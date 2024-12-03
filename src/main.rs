@@ -23,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
     info!("initializing router...");
 
     let router = Router::new().route("/", get(hello));
-    let port = 8001_u16;
+    let port = 8002_u16;
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
 
     info!("router initialized, now listening on port {}", port);
