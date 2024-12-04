@@ -20,6 +20,7 @@
                 }
             },
             "args": [],
+            "stdio": "test.stdin.json",
             "cwd": "${workspaceFolder}"
         },
         {

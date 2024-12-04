@@ -320,6 +320,8 @@ dependencies = [
  "askama",
  "axum",
  "axum-server",
+ "serde",
+ "serde_json",
  "tokio",
  "tower 0.5.1",
  "tower-http",

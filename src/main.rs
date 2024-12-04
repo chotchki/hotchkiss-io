@@ -7,8 +7,15 @@ use axum::{
     routing::get,
     Router,
 };
+use serde::{Deserialize, Serialize};
+use std::io;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+#[derive(Serialize, Deserialize)]
+struct Settings {
+    pub cloudflare_token: String,
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -19,6 +26,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
+
+    let stdin = io::read_to_string(io::stdin())?;
+
+    let settings: Settings = serde_json::from_str(&stdin)?;
 
     info!("initializing router...");
 
