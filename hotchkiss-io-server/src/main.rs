@@ -12,6 +12,8 @@ use std::io;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod certificate;
+
 #[derive(Serialize, Deserialize)]
 struct Settings {
     pub cloudflare_token: String,
@@ -27,9 +29,11 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    //Read our sensitive data from stdin
     let stdin = io::read_to_string(io::stdin())?;
-
     let settings: Settings = serde_json::from_str(&stdin)?;
+
+    //Construct our data storage
 
     info!("initializing router...");
 

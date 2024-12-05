@@ -12,7 +12,7 @@
                 "args": [
                     "build",
                     "--bin=hotchkiss-io",
-                    "--package=hotchkiss-io"
+                    "--package=hotchkiss-io-server"
                 ],
                 "filter": {
                     "name": "hotchkiss-io",
