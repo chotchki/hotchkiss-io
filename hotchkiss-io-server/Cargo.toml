@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 hotchkiss-io-db = { path = "../hotchkiss-io-db" }
+hotchkiss-io-dns = { path = "../hotchkiss-io-dns" }
 hotchkiss-io-ip = { path = "../hotchkiss-io-ip" }
 
 #Core Rust
@@ -21,9 +22,7 @@ tokio = { version = "1.41.1", features = ["full"] }
 
 #Certificate Setup
 acme-lib = "0.9.1"
-cloudflare = "0.11.0"
 reqwest = { version = "0.12", features = ["json"] }
-trust-dns-server = "0.23.2"
 
 #Database
 sqlx = { version = "0.8", features = [

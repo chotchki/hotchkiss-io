@@ -2,6 +2,8 @@ use anyhow::anyhow;
 use anyhow::Result;
 use reqwest::header;
 use std::collections::HashMap;
+use std::net::Ipv4Addr;
+use std::str::FromStr;
 
 use reqwest::{Certificate, Client, ClientBuilder, Url};
 use serde::{Deserialize, Serialize};
@@ -81,7 +83,7 @@ impl OmadaClient {
         Ok(())
     }
 
-    pub async fn get_wan_ip(&self) -> Result<String> {
+    pub async fn get_wan_ip(&self) -> Result<Ipv4Addr> {
         let omadac_id = self
             .omadac_id
             .clone()
@@ -153,7 +155,8 @@ impl OmadaClient {
         for port in port_info {
             let public_ip = port["wanPortIpv4Config"]["ip"].clone();
             if public_ip.is_string() {
-                return Ok(public_ip.as_str().unwrap().to_string());
+                let parsed_ip = Ipv4Addr::from_str(public_ip.as_str().unwrap())?;
+                return Ok(parsed_ip);
             }
         }
 

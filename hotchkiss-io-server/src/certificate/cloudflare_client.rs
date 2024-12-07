@@ -104,7 +104,8 @@ impl CloudflareClient {
     }
 
     async fn get_zone_id(client: &Client, domain: &str) -> Result<String, CloudflareClientError> {
-        let suffixes: Vec<&str> = domain.split('.').rev().take(2).collect();
+        let mut suffixes: Vec<&str> = domain.split('.').rev().take(2).collect();
+        suffixes.reverse();
         let parent = suffixes[..].join(".");
 
         let zone_result = client
