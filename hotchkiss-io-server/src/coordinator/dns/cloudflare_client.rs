@@ -6,8 +6,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
 
-mod cloudflare_api;
-
 pub struct CloudflareClient {
     api: CloudflareApi,
     pub token: String,

@@ -39,8 +39,6 @@ impl AcmePersistKey {
     }
 
     async fn put_key_value(&self, key: &str, value: &[u8]) -> Result<(), sqlx::Error> {
-        //let mut conn = self.pool.acquire().await?;
-
         query(
             r#"
                 INSERT OR REPLACE INTO acme_persist (
@@ -64,8 +62,6 @@ impl AcmePersistKey {
     }
 
     async fn get_key_value(&self, key: &str) -> Result<Option<Vec<u8>>, sqlx::Error> {
-        //let mut conn = self.pool.acquire().await?;
-
         let rec = query_scalar(
             r#"
                 SELECT acme_value

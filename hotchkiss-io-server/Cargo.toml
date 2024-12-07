@@ -10,8 +10,6 @@ path = "src/main.rs"
 
 [dependencies]
 hotchkiss-io-db = { path = "../hotchkiss-io-db" }
-hotchkiss-io-dns = { path = "../hotchkiss-io-dns" }
-hotchkiss-io-ip = { path = "../hotchkiss-io-ip" }
 
 #Core Rust
 anyhow = "1.0"

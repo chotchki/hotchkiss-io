@@ -1,9 +1,4 @@
 [workspace]
-members = [
-    "hotchkiss-io-db",
-    "hotchkiss-io-dns",
-    "hotchkiss-io-ip",
-    "hotchkiss-io-server",
-]
+members = ["hotchkiss-io-db", "hotchkiss-io-server"]
 default-members = ["hotchkiss-io-server"]
 resolver = "2"
