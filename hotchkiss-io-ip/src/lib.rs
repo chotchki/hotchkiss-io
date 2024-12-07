@@ -32,6 +32,7 @@ impl OmadaClient {
         let builder = ClientBuilder::new()
             .add_root_certificate(Certificate::from_pem(include_bytes!("localhost.pem"))?)
             .use_rustls_tls()
+            //This is due to omada generating a cert with a crap hostname
             .danger_accept_invalid_hostnames(true)
             .cookie_store(true)
             .default_headers(headers);
