@@ -21,7 +21,10 @@
             },
             "args": [],
             "stdio": "test.stdin.json",
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_BACKTRACE": "1"
+            }
         },
         {
             "type": "lldb",

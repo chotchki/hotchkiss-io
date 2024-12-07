@@ -7,6 +7,7 @@ use axum::{
     routing::get,
     Router,
 };
+use hotchkiss_io_ip::{OmadaClient, OmadaConfig};
 use serde::{Deserialize, Serialize};
 use std::io;
 use tracing::info;
@@ -17,6 +18,7 @@ mod certificate;
 #[derive(Serialize, Deserialize)]
 struct Settings {
     pub cloudflare_token: String,
+    pub omada_config: OmadaConfig,
 }
 
 #[tokio::main]
@@ -32,6 +34,11 @@ async fn main() -> anyhow::Result<()> {
     //Read our sensitive data from stdin
     let stdin = io::read_to_string(io::stdin())?;
     let settings: Settings = serde_json::from_str(&stdin)?;
+
+    //Get our public ip so we can figure out certs
+    let mut omada_client = OmadaClient::new(settings.omada_config)?;
+    omada_client.login().await?;
+    let public_ip = omada_client.get_wan_ip().await?;
 
     //Construct our data storage
 
