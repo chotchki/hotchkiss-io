@@ -31,7 +31,8 @@ impl CloudflareApi {
         name: String,
         addr: IpAddr,
     ) -> Result<()> {
-        let url = BASE_URL.join(&format!("/zones/{}/dns_records", zone_id.0))?;
+        let mut url = BASE_URL.clone();
+        url.set_path(&format!("/zones/{}/dns_records", zone_id.0));
 
         let content = match addr {
             IpAddr::V4(v4) => json!({
@@ -65,7 +66,8 @@ impl CloudflareApi {
         name: &str,
         value: &str,
     ) -> Result<()> {
-        let url = BASE_URL.join(&format!("/zones/{}/dns_records", zone_id.0))?;
+        let mut url = BASE_URL.clone();
+        url.set_path(&format!("/zones/{}/dns_records", zone_id.0));
 
         let content = json!({
             "ttl": "1",
@@ -86,7 +88,8 @@ impl CloudflareApi {
     }
 
     pub async fn delete_record(&self, zone_id: &ZoneInfoId, dns_id: &DnsRecId) -> Result<()> {
-        let url = BASE_URL.join(&format!("/zones/{}/dns_records/{}", zone_id.0, dns_id.0))?;
+        let mut url = BASE_URL.clone();
+        url.set_path(&format!("/zones/{}/dns_records/{}", zone_id.0, dns_id.0));
 
         self.client
             .delete(url)
@@ -103,7 +106,8 @@ impl CloudflareApi {
         suffixes.reverse();
         let parent = suffixes[..].join(".");
 
-        let mut url = BASE_URL.join("/zones")?;
+        let mut url = BASE_URL.clone();
+        url.set_path("/zones");
         url.set_query(Some(&(format!("name={parent}"))));
 
         let mut response = self
@@ -129,7 +133,8 @@ impl CloudflareApi {
         zone_id: &ZoneInfoId,
         domain: &str,
     ) -> Result<Vec<DnsRec>> {
-        let mut url = BASE_URL.join(&format!("/zones/{}/dns_records", zone_id.0))?;
+        let mut url = BASE_URL.clone();
+        url.join(&format!("/zones/{}/dns_records", zone_id.0))?;
         url.set_query(Some(&(format!("name={domain}"))));
 
         let response = self

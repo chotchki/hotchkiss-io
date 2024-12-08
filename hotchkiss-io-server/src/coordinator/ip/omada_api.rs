@@ -57,7 +57,9 @@ impl OmadaApi {
     }
 
     pub async fn get_user_info(&self, login_data: LoginData) -> Result<UserInfo> {
-        let user_info = self.base.join("/api/v2/current/users")?;
+        let mut user_info = self.base.clone();
+        user_info.set_path("/api/v2/current/users");
+
         let user_info_response = self
             .client
             .get(user_info.clone())
@@ -74,12 +76,13 @@ impl OmadaApi {
     }
 
     pub async fn get_controller_name(&self, login_data: LoginData) -> Result<ControllerName> {
-        let controller_status = self.base.join(
+        let mut controller_status = self.base.clone();
+        controller_status.set_path(
             &(format!(
                 "/{}/api/v2/maintenance/controllerStatus",
                 login_data.omadacId.0
             )),
-        )?;
+        );
         let controller_status_response = self
             .client
             .get(controller_status.clone())
@@ -102,12 +105,13 @@ impl OmadaApi {
         site_id: SiteId,
         controller_name: ControllerName,
     ) -> Result<Ipv4Addr> {
-        let gateway_info = self.base.join(
+        let mut gateway_info = self.base.clone();
+        gateway_info.set_path(
             &(format!(
                 "/{}/api/v2/sites/{}/gateways/{}",
                 login_data.omadacId.0, site_id.0, controller_name.0
             )),
-        )?;
+        );
         let mut gateway_info_response = self
             .client
             .get(gateway_info.clone())
