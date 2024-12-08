@@ -72,7 +72,7 @@ impl AcmeProviderService {
 
         let acc = self
             .handle
-            .spawn_blocking(move || dir.account(&CERT_EMAIL))
+            .spawn_blocking(move || dir.account(CERT_EMAIL))
             .await??;
 
         let acc2 = acc.clone();
@@ -151,7 +151,7 @@ impl AcmeProviderService {
                 }
             }
 
-            sleep(Duration::from_secs(60));
+            sleep(Duration::from_secs(60)).await;
             tracing::debug!(
                 "Domain {} with value {} not found",
                 domain_proof_str,

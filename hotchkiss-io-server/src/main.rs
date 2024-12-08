@@ -8,10 +8,8 @@ use axum::{
     Router,
 };
 use coordinator::{ip::omada_config::OmadaConfig, Coordinator};
-use hotchkiss_io_db::DatabaseHandle;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, io, net::IpAddr};
-use tokio::net::lookup_host;
+use std::io;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 

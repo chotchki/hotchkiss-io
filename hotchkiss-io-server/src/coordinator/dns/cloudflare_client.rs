@@ -10,7 +10,6 @@ use std::str::FromStr;
 
 pub struct CloudflareClient {
     api: CloudflareApi,
-    pub token: String,
     pub domain: String,
 }
 
@@ -18,7 +17,6 @@ impl CloudflareClient {
     pub fn new(token: String, domain: String) -> Result<CloudflareClient> {
         Ok(CloudflareClient {
             api: CloudflareApi::new(token.clone())?,
-            token,
             domain,
         })
     }
