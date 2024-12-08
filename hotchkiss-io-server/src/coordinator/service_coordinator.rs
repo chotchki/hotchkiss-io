@@ -1,3 +1,5 @@
+use std::backtrace::Backtrace;
+
 use super::acme_provider_service::AcmeProviderService;
 use super::dns_provider_service::DnsProviderService;
 use super::endpoints_provider_service::EndpointsProviderService;
@@ -64,7 +66,7 @@ impl ServiceCoordinator {
             r = self.ip_provider_service.start(ip_provider_sender) => {
                 match r {
                     Ok(()) => tracing::debug!("IP Provider exited."),
-                    Err(e) => tracing::error!("IP Provider had an error |{}", e)
+                    Err(e) => tracing::error!("IP Provider had an error |{}|{}", e, Backtrace::capture())
                 }
             }
             //r = self.dns_server_service.start() => {
@@ -82,19 +84,19 @@ impl ServiceCoordinator {
             r = self.dns_provider_service.start(ip_provider_reciever) => {
                  match r {
                      Ok(()) => tracing::debug!("Cloudflare A/AAAA record service exited."),
-                     Err(e) => tracing::error!("Cloudflare A/AAAA had an error |{}", e)
+                     Err(e) => tracing::error!("Cloudflare A/AAAA had an error |{}|{}", e, Backtrace::capture())
                  }
             }
             r = self.acme_provider_service.start(tls_config_sender) => {
                  match r {
                      Ok(()) => tracing::debug!("Acme Service exited."),
-                     Err(e) => tracing::error!("Acme Service had an error |{}", e)
+                     Err(e) => tracing::error!("Acme Service had an error |{}|{}", e, Backtrace::capture())
                  }
             }
             r = self.endpoints_provider_service.start(tls_config_reciever) => {
                  match r {
                      Ok(()) => tracing::debug!("Endpoints exited."),
-                     Err(e) => tracing::error!("Endpoints had an error |{}", e)
+                     Err(e) => tracing::error!("Endpoints had an error |{}|{}", e, Backtrace::capture())
                  }
             }
         }

@@ -2,7 +2,7 @@ use acme_lib::{create_p256_key, Certificate, Directory, DirectoryUrl};
 use anyhow::Result;
 use axum_server::tls_rustls::RustlsConfig;
 use rustls::{
-    pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs1KeyDer},
+    pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, PrivatePkcs1KeyDer},
     ServerConfig,
 };
 use sqlx::SqlitePool;
@@ -11,6 +11,7 @@ use std::{
     time::Duration,
 };
 use tokio::{process::Command, runtime::Handle, sync::broadcast::Sender, time::sleep};
+use tracing::instrument;
 
 use super::{acme::acme_persist_key::AcmePersistKey, dns::cloudflare_client::CloudflareClient};
 
@@ -25,6 +26,7 @@ static BASE_URL: LazyLock<DirectoryUrl> = LazyLock::new(|| {
 const CERT_EMAIL: &str = "foo@bar.com";
 const CERT_REFRESH: Duration = Duration::new(6 * 60 * 60, 0);
 
+#[derive(Debug)]
 pub struct AcmeProviderService {
     handle: Arc<Handle>,
     persist: AcmePersistKey,
@@ -47,13 +49,14 @@ impl AcmeProviderService {
         let acme_cert = self.get_certificate().await?;
 
         let rustls_certs =
-            vec![CertificateDer::from_slice(&acme_cert.certificate_der()).into_owned()];
-        let rustls_private_key = PrivatePkcs1KeyDer::from(acme_cert.private_key_der());
+            vec![CertificateDer::from_pem_slice(acme_cert.certificate().as_bytes()).unwrap()];
+
+        let rustls_private_key = PrivateKeyDer::from_pem_slice(acme_cert.private_key().as_bytes())?;
 
         let server_config = Arc::new(
             ServerConfig::builder()
                 .with_no_client_auth()
-                .with_single_cert(rustls_certs, PrivateKeyDer::Pkcs1(rustls_private_key))?,
+                .with_single_cert(rustls_certs, rustls_private_key)?,
         );
         let rusttls_cfg = RustlsConfig::from_config(server_config);
 
@@ -72,6 +75,7 @@ impl AcmeProviderService {
         }
     }
 
+    #[instrument]
     pub async fn get_certificate(&self) -> Result<Certificate> {
         let dir = Directory::from_url(self.persist.clone(), BASE_URL.clone())?;
 
@@ -131,7 +135,11 @@ impl AcmeProviderService {
 
         let pkey_pri = create_p256_key();
         let ord_cert = ord_csr.finalize_pkey(pkey_pri, 5000)?;
-        let cert = ord_cert.download_and_save_cert()?;
+
+        let cert = self
+            .handle
+            .spawn_blocking(move || ord_cert.download_and_save_cert())
+            .await??;
 
         Ok(cert)
     }

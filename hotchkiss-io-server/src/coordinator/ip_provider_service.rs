@@ -5,8 +5,9 @@ use tokio::{
     sync::broadcast::Sender,
     time::{interval, MissedTickBehavior},
 };
-use tracing::debug;
+use tracing::{debug, instrument};
 
+#[derive(Debug)]
 pub struct IpProviderService {
     client: OmadaClient,
 }
@@ -21,6 +22,7 @@ impl IpProviderService {
     /// This schedules a task to periodically wake up and see
     /// if the IP addresses for the machine have changed, if so
     /// they are broadcoast
+    #[instrument]
     pub async fn start(&mut self, ip_changed: Sender<HashSet<IpAddr>>) -> Result<()> {
         let mut duration = interval(Duration::from_millis(60 * 60 * 1000));
         duration.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -49,6 +51,7 @@ impl IpProviderService {
         }
     }
 
+    #[instrument]
     async fn server_ips(&mut self) -> Result<HashSet<IpAddr>> {
         let current_ip = IpAddr::V4(self.client.get_wan_ip().await?);
         let mut current_ips = HashSet::new();

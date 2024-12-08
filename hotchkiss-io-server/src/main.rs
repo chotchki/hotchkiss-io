@@ -1,5 +1,6 @@
 /// Built off this tutorial: https://joeymckenzie.tech/blog/templates-with-rust-axum-htmx-askama
 use coordinator::{ip::omada_config::OmadaConfig, service_coordinator::ServiceCoordinator};
+use rustls::crypto::{ring, CryptoProvider};
 use serde::{Deserialize, Serialize};
 use std::io;
 use tracing::info;
@@ -18,6 +19,10 @@ struct Settings {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    ring::default_provider()
+        .install_default()
+        .expect("Crypto provider ring unable to be installed");
+
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()

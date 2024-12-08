@@ -1,4 +1,5 @@
 use anyhow::bail;
+use anyhow::Context;
 use anyhow::Result;
 use reqwest::{Client, ClientBuilder};
 use serde::{Deserialize, Serialize};
@@ -8,8 +9,9 @@ use std::sync::LazyLock;
 use url::Url;
 
 static BASE_URL: LazyLock<Url> =
-    LazyLock::new(|| Url::parse("https://api.cloudflare.com/client/v4").unwrap());
+    LazyLock::new(|| Url::parse("https://api.cloudflare.com/client/v4/").unwrap());
 
+#[derive(Debug)]
 pub struct CloudflareApi {
     token: String,
     client: Client,
@@ -31,8 +33,7 @@ impl CloudflareApi {
         name: String,
         addr: IpAddr,
     ) -> Result<()> {
-        let mut url = BASE_URL.clone();
-        url.set_path(&format!("/zones/{}/dns_records", zone_id.0));
+        let url = BASE_URL.join(&format!("./zones/{}/dns_records", zone_id.0))?;
 
         let content = match addr {
             IpAddr::V4(v4) => json!({
@@ -66,11 +67,9 @@ impl CloudflareApi {
         name: &str,
         value: &str,
     ) -> Result<()> {
-        let mut url = BASE_URL.clone();
-        url.set_path(&format!("/zones/{}/dns_records", zone_id.0));
+        let url = BASE_URL.join(&format!("./zones/{}/dns_records", zone_id.0))?;
 
         let content = json!({
-            "ttl": "1",
             "name": name,
             "content": value,
             "type": "TXT"
@@ -88,8 +87,7 @@ impl CloudflareApi {
     }
 
     pub async fn delete_record(&self, zone_id: &ZoneInfoId, dns_id: &DnsRecId) -> Result<()> {
-        let mut url = BASE_URL.clone();
-        url.set_path(&format!("/zones/{}/dns_records/{}", zone_id.0, dns_id.0));
+        let url = BASE_URL.join(&format!("./zones/{}/dns_records/{}", zone_id.0, dns_id.0))?;
 
         self.client
             .delete(url)
@@ -106,8 +104,7 @@ impl CloudflareApi {
         suffixes.reverse();
         let parent = suffixes[..].join(".");
 
-        let mut url = BASE_URL.clone();
-        url.set_path("/zones");
+        let mut url = BASE_URL.join("./zones")?;
         url.set_query(Some(&(format!("name={parent}"))));
 
         let mut response = self
@@ -133,8 +130,7 @@ impl CloudflareApi {
         zone_id: &ZoneInfoId,
         domain: &str,
     ) -> Result<Vec<DnsRec>> {
-        let mut url = BASE_URL.clone();
-        url.join(&format!("/zones/{}/dns_records", zone_id.0))?;
+        let mut url = BASE_URL.join(&format!("./zones/{}/dns_records", zone_id.0))?;
         url.set_query(Some(&(format!("name={domain}"))));
 
         let response = self

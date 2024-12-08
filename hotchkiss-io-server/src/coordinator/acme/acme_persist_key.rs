@@ -4,7 +4,7 @@ use sqlx::{query, query_scalar, SqlitePool};
 use std::sync::Arc;
 use tokio::runtime::Handle;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AcmePersistKey {
     pool: SqlitePool,
     handle: Arc<Handle>,

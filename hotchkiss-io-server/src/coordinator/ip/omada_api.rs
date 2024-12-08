@@ -4,8 +4,10 @@ use super::omada_config::OmadaConfig;
 use anyhow::{bail, Result};
 use reqwest::{header, Certificate, Client, ClientBuilder};
 use serde::{Deserialize, Serialize};
+use tracing::{debug, instrument};
 use url::Url;
 
+#[derive(Debug)]
 pub struct OmadaApi {
     config: OmadaConfig,
     base: Url,
@@ -36,8 +38,9 @@ impl OmadaApi {
         })
     }
 
+    #[instrument]
     pub async fn login(&mut self) -> anyhow::Result<LoginData> {
-        let url = self.base.join("/api/v2/login")?;
+        let url = self.base.join("./api/v2/login")?;
 
         let mut post_body = HashMap::new();
         post_body.insert("username", self.config.username.clone());
@@ -56,9 +59,9 @@ impl OmadaApi {
         Ok(response.result)
     }
 
+    #[instrument]
     pub async fn get_user_info(&self, login_data: LoginData) -> Result<UserInfo> {
-        let mut user_info = self.base.clone();
-        user_info.set_path("/api/v2/current/users");
+        let user_info = self.base.join("./api/v2/current/users")?;
 
         let user_info_response = self
             .client
@@ -75,14 +78,14 @@ impl OmadaApi {
         //let site_id = user_info_json["result"]["privilege"]["sites"][0]
     }
 
+    #[instrument]
     pub async fn get_controller_name(&self, login_data: LoginData) -> Result<ControllerName> {
-        let mut controller_status = self.base.clone();
-        controller_status.set_path(
+        let controller_status = self.base.join(
             &(format!(
-                "/{}/api/v2/maintenance/controllerStatus",
+                "./{}/api/v2/maintenance/controllerStatus",
                 login_data.omadacId.0
             )),
-        );
+        )?;
         let controller_status_response = self
             .client
             .get(controller_status.clone())
@@ -99,20 +102,22 @@ impl OmadaApi {
         Ok(ControllerName(controller_name))
     }
 
+    #[instrument]
     pub async fn get_wan_ip(
         &self,
         login_data: LoginData,
         site_id: SiteId,
         controller_name: ControllerName,
     ) -> Result<Ipv4Addr> {
-        let mut gateway_info = self.base.clone();
-        gateway_info.set_path(
+        let gateway_info = self.base.join(
             &(format!(
-                "/{}/api/v2/sites/{}/gateways/{}",
+                "./{}/api/v2/sites/{}/gateways/{}",
                 login_data.omadacId.0, site_id.0, controller_name.0
             )),
-        );
-        let mut gateway_info_response = self
+        )?;
+
+        debug!("Gateway url {}", gateway_info);
+        let gateway_info_response = self
             .client
             .get(gateway_info.clone())
             .header("Csrf-Token", login_data.token.0)
@@ -122,87 +127,86 @@ impl OmadaApi {
             .json::<GatewayInfoResult>()
             .await?;
 
-        if gateway_info_response.result.portStats.is_empty() {
-            bail!("Unable to find wan ip")
+        for port_info in gateway_info_response.result.portStats {
+            if let Some(wan_ip) = port_info.wanPortIpv4Config {
+                return Ok(wan_ip.ip);
+            }
         }
-        Ok(gateway_info_response
-            .result
-            .portStats
-            .remove(0)
-            .wanPortIpv4Config
-            .ip)
+
+        bail!("Unable to find wan ip")
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LoginResult {
     pub result: LoginData,
 }
 
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LoginData {
     pub omadacId: OmadacId,
     pub token: CSRFToken,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct OmadacId(pub String);
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CSRFToken(pub String);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UserInfoResult {
     pub result: UserInfo,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UserInfo {
     pub privilege: Privileges,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Privileges {
     pub sites: Vec<SiteId>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SiteId(pub String);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ControllerStatusResult {
     pub result: ControllerInfo,
 }
 
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ControllerInfo {
     pub macAddress: ControllerName,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ControllerName(pub String);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GatewayInfoResult {
     pub result: GatewayInfo,
 }
 
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GatewayInfo {
     pub portStats: Vec<PortInfo>,
 }
 
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PortInfo {
-    pub wanPortIpv4Config: PortIpInfo,
+    pub name: String,
+    pub wanPortIpv4Config: Option<PortIpInfo>,
 }
 
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PortIpInfo {
     pub ip: Ipv4Addr,
 }

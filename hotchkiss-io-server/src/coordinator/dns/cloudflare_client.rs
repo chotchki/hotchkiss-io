@@ -8,6 +8,7 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
+#[derive(Debug)]
 pub struct CloudflareClient {
     api: CloudflareApi,
     pub domain: String,
