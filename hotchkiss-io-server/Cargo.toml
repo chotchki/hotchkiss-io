@@ -13,14 +13,16 @@ hotchkiss-io-db = { path = "../hotchkiss-io-db" }
 
 #Core Rust
 anyhow = "1.0"
-thiserror = "2"
+url = "2.5.4"
 
 #Async
 tokio = { version = "1.41.1", features = ["full"] }
 
 #Certificate Setup
 acme-lib = "0.9.1"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["cookies", "json", "rustls-tls"] }
+rustls = "0.23.19"
+
 
 #Database
 sqlx = { version = "0.8", features = [
@@ -43,6 +45,6 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 #Web Frameworks
 askama = "0.12.1"
 axum = "0.7.7"
-axum-server = "0.7.1"
+axum-server = { version = "0.7.1", features = ["tls-rustls"] }
 tower = "0.5.1"
 tower-http = { version = "0.6.1", features = ["fs"] }

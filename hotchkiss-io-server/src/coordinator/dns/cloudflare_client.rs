@@ -1,10 +1,12 @@
+use super::cloudflare_api::CloudflareApi;
+use super::cloudflare_api::DnsRec;
+use super::cloudflare_api::DnsRecId;
 use anyhow::Result;
-use cloudflare_api::CloudflareApi;
-use cloudflare_api::DnsRec;
-use cloudflare_api::DnsRecId;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::str::FromStr;
 
 pub struct CloudflareClient {
     api: CloudflareApi,
@@ -13,7 +15,7 @@ pub struct CloudflareClient {
 }
 
 impl CloudflareClient {
-    pub async fn new(token: String, domain: String) -> Result<CloudflareClient> {
+    pub fn new(token: String, domain: String) -> Result<CloudflareClient> {
         Ok(CloudflareClient {
             api: CloudflareApi::new(token.clone())?,
             token,
@@ -21,13 +23,33 @@ impl CloudflareClient {
         })
     }
 
+    pub async fn create_proof(&self, proof_name: &str, proof_value: &str) -> Result<()> {
+        let zone_id = self.api.get_zone_id(&self.domain).await?;
+
+        let old_recs = self.api.get_recs_by_name(&zone_id, proof_name).await?;
+        for r in old_recs {
+            self.api.delete_record(&zone_id, &r.id).await?;
+        }
+
+        self.api
+            .create_txt_record(&zone_id, proof_name, proof_value)
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn update_dns(&self, addrs: HashSet<IpAddr>) -> Result<()> {
         let zone_id = self.api.get_zone_id(&self.domain).await?;
 
         let dns_recs: Vec<DnsRec> = self.api.get_recs_by_name(&zone_id, &self.domain).await?;
 
-        let mut dns_ip_to_id: HashMap<IpAddr, DnsRecId> =
-            dns_recs.iter().map(|x| (x.content, x.id.clone())).collect();
+        let mut dns_ip_to_id: HashMap<IpAddr, DnsRecId> = HashMap::new();
+        for rec in dns_recs {
+            dns_ip_to_id.insert(
+                IpAddr::V4(Ipv4Addr::from_str(&rec.content)?),
+                rec.id.clone(),
+            );
+        }
 
         //Now we need to figure out, the sets of actions to take
         let mut missing_recs = addrs.clone();

@@ -7,6 +7,7 @@ use axum::{
     routing::get,
     Router,
 };
+use coordinator::{ip::omada_config::OmadaConfig, Coordinator};
 use hotchkiss_io_db::DatabaseHandle;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, io, net::IpAddr};
@@ -39,30 +40,9 @@ async fn main() -> anyhow::Result<()> {
     let stdin = io::read_to_string(io::stdin())?;
     let settings: Settings = serde_json::from_str(&stdin)?;
 
-    //Construct our data storage
-    let db_handle = DatabaseHandle::create(&settings.database_path).await?;
-
-    //Construct our cloudflare client
-    let cloudflare_client =
-        CloudflareClient::new(settings.cloudflare_token, settings.domain.clone()).await?;
-
-    //Get our public ip so we can figure out certs
-    let mut omada_client = OmadaClient::new(settings.omada_config)?;
-    omada_client.login().await?;
-    let public_ips = vec![IpAddr::V4(omada_client.get_wan_ip().await?)];
-
-    //Now let's check if our ip is setup correctly
-    let dns_current_ips: Vec<IpAddr> = lookup_host(&settings.domain)
-        .await?
-        .map(|x| x.ip())
-        .collect();
-
-    if public_ips != dns_current_ips {
-        //Need to update the dns
-        info!("Updating DNS");
-        let addrs: HashSet<IpAddr> = public_ips.into_iter().collect();
-        cloudflare_client.update_dns(addrs).await?;
-    }
+    //Build the coordinator
+    let mut coordinator = Coordinator::create(settings).await?;
+    coordinator.start().await?; //This never returns
 
     info!("initializing router...");
 

@@ -1,46 +1,59 @@
+use acme_provider_service::AcmeProviderService;
 /// The goal of the coordinator is to start up the various dependancies of the server AND
 /// be able to reconfigure it automatically at runtime.
 use anyhow::Result;
+use dns_provider_service::DnsProviderService;
+use hotchkiss_io_db::DatabaseHandle;
+use sqlx::{Pool, Sqlite};
+use tokio::sync::broadcast;
 
-mod dns;
-mod ip;
+mod acme_provider_service;
+pub mod dns;
+mod dns_provider_service;
+pub mod ip;
 mod ip_provider_service;
 use crate::{coordinator::ip_provider_service::IpProviderService, Settings};
 
 pub struct Coordinator {
+    pool: Pool<Sqlite>,
     ip_provider_service: IpProviderService,
+    dns_provider_service: DnsProviderService,
+    acme_provider_service: AcmeProviderService,
 }
 
 impl Coordinator {
     pub async fn create(settings: Settings) -> Result<Coordinator> {
-        //let pool = DatabaseHandle::create(path).await?;
+        let pool = DatabaseHandle::create(&settings.database_path).await?;
 
         //let installation_status_service = InstallationStatusService::create(pool.clone());
-        let ip_provider_service = IpProviderService::create(settings.omada_config);
+        let ip_provider_service = IpProviderService::create(settings.omada_config)?;
         //let dns_server_service = DnsServer::create(pool.clone()).await;
         //let install_endpoints = InstallEndpoints::create(pool.clone());
-        //let cloudflare_a_service = CloudflareAService::create();
-        //let acme_provision_service = AcmeProvisionService::create(pool.clone()).await;
+        let dns_provider_service =
+            DnsProviderService::create(settings.cloudflare_token.clone(), settings.domain.clone())?;
+        let acme_provider_service =
+            AcmeProviderService::create(pool.clone(), settings.cloudflare_token, settings.domain)?;
         //let endpoints = Endpoints::create(pool.clone(), rand_gen.clone())?;
 
         Ok(Self {
+            pool,
             //installation_status_service,
             ip_provider_service,
             //dns_server_service,
             //install_endpoints,
-            //cloudflare_a_service,
-            //acme_provision_service,
+            dns_provider_service,
+            acme_provider_service,
             //endpoints,
         })
     }
 
-    pub async fn start(&mut self) -> Result<(), CoordinatorError> {
-        let (install_refresh_sender, install_refresh_reciever) = broadcast::channel(1);
-        let (install_stat_sender, install_stat_reciever) = broadcast::channel(1);
-        let install_stat_reciever2 = install_stat_sender.subscribe();
+    pub async fn start(&mut self) -> Result<()> {
+        //let (install_refresh_sender, install_refresh_reciever) = broadcast::channel(1);
+        //let (install_stat_sender, install_stat_reciever) = broadcast::channel(1);
+        //let install_stat_reciever2 = install_stat_sender.subscribe();
         let (ip_provider_sender, ip_provider_reciever) = broadcast::channel(1);
         //let ip_provider_reciever2 = ip_provider_sender.subscribe();
-        let install_stat_reciever3 = install_stat_sender.subscribe();
+        //let install_stat_reciever3 = install_stat_sender.subscribe();
         let (tls_config_sender, tls_config_reciever) = broadcast::channel(1);
 
         //let (https_ready_sender, https_ready_reciever) = broadcast::channel(1);
@@ -70,18 +83,18 @@ impl Coordinator {
             //         Err(e) => tracing::error!("Install Endpoints had an error |{}", e)
             //     }
             // }
-            // r = self.cloudflare_a_service.start(ip_provider_reciever, install_stat_reciever2) => {
-            //     match r {
-            //         Ok(()) => tracing::debug!("Cloudflare A/AAAA record service exited."),
-            //         Err(e) => tracing::error!("Cloudflare A/AAAA had an error |{}", e)
-            //     }
-            // }
-            // r = self.acme_provision_service.start(install_stat_reciever3, tls_config_sender) => {
-            //     match r {
-            //         Ok(()) => tracing::debug!("Acme Service exited."),
-            //         Err(e) => tracing::error!("Acme Service had an error |{}", e)
-            //     }
-            // }
+            r = self.dns_provider_service.start(ip_provider_reciever) => {
+                 match r {
+                     Ok(()) => tracing::debug!("Cloudflare A/AAAA record service exited."),
+                     Err(e) => tracing::error!("Cloudflare A/AAAA had an error |{}", e)
+                 }
+            }
+            r = self.acme_provider_service.start(tls_config_sender) => {
+                 match r {
+                     Ok(()) => tracing::debug!("Acme Service exited."),
+                     Err(e) => tracing::error!("Acme Service had an error |{}", e)
+                 }
+            }
             // r = self.endpoints.start(tls_config_reciever) => {
             //     match r {
             //         Ok(()) => tracing::debug!("Endpoints exited."),

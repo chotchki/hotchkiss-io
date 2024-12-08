@@ -1,7 +1,10 @@
-use reqwest::cookie;
+use std::{collections::HashMap, net::Ipv4Addr};
 
-static BASE_URL: LazyLock<Url> =
-    LazyLock::new(|| Url::parse("https://api.cloudflare.com/client/v4").unwrap());
+use super::omada_config::OmadaConfig;
+use anyhow::{bail, Result};
+use reqwest::{cookie::Cookie, header, Certificate, Client, ClientBuilder};
+use serde::{Deserialize, Serialize};
+use url::Url;
 
 pub struct OmadaApi {
     config: OmadaConfig,
@@ -22,11 +25,13 @@ impl OmadaApi {
             .use_rustls_tls()
             //This is due to omada generating a cert with a crap hostname
             .danger_accept_invalid_hostnames(true)
-            .cookie_store(false);
+            .cookie_store(true);
+
+        let base = Url::parse(&config.url)?;
 
         Ok(OmadaApi {
             config,
-            base: Url::parse(&config.url)?,
+            base,
             client: builder.build()?,
         })
     }
@@ -44,25 +49,19 @@ impl OmadaApi {
             .json(&post_body)
             .send()
             .await?
-            .error_for_status()?;
+            .error_for_status()?
+            .json::<LoginResult>()
+            .await?;
 
-        let session_cookie = response.cookies;
-
-        let response_json = response.json::<LoginResult>().await?;
-
-        Ok(SessionData {
-            omadac_id: response_json.result.omadacId,
-            token: response_json.result.token,
-            session: session_cookie,
-        })
+        Ok(response.result)
     }
 
-    pub async fn get_user_info(&self, session: SessionData) -> Result<UserInfo> {
+    pub async fn get_user_info(&self, login_data: LoginData) -> Result<UserInfo> {
         let user_info = self.base.join("/api/v2/current/users")?;
         let user_info_response = self
             .client
             .get(user_info.clone())
-            .header("Csrf-Token", session.token.0)
+            .header("Csrf-Token", login_data.token.0)
             .send()
             .await?
             .error_for_status()?
@@ -74,60 +73,60 @@ impl OmadaApi {
         //let site_id = user_info_json["result"]["privilege"]["sites"][0]
     }
 
-    pub async fn get_controller_name(&self) -> Result<ControllerName> {
-        let controller_status = self
-            .base
-            .join(&("/".to_string() + &omadac_id + "/api/v2/maintenance/controllerStatus"))?;
+    pub async fn get_controller_name(&self, login_data: LoginData) -> Result<ControllerName> {
+        let controller_status = self.base.join(
+            &(format!(
+                "/{}/api/v2/maintenance/controllerStatus",
+                login_data.omadacId.0
+            )),
+        )?;
         let controller_status_response = self
             .client
             .get(controller_status.clone())
-            .header("Csrf-Token", token.clone())
+            .header("Csrf-Token", login_data.token.0)
             .send()
             .await?
-            .error_for_status()?;
-        let controller_status_json = controller_status_response
-            .json::<serde_json::Value>()
+            .error_for_status()?
+            .json::<ControllerStatusResult>()
             .await?;
 
-        let controller_reformatted = controller_status_json["result"]["macAddress"]
-            .as_str()
-            .ok_or_else(|| {
-                anyhow!("Unable to find controller MAC").context(controller_status.clone())
-            })?
-            .replace(":", "-");
+        let controller_mac = controller_status_response.result.macAddress;
+        let controller_name = controller_mac.0.replace(":", "-");
+
+        Ok(ControllerName(controller_name))
     }
 
-    pub async fn get_wan_ip(&self) -> Result<Ipv4Addr> {
+    pub async fn get_wan_ip(
+        &self,
+        login_data: LoginData,
+        site_id: SiteId,
+        controller_name: ControllerName,
+    ) -> Result<Ipv4Addr> {
         let gateway_info = self.base.join(
-            &("/".to_string()
-                + &omadac_id
-                + "/api/v2/sites/"
-                + site_id
-                + "/gateways/"
-                + &controller_reformatted),
+            &(format!(
+                "/{}/api/v2/sites/{}/gateways/{}",
+                login_data.omadacId.0, site_id.0, controller_name.0
+            )),
         )?;
-        let gateway_info_response = self
+        let mut gateway_info_response = self
             .client
             .get(gateway_info.clone())
-            .header("Csrf-Token", token)
+            .header("Csrf-Token", login_data.token.0)
             .send()
             .await?
-            .error_for_status()?;
+            .error_for_status()?
+            .json::<GatewayInfoResult>()
+            .await?;
 
-        let gateway_info_json = gateway_info_response.json::<serde_json::Value>().await?;
-        let port_info = gateway_info_json["result"]["portStats"]
-            .as_array()
-            .ok_or_else(|| anyhow!("Unable to find gateway ports").context(gateway_info.clone()))?;
-
-        for port in port_info {
-            let public_ip = port["wanPortIpv4Config"]["ip"].clone();
-            if public_ip.is_string() {
-                let parsed_ip = Ipv4Addr::from_str(public_ip.as_str().unwrap())?;
-                return Ok(parsed_ip);
-            }
+        if gateway_info_response.result.portStats.is_empty() {
+            bail!("Unable to find wan ip")
         }
-
-        Err(anyhow!("Unable to find wan ip").context(gateway_info.clone()))
+        Ok(gateway_info_response
+            .result
+            .portStats
+            .remove(0)
+            .wanPortIpv4Config
+            .ip)
     }
 }
 
@@ -137,24 +136,17 @@ pub struct LoginResult {
 }
 
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct LoginData {
     pub omadacId: OmadacId,
     pub token: CSRFToken,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct OmadacId(pub String);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct CSRFToken(pub String);
-
-#[derive(Serialize, Deserialize)]
-pub struct SessionData {
-    pub omadac_id: OmadacId,
-    pub token: CSRFToken,
-    pub session: Cookie,
-}
 
 #[derive(Serialize, Deserialize)]
 pub struct UserInfoResult {
@@ -175,4 +167,38 @@ pub struct Privileges {
 pub struct SiteId(pub String);
 
 #[derive(Serialize, Deserialize)]
+pub struct ControllerStatusResult {
+    pub result: ControllerInfo,
+}
+
+#[allow(non_snake_case)]
+#[derive(Serialize, Deserialize)]
+pub struct ControllerInfo {
+    pub macAddress: ControllerName,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct ControllerName(pub String);
+
+#[derive(Serialize, Deserialize)]
+pub struct GatewayInfoResult {
+    pub result: GatewayInfo,
+}
+
+#[allow(non_snake_case)]
+#[derive(Serialize, Deserialize)]
+pub struct GatewayInfo {
+    pub portStats: Vec<PortInfo>,
+}
+
+#[allow(non_snake_case)]
+#[derive(Serialize, Deserialize)]
+pub struct PortInfo {
+    pub wanPortIpv4Config: PortIpInfo,
+}
+
+#[allow(non_snake_case)]
+#[derive(Serialize, Deserialize)]
+pub struct PortIpInfo {
+    pub ip: Ipv4Addr,
+}

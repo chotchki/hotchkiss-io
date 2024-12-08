@@ -59,6 +59,32 @@ impl CloudflareApi {
         Ok(())
     }
 
+    pub async fn create_txt_record(
+        &self,
+        zone_id: &ZoneInfoId,
+        name: &str,
+        value: &str,
+    ) -> Result<()> {
+        let url = BASE_URL.join(&format!("/zones/{}/dns_records", zone_id.0))?;
+
+        let content = json!({
+            "ttl": "1",
+            "name": name,
+            "content": value,
+            "type": "TXT"
+        });
+
+        self.client
+            .post(url)
+            .bearer_auth(self.token.clone())
+            .json(&content)
+            .send()
+            .await?
+            .error_for_status()?;
+
+        Ok(())
+    }
+
     pub async fn delete_record(&self, zone_id: &ZoneInfoId, dns_id: &DnsRecId) -> Result<()> {
         let url = BASE_URL.join(&format!("/zones/{}/dns_records/{}", zone_id.0, dns_id.0))?;
 
@@ -140,7 +166,7 @@ pub struct ResultsDnsRec {
 
 #[derive(Serialize, Deserialize)]
 pub struct DnsRec {
-    pub content: IpAddr,
+    pub content: String,
     pub id: DnsRecId,
 }
 
