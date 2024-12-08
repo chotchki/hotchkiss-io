@@ -1,13 +1,6 @@
-use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
-use reqwest::header;
-use std::collections::HashMap;
 use std::net::Ipv4Addr;
-use std::str::FromStr;
-
-use reqwest::{Certificate, Client, ClientBuilder, Url};
-use serde::{Deserialize, Serialize};
 
 use super::omada_api::OmadaApi;
 use super::omada_config::OmadaConfig;

@@ -12,9 +12,7 @@ use std::{
 };
 use tokio::{process::Command, runtime::Handle, sync::broadcast::Sender, time::sleep};
 
-use crate::certificate::AcmePersistKey;
-
-use super::dns::cloudflare_client::CloudflareClient;
+use super::{acme::acme_persist_key::AcmePersistKey, dns::cloudflare_client::CloudflareClient};
 
 static BASE_URL: LazyLock<DirectoryUrl> = LazyLock::new(|| {
     if cfg!(debug_assertions) {

@@ -2,7 +2,7 @@ use std::{collections::HashMap, net::Ipv4Addr};
 
 use super::omada_config::OmadaConfig;
 use anyhow::{bail, Result};
-use reqwest::{cookie::Cookie, header, Certificate, Client, ClientBuilder};
+use reqwest::{header, Certificate, Client, ClientBuilder};
 use serde::{Deserialize, Serialize};
 use url::Url;
 

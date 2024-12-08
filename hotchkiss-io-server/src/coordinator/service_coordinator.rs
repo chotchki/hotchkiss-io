@@ -1,28 +1,24 @@
-use acme_provider_service::AcmeProviderService;
+use super::acme_provider_service::AcmeProviderService;
+use super::dns_provider_service::DnsProviderService;
+use super::endpoints_provider_service::EndpointsProviderService;
+use crate::{coordinator::ip_provider_service::IpProviderService, Settings};
 /// The goal of the coordinator is to start up the various dependancies of the server AND
 /// be able to reconfigure it automatically at runtime.
 use anyhow::Result;
-use dns_provider_service::DnsProviderService;
 use hotchkiss_io_db::DatabaseHandle;
 use sqlx::{Pool, Sqlite};
 use tokio::sync::broadcast;
 
-mod acme_provider_service;
-pub mod dns;
-mod dns_provider_service;
-pub mod ip;
-mod ip_provider_service;
-use crate::{coordinator::ip_provider_service::IpProviderService, Settings};
-
-pub struct Coordinator {
+pub struct ServiceCoordinator {
     pool: Pool<Sqlite>,
     ip_provider_service: IpProviderService,
     dns_provider_service: DnsProviderService,
     acme_provider_service: AcmeProviderService,
+    endpoints_provider_service: EndpointsProviderService,
 }
 
-impl Coordinator {
-    pub async fn create(settings: Settings) -> Result<Coordinator> {
+impl ServiceCoordinator {
+    pub async fn create(settings: Settings) -> Result<Self> {
         let pool = DatabaseHandle::create(&settings.database_path).await?;
 
         //let installation_status_service = InstallationStatusService::create(pool.clone());
@@ -33,7 +29,7 @@ impl Coordinator {
             DnsProviderService::create(settings.cloudflare_token.clone(), settings.domain.clone())?;
         let acme_provider_service =
             AcmeProviderService::create(pool.clone(), settings.cloudflare_token, settings.domain)?;
-        //let endpoints = Endpoints::create(pool.clone(), rand_gen.clone())?;
+        let endpoints_provider_service = EndpointsProviderService::create(pool.clone())?;
 
         Ok(Self {
             pool,
@@ -43,7 +39,7 @@ impl Coordinator {
             //install_endpoints,
             dns_provider_service,
             acme_provider_service,
-            //endpoints,
+            endpoints_provider_service,
         })
     }
 
@@ -95,12 +91,12 @@ impl Coordinator {
                      Err(e) => tracing::error!("Acme Service had an error |{}", e)
                  }
             }
-            // r = self.endpoints.start(tls_config_reciever) => {
-            //     match r {
-            //         Ok(()) => tracing::debug!("Endpoints exited."),
-            //         Err(e) => tracing::error!("Endpoints had an error |{}", e)
-            //     }
-            // }
+            r = self.endpoints_provider_service.start(tls_config_reciever) => {
+                 match r {
+                     Ok(()) => tracing::debug!("Endpoints exited."),
+                     Err(e) => tracing::error!("Endpoints had an error |{}", e)
+                 }
+            }
         }
 
         Ok(())
