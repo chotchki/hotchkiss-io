@@ -16,7 +16,14 @@ use crate::certificate::AcmePersistKey;
 
 use super::dns::cloudflare_client::CloudflareClient;
 
-static BASE_URL: LazyLock<DirectoryUrl> = LazyLock::new(|| DirectoryUrl::LetsEncryptStaging);
+static BASE_URL: LazyLock<DirectoryUrl> = LazyLock::new(|| {
+    if cfg!(debug_assertions) {
+        DirectoryUrl::LetsEncryptStaging
+    } else {
+        DirectoryUrl::LetsEncrypt
+    }
+});
+
 const CERT_EMAIL: &str = "foo@bar.com";
 const CERT_REFRESH: Duration = Duration::new(6 * 60 * 60, 0);
 
