@@ -1,8 +1,8 @@
 use acme_lib::{create_p256_key, Certificate, Directory, DirectoryUrl};
-use anyhow::Result;
+use anyhow::{bail, Result};
 use axum_server::tls_rustls::RustlsConfig;
 use rustls::{
-    pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, PrivatePkcs1KeyDer},
+    pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
     ServerConfig,
 };
 use sqlx::SqlitePool;
@@ -48,8 +48,14 @@ impl AcmeProviderService {
     pub async fn start(&self, tls_config_sender: Sender<RustlsConfig>) -> Result<()> {
         let acme_cert = self.get_certificate().await?;
 
-        let rustls_certs =
-            vec![CertificateDer::from_pem_slice(acme_cert.certificate().as_bytes()).unwrap()];
+        let mut rustls_certs: Vec<CertificateDer<'static>> = vec![];
+        for cert in CertificateDer::pem_slice_iter(acme_cert.certificate().as_bytes()) {
+            if let Ok(cert) = cert {
+                rustls_certs.push(cert.into_owned());
+            } else {
+                bail!("Could not parse cert");
+            }
+        }
 
         let rustls_private_key = PrivateKeyDer::from_pem_slice(acme_cert.private_key().as_bytes())?;
 
