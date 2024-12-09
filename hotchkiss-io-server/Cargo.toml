@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 hotchkiss-io-db = { path = "../hotchkiss-io-db" }
+hotchkiss-io-frontend = { path = "../hotchkiss-io-frontend" }
 
 #Core Rust
 anyhow = "1.0"
@@ -48,3 +49,5 @@ axum = "0.7.7"
 axum-server = { version = "0.7.1", features = ["tls-rustls"] }
 tower = "0.5.1"
 tower-http = { version = "0.6.1", features = ["fs"] }
+hyper-util = "0.1.10"
+rust-embed = "8.5.0"

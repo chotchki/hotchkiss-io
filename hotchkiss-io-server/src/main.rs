@@ -1,6 +1,6 @@
 /// Built off this tutorial: https://joeymckenzie.tech/blog/templates-with-rust-axum-htmx-askama
 use coordinator::{ip::omada_config::OmadaConfig, service_coordinator::ServiceCoordinator};
-use rustls::crypto::{ring, CryptoProvider};
+use rustls::crypto::ring;
 use serde::{Deserialize, Serialize};
 use std::io;
 use tracing::info;

@@ -7,7 +7,7 @@ use axum::{
 use reqwest::StatusCode;
 
 pub fn create_router() -> Router {
-    let router = Router::new().route("/", get(hello));
+    let mut router = Router::new().route("/", get(hello));
 
     //app = app.merge(authentication::router(
     //    self.pool.clone(),
@@ -23,14 +23,14 @@ pub fn create_router() -> Router {
     //app = app.merge(setup::router(self.pool.clone()));
 
     //Only enable embedded static content if we're in release mode
-    //#[cfg(debug_assertions)]
-    //{
-    //    app = app.merge(crate::web::dev_frontend::router());
-    //}
-    //#[cfg(not(debug_assertions))]
-    //{
-    //    app = app.merge(crate::web::frontend::router());
-    //}
+    #[cfg(debug_assertions)]
+    {
+        router = router.merge(crate::web::dev_frontend::router());
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        router = router.merge(crate::web::frontend::router());
+    }
 
     router
 }

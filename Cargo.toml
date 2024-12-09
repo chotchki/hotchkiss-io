@@ -1,4 +1,4 @@
 [workspace]
-members = ["hotchkiss-io-db", "hotchkiss-io-server"]
+members = ["hotchkiss-io-db", "hotchkiss-io-frontend", "hotchkiss-io-server"]
 default-members = ["hotchkiss-io-server"]
 resolver = "2"
