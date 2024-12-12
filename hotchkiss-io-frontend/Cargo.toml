@@ -1,9 +1,0 @@
-[package]
-name = "hotchkiss-io-frontend"
-description = "The embedded frontend for hotchkiss-io"
-version = "0.1.0"
-edition = "2021"
-links = "hotchkissiofrontend"
-
-[build-dependencies]
-npm_rs = "1.0"

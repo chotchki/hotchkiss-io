@@ -1,3 +1,4 @@
+use super::static_content::static_content;
 use askama::Template;
 use axum::{
     response::{Html, IntoResponse, Response},
@@ -8,6 +9,7 @@ use reqwest::StatusCode;
 
 pub fn create_router() -> Router {
     let mut router = Router::new().route("/", get(hello));
+    router = router.merge(static_content());
 
     //app = app.merge(authentication::router(
     //    self.pool.clone(),
@@ -21,16 +23,6 @@ pub fn create_router() -> Router {
     //app = app.merge(groups_applied::router(self.pool.clone()));
     //app = app.merge(health::router());
     //app = app.merge(setup::router(self.pool.clone()));
-
-    //Only enable embedded static content if we're in release mode
-    #[cfg(debug_assertions)]
-    {
-        router = router.merge(crate::web::dev_frontend::router());
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        router = router.merge(crate::web::frontend::router());
-    }
 
     router
 }

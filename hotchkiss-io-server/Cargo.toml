@@ -8,9 +8,11 @@ edition = "2021"
 name = "hotchkiss-io"
 path = "src/main.rs"
 
+[build-dependencies]
+anyhow = "1.0"
+
 [dependencies]
 hotchkiss-io-db = { path = "../hotchkiss-io-db" }
-hotchkiss-io-frontend = { path = "../hotchkiss-io-frontend" }
 
 #Core Rust
 anyhow = "1.0"
@@ -47,7 +49,9 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 askama = "0.12.1"
 axum = "0.7.7"
 axum-server = { version = "0.7.1", features = ["tls-rustls"] }
+mime_guess = "2.0.5"
+#hyper-util = "0.1.10"
+rust-embed = "8.5.0"
 tower = "0.5.1"
 tower-http = { version = "0.6.1", features = ["fs"] }
-hyper-util = "0.1.10"
-rust-embed = "8.5.0"
+#npm_rs = "1.0"

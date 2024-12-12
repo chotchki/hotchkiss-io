@@ -1,6 +1,5 @@
 use axum::{
-    body::{boxed, Full},
-    handler::Handler,
+    body::Body,
     http::{header, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::get,
@@ -8,21 +7,11 @@ use axum::{
 };
 use rust_embed::RustEmbed;
 
-use crate::GIT_VERSION;
-
-pub fn router() -> Router {
+pub fn static_content() -> Router {
     Router::new()
-        .route("/", get(index_handler))
-        .route("/favicon.ico", static_handler.into_service())
-        .route("/index.html", get(index_handler))
-        .route("/manifest.json", static_handler.into_service())
-        .route("/robots.txt", static_handler.into_service())
-        .route("/icons/*file", static_handler.into_service())
-        .route("/static/*file", static_handler.into_service())
-}
-
-async fn index_handler() -> impl IntoResponse {
-    static_handler("/index.html".parse::<Uri>().unwrap()).await
+        //.route("/favicon.ico", get(static_handler))
+        .route("/robots.txt", get(static_handler))
+        .route("/styles/*file", get(static_handler))
 }
 
 async fn static_handler(uri: Uri) -> impl IntoResponse {
@@ -33,7 +22,7 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
 
 // Static Example from here: https://github.com/pyrossh/rust-embed/blob/master/examples/axum.rs
 #[derive(RustEmbed)]
-#[folder = "$FRONTEND_BUILD_DIR"]
+#[folder = "assets"]
 struct Asset;
 
 pub struct StaticFile<T>(pub T);
@@ -52,19 +41,18 @@ where
 
         match Asset::get(path.as_str()) {
             Some(content) => {
-                let body = boxed(Full::from(content.data));
                 let mime = mime_guess::from_path(path).first_or_octet_stream();
                 Response::builder()
                     .header(header::CONTENT_TYPE, mime.as_ref())
-                    .header("x-git-version", GIT_VERSION)
-                    .body(body)
+                    //.header("x-git-version", GIT_VERSION)
+                    .body(Body::from(content.data))
                     .unwrap()
             }
             None => Response::builder()
                 .status(StatusCode::NOT_FOUND)
-                .body(boxed(Full::from(
+                .body(Body::from(
                     "404 - Yeah you're statically not finding what you want.",
-                )))
+                ))
                 .unwrap(),
         }
     }

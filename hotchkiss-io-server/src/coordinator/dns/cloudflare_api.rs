@@ -1,5 +1,4 @@
 use anyhow::bail;
-use anyhow::Context;
 use anyhow::Result;
 use reqwest::{Client, ClientBuilder};
 use serde::{Deserialize, Serialize};
