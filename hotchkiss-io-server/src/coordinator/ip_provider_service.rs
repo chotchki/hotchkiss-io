@@ -1,4 +1,4 @@
-use super::ip::{omada_client::OmadaClient, omada_config::OmadaConfig};
+use super::ip::{ifconfig::IfconfigMe, omada_client::OmadaClient, omada_config::OmadaConfig};
 use anyhow::Result;
 use std::{collections::HashSet, net::IpAddr, time::Duration};
 use tokio::{
@@ -9,13 +9,15 @@ use tracing::{debug, instrument};
 
 #[derive(Debug)]
 pub struct IpProviderService {
-    client: OmadaClient,
+    //client: OmadaClient,
+    client: IfconfigMe,
 }
 
 impl IpProviderService {
     pub fn create(config: OmadaConfig) -> Result<IpProviderService> {
         Ok(IpProviderService {
-            client: OmadaClient::new(config)?,
+            //client: OmadaClient::new(config)?,
+            client: IfconfigMe::new()?,
         })
     }
 
@@ -53,7 +55,7 @@ impl IpProviderService {
 
     #[instrument]
     async fn server_ips(&mut self) -> Result<HashSet<IpAddr>> {
-        let current_ip = IpAddr::V4(self.client.get_wan_ip().await?);
+        let current_ip = IpAddr::V4(self.client.public_ip().await?);
         let mut current_ips = HashSet::new();
         current_ips.insert(current_ip);
         Ok(current_ips)
