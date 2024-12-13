@@ -70,7 +70,7 @@ impl CloudflareApi {
 
         let content = json!({
             "name": name,
-            "content": value,
+            "content": format!("\"{}\"", value),
             "type": "TXT"
         });
 
