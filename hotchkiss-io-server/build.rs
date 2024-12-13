@@ -5,7 +5,7 @@ fn main() -> Result<()> {
     let schema_key = "DATABASE_URL";
     let schema_url = env::var("DEP_HOTCHKISSIODB_DATABASE_URL").unwrap(); //DEP_HOTCHKISSIODB_
     println!("cargo::rustc-env={}={}", schema_key, schema_url);
-    println!("cargo::rerun-if-changed=styles/tailwind.css");
+    println!("cargo::rerun-if-changed=templates");
 
     Command::new("npx")
         .args([

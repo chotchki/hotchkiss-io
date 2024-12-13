@@ -1,4 +1,4 @@
-use super::ip::{ifconfig::IfconfigMe, omada_client::OmadaClient, omada_config::OmadaConfig};
+use super::ip::{ifconfig::IfconfigMe, omada_config::OmadaConfig};
 use anyhow::Result;
 use std::{collections::HashSet, net::IpAddr, time::Duration};
 use tokio::{
