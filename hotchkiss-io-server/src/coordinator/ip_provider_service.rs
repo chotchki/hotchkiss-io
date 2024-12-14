@@ -1,11 +1,15 @@
 use super::ip::{ifconfig::IfconfigMe, omada_config::OmadaConfig};
 use anyhow::Result;
-use std::{collections::HashSet, net::IpAddr, time::Duration};
+use std::{
+    collections::HashSet,
+    net::{IpAddr, Ipv4Addr},
+    time::Duration,
+};
 use tokio::{
     sync::broadcast::Sender,
     time::{interval, MissedTickBehavior},
 };
-use tracing::{debug, instrument};
+use tracing::debug;
 
 #[derive(Debug)]
 pub struct IpProviderService {
@@ -24,7 +28,6 @@ impl IpProviderService {
     /// This schedules a task to periodically wake up and see
     /// if the IP addresses for the machine have changed, if so
     /// they are broadcoast
-    #[instrument]
     pub async fn start(&mut self, ip_changed: Sender<HashSet<IpAddr>>) -> Result<()> {
         let mut duration = interval(Duration::from_millis(60 * 60 * 1000));
         duration.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -32,7 +35,7 @@ impl IpProviderService {
         let mut current_ips = self.server_ips().await?;
 
         //Always send the starting IPs
-        debug!("Sending Initial IP addresses");
+        debug!("Sending Initial IP addresses {:?}", current_ips);
         ip_changed.send(current_ips.clone()).ok();
 
         loop {
@@ -42,7 +45,7 @@ impl IpProviderService {
                 Ok(new_ips) => {
                     if current_ips != new_ips {
                         current_ips = new_ips;
-                        tracing::info!("IP addresses changed, broadcasting");
+                        tracing::info!("IP addresses changed, broadcasting {:?}", current_ips);
                         ip_changed.send(current_ips.clone()).ok();
                     }
                 }
@@ -53,9 +56,13 @@ impl IpProviderService {
         }
     }
 
-    #[instrument]
     async fn server_ips(&mut self) -> Result<HashSet<IpAddr>> {
-        let current_ip = IpAddr::V4(self.client.public_ip().await?);
+        let current_ip = if cfg!(debug_assertions) {
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
+        } else {
+            IpAddr::V4(self.client.public_ip().await?)
+        };
+
         let mut current_ips = HashSet::new();
         current_ips.insert(current_ip);
         Ok(current_ips)

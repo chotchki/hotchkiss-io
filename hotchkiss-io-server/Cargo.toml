@@ -23,7 +23,12 @@ tokio = { version = "1.41.1", features = ["full"] }
 
 #Certificate Setup
 acme-lib = "0.9.1"
-reqwest = { version = "0.12", features = ["cookies", "json", "rustls-tls"] }
+reqwest = { version = "0.12", features = [
+    "cookies",
+    "hickory-dns",
+    "json",
+    "rustls-tls",
+] }
 rustls = { version = "0.23.19", features = ["ring"] }
 
 

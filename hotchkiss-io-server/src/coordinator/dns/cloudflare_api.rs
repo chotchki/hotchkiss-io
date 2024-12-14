@@ -1,10 +1,12 @@
 use anyhow::bail;
 use anyhow::Result;
+use reqwest::Response;
 use reqwest::{Client, ClientBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::net::IpAddr;
 use std::sync::LazyLock;
+use tracing::error;
 use url::Url;
 
 static BASE_URL: LazyLock<Url> =
@@ -36,26 +38,28 @@ impl CloudflareApi {
 
         let content = match addr {
             IpAddr::V4(v4) => json!({
-                "ttl": "1",
+                "ttl": 1,
                 "name": name,
                 "content": v4.to_string(),
                 "type": "A"
             }),
             IpAddr::V6(v6) => json!({
-                "ttl": "1",
+                "ttl": 1,
                 "name": name,
                 "content": v6.to_string(),
                 "type": "AAAA"
             }),
         };
 
-        self.client
-            .post(url)
-            .bearer_auth(self.token.clone())
-            .json(&content)
-            .send()
-            .await?
-            .error_for_status()?;
+        Self::transform_error(
+            self.client
+                .post(url)
+                .bearer_auth(self.token.clone())
+                .json(&content)
+                .send()
+                .await?,
+        )
+        .await?;
 
         Ok(())
     }
@@ -74,13 +78,15 @@ impl CloudflareApi {
             "type": "TXT"
         });
 
-        self.client
-            .post(url)
-            .bearer_auth(self.token.clone())
-            .json(&content)
-            .send()
-            .await?
-            .error_for_status()?;
+        Self::transform_error(
+            self.client
+                .post(url)
+                .bearer_auth(self.token.clone())
+                .json(&content)
+                .send()
+                .await?,
+        )
+        .await?;
 
         Ok(())
     }
@@ -143,6 +149,22 @@ impl CloudflareApi {
             .await?;
 
         Ok(response.result)
+    }
+
+    async fn transform_error(response: Response) -> Result<Response> {
+        if !response.status().is_success() {
+            let request_url = response.url().clone();
+            let status_code = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or("No response body".to_string());
+            error!("Reqwest failed with status code {}", status_code);
+            error!("Request url {}", request_url);
+            error!("Response body {}", body);
+            bail!("Reqwest failed");
+        }
+        Ok(response)
     }
 }
 

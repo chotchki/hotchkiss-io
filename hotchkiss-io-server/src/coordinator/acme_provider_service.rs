@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 use tokio::{process::Command, runtime::Handle, sync::broadcast::Sender, time::sleep};
-use tracing::instrument;
+use tracing::{debug, instrument};
 
 use super::{acme::acme_persist_key::AcmePersistKey, dns::cloudflare_client::CloudflareClient};
 
@@ -36,6 +36,7 @@ pub struct AcmeProviderService {
 
 impl AcmeProviderService {
     pub fn create(pool: SqlitePool, token: String, domain: String) -> Result<Self> {
+        debug!("Starting acme for domain {}", domain);
         let handle = Arc::new(Handle::current());
         Ok(Self {
             handle: handle.clone(),

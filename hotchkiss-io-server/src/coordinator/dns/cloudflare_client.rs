@@ -56,10 +56,15 @@ impl CloudflareClient {
 
         dns_ip_to_id.retain(|k, _| !addrs.contains(k));
 
+        //Now get record name needed
+        let mut prefixes: Vec<&str> = self.domain.split('.').rev().skip(2).collect();
+        prefixes.reverse();
+        let prefix = prefixes[..].join(".");
+
         //Now we create and delete records
         for rec in missing_recs {
             self.api
-                .create_record(&zone_id, self.domain.clone(), rec)
+                .create_record(&zone_id, prefix.clone(), rec)
                 .await?;
         }
         for id in dns_ip_to_id.values() {

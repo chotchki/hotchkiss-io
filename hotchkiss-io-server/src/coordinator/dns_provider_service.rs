@@ -1,9 +1,6 @@
 use super::dns::cloudflare_client::CloudflareClient;
 use anyhow::Result;
-use std::{
-    collections::HashSet,
-    net::{IpAddr, SocketAddr},
-};
+use std::{collections::HashSet, net::IpAddr};
 use tokio::{net::lookup_host, sync::broadcast::Receiver};
 use tracing::info;
 
@@ -38,9 +35,10 @@ impl DnsProviderService {
     }
 
     async fn lookup_dns(&self) -> Result<HashSet<IpAddr>> {
-        let hosts: Vec<SocketAddr> = lookup_host(self.domain.to_string() + ":443")
-            .await?
-            .collect();
+        let hosts = match lookup_host(self.domain.to_string() + ":443").await {
+            Ok(o) => o.collect(),
+            Err(_) => vec![],
+        };
 
         let hash: HashSet<IpAddr> = hosts.iter().map(|x| x.ip()).collect();
 
