@@ -4,6 +4,10 @@
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="/styles/main.css" rel="stylesheet" />
+
+    <title>{% block title %}{{ title }}{% endblock %}</title>
+
+    {% block head %}{% endblock %}
 </head>
 
 <body class="bg-cyan-400">
@@ -27,7 +31,7 @@
 
         <!-- Content -->
         <div class="bg-cyan-50 m-2 p-8 rounded-md">
-            Content TBD
+            {% block content %}{% endblock %}
         </div>
     </div>
 </body>

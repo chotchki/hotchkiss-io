@@ -8,33 +8,42 @@ use axum::{
 use reqwest::StatusCode;
 
 pub fn create_router() -> Router {
-    let mut router = Router::new().route("/", get(hello));
+    let mut router = Router::new()
+        .route("/", get(projects))
+        .route("/contact", get(contact))
+        .route("/projects", get(projects))
+        .route("/resume", get(resume));
     router = router.merge(static_content());
-
-    //app = app.merge(authentication::router(
-    //    self.pool.clone(),
-    //    session_layer.clone(),
-    //    webauthn,
-    //));
-    //app = app.merge(clients::router(self.pool.clone()));
-    //app = app.merge(client_groups::router(self.pool.clone()));
-    //app = app.merge(domains::router(self.pool.clone(), session_layer));
-    //app = app.merge(domain_groups::router(self.pool.clone()));
-    //app = app.merge(groups_applied::router(self.pool.clone()));
-    //app = app.merge(health::router());
-    //app = app.merge(setup::router(self.pool.clone()));
 
     router
 }
 
-async fn hello() -> impl IntoResponse {
-    let template = HelloTemplate {};
+async fn contact() -> impl IntoResponse {
+    let template = ContactTemplate {};
     HtmlTemplate(template)
 }
 
 #[derive(Template)]
-#[template(path = "hello.html")]
-struct HelloTemplate;
+#[template(path = "contact.html")]
+struct ContactTemplate;
+
+async fn projects() -> impl IntoResponse {
+    let template = ProjectsTemplate {};
+    HtmlTemplate(template)
+}
+
+#[derive(Template)]
+#[template(path = "projects.html")]
+struct ProjectsTemplate;
+
+#[derive(Template)]
+#[template(path = "resume.html")]
+struct ResumeTemplate;
+
+async fn resume() -> impl IntoResponse {
+    let template = ResumeTemplate {};
+    HtmlTemplate(template)
+}
 
 /// A wrapper type that we'll use to encapsulate HTML parsed by askama into valid HTML for axum to serve.
 struct HtmlTemplate<T>(T);
