@@ -2,18 +2,31 @@
 <html lang="en">
 
 <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="/styles/main.css" rel="stylesheet" />
 </head>
 
-<body>
-    <div
-        class="mx-auto max-w-xs bg-white shadow-xl p-4 text-slate-500 leading-6 flex justify-center dark:bg-slate-800 dark:text-slate-400">
-        <div class="flex items-center gap-4 p-4">
-            <h1>Howdy! Again!</h1>
+<body class="bg-cyan-400">
+    <!-- Site, centered -->
+    <div class="flex flex-col justify-center items-center">
+        <!-- Jumbotron image -->
+        <div class="bg-cyan-50 mb-2 max-w-screen-md">
+            Jumbotron
+        </div>
+        <!-- Navigation -->
+        <div class="max-w-screen-md">
+            <ul class="list-none flex flex-row justify-around">
+                <li><a class="bg-cyan-50 m-2 p-2 min-w-40 rounded-md text-center" href="/projects">Projects</a></li>
+                <li><a class="bg-cyan-50 m-2 p-2 min-w-40 rounded-md text-center" href="/resume">Resume</a></li>
+                <li><a class="bg-cyan-50 m-2 p-2 min-w-40 rounded-md text-center" href="/contact">Contact Me</a></li>
+            </ul>
+        </div>
+
+        <!-- Content -->
+        <div class="bg-cyan-50 m-2 p-8 rounded-md">
+            Content
         </div>
     </div>
-
-
 </body>
 
 </html>
