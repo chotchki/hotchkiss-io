@@ -6,16 +6,21 @@ use axum::{
     Router,
 };
 use reqwest::StatusCode;
+use tower::ServiceBuilder;
+use tower_http::{compression::CompressionLayer, trace::TraceLayer};
 
 pub fn create_router() -> Router {
-    let mut router = Router::new()
+    Router::new()
         .route("/", get(projects))
         .route("/contact", get(contact))
         .route("/projects", get(projects))
-        .route("/resume", get(resume));
-    router = router.merge(static_content());
-
-    router
+        .route("/resume", get(resume))
+        .merge(static_content())
+        .layer(
+            ServiceBuilder::new()
+                .layer(TraceLayer::new_for_http())
+                .layer(CompressionLayer::new()),
+        )
 }
 
 async fn contact() -> impl IntoResponse {

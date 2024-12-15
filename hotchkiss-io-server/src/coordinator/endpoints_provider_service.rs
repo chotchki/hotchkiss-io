@@ -62,9 +62,8 @@ impl EndpointsProviderService {
     async fn https_server(addr: SocketAddr, config: RustlsConfig) {
         tracing::info!("HTTPS Server listening on {}", addr);
 
-        let app_serv = create_router().into_make_service();
         axum_server::bind_rustls(addr, config)
-            .serve(app_serv)
+            .serve(create_router().into_make_service())
             .await
             .unwrap();
     }
