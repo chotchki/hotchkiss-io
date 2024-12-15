@@ -7,7 +7,7 @@
 
 default_job = "run-long"
 env.CARGO_TERM_COLOR = "always"
-watch = ["hotchkiss-io-server/assets", "hotchkiss-io-server/templates"]
+watch = ["assets", "templates"]
 
 # Run your long-running application (eg server) and have the result displayed in bacon.
 # For programs that never stop (eg a server), `background` is set to false

@@ -7,6 +7,7 @@ use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod coordinator;
+pub mod db;
 mod web;
 
 #[derive(Serialize, Deserialize)]

@@ -3,11 +3,13 @@ use std::backtrace::Backtrace;
 use super::acme_provider_service::AcmeProviderService;
 use super::dns_provider_service::DnsProviderService;
 use super::endpoints_provider_service::EndpointsProviderService;
-use crate::{coordinator::ip_provider_service::IpProviderService, Settings};
+use crate::{
+    coordinator::ip_provider_service::IpProviderService, db::database_handle::DatabaseHandle,
+    Settings,
+};
 /// The goal of the coordinator is to start up the various dependancies of the server AND
 /// be able to reconfigure it automatically at runtime.
 use anyhow::Result;
-use hotchkiss_io_db::DatabaseHandle;
 use sqlx::{Pool, Sqlite};
 use tokio::sync::broadcast;
 
