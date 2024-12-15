@@ -7,6 +7,7 @@
 
 default_job = "run-long"
 env.CARGO_TERM_COLOR = "always"
+watch = ["hotchkiss-io-server/assets", "hotchkiss-io-server/templates"]
 
 # Run your long-running application (eg server) and have the result displayed in bacon.
 # For programs that never stop (eg a server), `background` is set to false
@@ -17,7 +18,7 @@ env.CARGO_TERM_COLOR = "always"
 # If you often use this job, it makes sense to override the 'r' key by adding
 # a binding `r = job:run-long` at the end of this file .
 [jobs.run-long]
-command = ["cargo", "run", "--", "<test.stdin.json"]
+command = ["cargo", "run", "--", "data/config.json"]
 need_stdout = true
 allow_warnings = true
 background = false
