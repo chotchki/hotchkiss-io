@@ -5,10 +5,7 @@ use axum::{
     routing::get,
     Router,
 };
-use git_version::git_version;
 use rust_embed::RustEmbed;
-
-const GIT_VERSION: &str = git_version!();
 
 pub fn static_content() -> Router {
     Router::new()
@@ -47,7 +44,6 @@ where
                 let mime = mime_guess::from_path(path).first_or_octet_stream();
                 Response::builder()
                     .header(header::CONTENT_TYPE, mime.as_ref())
-                    .header("x-git-version", GIT_VERSION)
                     .body(Body::from(content.data))
                     .unwrap()
             }
