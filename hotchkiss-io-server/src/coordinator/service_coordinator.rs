@@ -24,7 +24,7 @@ impl ServiceCoordinator {
         let pool = DatabaseHandle::create(&settings.database_path).await?;
 
         //let installation_status_service = InstallationStatusService::create(pool.clone());
-        let ip_provider_service = IpProviderService::create(settings.omada_config)?;
+        let ip_provider_service = IpProviderService::create()?;
         //let dns_server_service = DnsServer::create(pool.clone()).await;
         //let install_endpoints = InstallEndpoints::create(pool.clone());
         let dns_provider_service =

@@ -1,5 +1,5 @@
 /// Built off this tutorial: https://joeymckenzie.tech/blog/templates-with-rust-axum-htmx-askama
-use coordinator::{ip::omada_config::OmadaConfig, service_coordinator::ServiceCoordinator};
+use coordinator::service_coordinator::ServiceCoordinator;
 use rustls::crypto::ring;
 use serde::{Deserialize, Serialize};
 use std::{env, fs};
@@ -14,7 +14,6 @@ struct Settings {
     pub cloudflare_token: String,
     pub database_path: String,
     pub domain: String,
-    pub omada_config: OmadaConfig,
 }
 
 #[tokio::main]

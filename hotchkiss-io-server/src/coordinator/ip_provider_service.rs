@@ -1,4 +1,4 @@
-use super::ip::{ifconfig::IfconfigMe, omada_config::OmadaConfig};
+use super::ip::ifconfig::IfconfigMe;
 use anyhow::Result;
 use std::{
     collections::HashSet,
@@ -18,9 +18,8 @@ pub struct IpProviderService {
 }
 
 impl IpProviderService {
-    pub fn create(config: OmadaConfig) -> Result<IpProviderService> {
+    pub fn create() -> Result<IpProviderService> {
         Ok(IpProviderService {
-            //client: OmadaClient::new(config)?,
             client: IfconfigMe::new()?,
         })
     }
