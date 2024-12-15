@@ -2,8 +2,8 @@
 use coordinator::{ip::omada_config::OmadaConfig, service_coordinator::ServiceCoordinator};
 use rustls::crypto::ring;
 use serde::{Deserialize, Serialize};
-use std::io;
-use tracing::info;
+use std::{env, fs};
+use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod coordinator;
@@ -31,9 +31,20 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    info!("Hotchkiss IO Starting Up");
+
     //Read our sensitive data from stdin
-    let stdin = io::read_to_string(io::stdin())?;
-    let settings: Settings = serde_json::from_str(&stdin)?;
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        error!(
+            "You must pass the config file path as an argument, got {:?}",
+            args
+        );
+        return Ok(());
+    }
+
+    let config = fs::read_to_string(args.get(1).unwrap())?;
+    let settings: Settings = serde_json::from_str(&config)?;
 
     //Build the coordinator
     let mut coordinator = ServiceCoordinator::create(settings).await?;

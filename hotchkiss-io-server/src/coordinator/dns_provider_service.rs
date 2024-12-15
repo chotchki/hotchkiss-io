@@ -2,7 +2,7 @@ use super::dns::cloudflare_client::CloudflareClient;
 use anyhow::Result;
 use std::{collections::HashSet, net::IpAddr};
 use tokio::{net::lookup_host, sync::broadcast::Receiver};
-use tracing::info;
+use tracing::{debug, info};
 
 pub struct DnsProviderService {
     domain: String,
@@ -19,6 +19,8 @@ impl DnsProviderService {
 
     pub async fn start(&self, mut ip_changed: Receiver<HashSet<IpAddr>>) -> Result<()> {
         let mut current_ips = ip_changed.recv().await?;
+
+        debug!("Got ip address, checking dns");
         let mut dns_ips = self.lookup_dns().await?;
 
         loop {

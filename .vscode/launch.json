@@ -12,15 +12,16 @@
                 "args": [
                     "build",
                     "--bin=hotchkiss-io",
-                    "--package=hotchkiss-io-server"
+                    "--package=hotchkiss-io-server",
                 ],
                 "filter": {
                     "name": "hotchkiss-io",
                     "kind": "bin"
                 }
             },
-            "args": [],
-            "stdio": "test.stdin.json",
+            "args": [
+                "data/config.json"
+            ],
             "cwd": "${workspaceFolder}",
             "env": {
                 "RUST_BACKTRACE": "1"

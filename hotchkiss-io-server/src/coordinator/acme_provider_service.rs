@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 use tokio::{process::Command, runtime::Handle, sync::broadcast::Sender, time::sleep};
-use tracing::{debug, instrument};
+use tracing::{debug, info, instrument};
 
 use super::{acme::acme_persist_key::AcmePersistKey, dns::cloudflare_client::CloudflareClient};
 
@@ -67,6 +67,7 @@ impl AcmeProviderService {
         );
         let rusttls_cfg = RustlsConfig::from_config(server_config);
 
+        info!("Sending initial Rustls config");
         tls_config_sender.send(rusttls_cfg.clone())?;
 
         loop {
