@@ -94,12 +94,14 @@ impl CloudflareApi {
     pub async fn delete_record(&self, zone_id: &ZoneInfoId, dns_id: &DnsRecId) -> Result<()> {
         let url = BASE_URL.join(&format!("./zones/{}/dns_records/{}", zone_id.0, dns_id.0))?;
 
-        self.client
-            .delete(url)
-            .bearer_auth(self.token.clone())
-            .send()
-            .await?
-            .error_for_status()?;
+        Self::transform_error(
+            self.client
+                .delete(url)
+                .bearer_auth(self.token.clone())
+                .send()
+                .await?,
+        )
+        .await?;
 
         Ok(())
     }
@@ -112,15 +114,16 @@ impl CloudflareApi {
         let mut url = BASE_URL.join("./zones")?;
         url.set_query(Some(&(format!("name={parent}"))));
 
-        let mut response = self
-            .client
-            .get(url)
-            .bearer_auth(self.token.clone())
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<ResultsZoneInfo>()
-            .await?;
+        let mut response = Self::transform_error(
+            self.client
+                .get(url)
+                .bearer_auth(self.token.clone())
+                .send()
+                .await?,
+        )
+        .await?
+        .json::<ResultsZoneInfo>()
+        .await?;
 
         if response.result.is_empty() {
             bail!("No zone id found for {domain}");
@@ -138,15 +141,16 @@ impl CloudflareApi {
         let mut url = BASE_URL.join(&format!("./zones/{}/dns_records", zone_id.0))?;
         url.set_query(Some(&(format!("name={domain}"))));
 
-        let response = self
-            .client
-            .get(url.clone())
-            .bearer_auth(self.token.clone())
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<ResultsDnsRec>()
-            .await?;
+        let response = Self::transform_error(
+            self.client
+                .get(url.clone())
+                .bearer_auth(self.token.clone())
+                .send()
+                .await?,
+        )
+        .await?
+        .json::<ResultsDnsRec>()
+        .await?;
 
         Ok(response.result)
     }
