@@ -1,21 +1,20 @@
 /// Built off this tutorial: https://joeymckenzie.tech/blog/templates-with-rust-axum-htmx-askama
+use anyhow::Context;
 use coordinator::service_coordinator::ServiceCoordinator;
 use rustls::crypto::ring;
 use serde::{Deserialize, Serialize};
-use std::{env, fs};
-use tracing::{error, info};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use std::{env, fs, io};
+use tracing::{error, info, Level};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::{
+    filter, fmt, layer::SubscriberExt, registry, util::SubscriberInitExt, Layer,
+};
 
 mod coordinator;
 pub mod db;
+mod settings;
+use settings::Settings;
 mod web;
-
-#[derive(Serialize, Deserialize)]
-struct Settings {
-    pub cloudflare_token: String,
-    pub database_path: String,
-    pub domain: String,
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -23,28 +22,49 @@ async fn main() -> anyhow::Result<()> {
         .install_default()
         .expect("Crypto provider ring unable to be installed");
 
+    let args: Vec<String> = env::args().skip(1).take(1).collect();
+
+    let config = fs::read_to_string(
+        args.first()
+            .with_context(|| format!("First argument must be the config file, got {args:?}"))?,
+    )?;
+    let settings: Settings = serde_json::from_str(&config).with_context(|| {
+        format!("Failed to parse settings file to settings struct content:{config}")
+    })?;
+
+    let app_filter = filter::Targets::new().with_target("hotchkiss_io", Level::DEBUG);
+    let access_filter = filter::Targets::new().with_target("tower_http", Level::DEBUG);
+
+    let app_rolling =
+        RollingFileAppender::new(Rotation::DAILY, &settings.log_path, "hotchkiss.io.log");
+    let access_rolling =
+        RollingFileAppender::new(Rotation::DAILY, &settings.log_path, "access.log");
+
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "hotchkiss_io=debug".into()),
+            fmt::layer()
+                .compact()
+                .with_ansi(true)
+                .with_writer(io::stdout)
+                .with_filter(app_filter.clone()),
         )
-        .with(tracing_subscriber::fmt::layer())
+        .with(
+            fmt::layer()
+                .compact()
+                .with_ansi(false)
+                .with_writer(app_rolling)
+                .with_filter(app_filter),
+        )
+        .with(
+            fmt::layer()
+                .compact()
+                .with_ansi(false)
+                .with_writer(access_rolling)
+                .with_filter(access_filter),
+        )
         .init();
 
     info!("Hotchkiss IO Starting Up");
-
-    //Read our sensitive data from stdin
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        error!(
-            "You must pass the config file path as an argument, got {:?}",
-            args
-        );
-        return Ok(());
-    }
-
-    let config = fs::read_to_string(args.get(1).unwrap())?;
-    let settings: Settings = serde_json::from_str(&config)?;
 
     //Build the coordinator
     let mut coordinator = ServiceCoordinator::create(settings).await?;
