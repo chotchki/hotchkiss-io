@@ -1,20 +1,17 @@
 use super::static_content::static_content;
 use askama::Template;
 use axum::{
-    body::Bytes,
-    http::Request,
     response::{Html, IntoResponse, Response},
     routing::get,
     Router,
 };
-use http_body_util::Full;
 use reqwest::StatusCode;
 use tower::ServiceBuilder;
 use tower_http::{
     compression::CompressionLayer,
-    trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer},
+    trace::{DefaultMakeSpan, DefaultOnRequest, TraceLayer},
 };
-use tracing::{Level, Span};
+use tracing::Level;
 
 pub fn create_router() -> Router {
     Router::new()

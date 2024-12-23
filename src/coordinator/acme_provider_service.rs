@@ -1,6 +1,10 @@
 use acme_lib::{create_p256_key, Certificate, Directory, DirectoryUrl};
 use anyhow::{bail, Result};
 use axum_server::tls_rustls::RustlsConfig;
+use hickory_resolver::{
+    proto::rr::{rdata::TXT, RData, RecordType},
+    TokioAsyncResolver,
+};
 use rustls::{
     pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
     ServerConfig,
@@ -32,10 +36,16 @@ pub struct AcmeProviderService {
     persist: AcmePersistKey,
     domain: String,
     client: CloudflareClient,
+    resolver: TokioAsyncResolver,
 }
 
 impl AcmeProviderService {
-    pub fn create(pool: SqlitePool, token: String, domain: String) -> Result<Self> {
+    pub fn create(
+        pool: SqlitePool,
+        resolver: TokioAsyncResolver,
+        token: String,
+        domain: String,
+    ) -> Result<Self> {
         debug!("Starting acme for domain {}", domain);
         let handle = Arc::new(Handle::current());
         Ok(Self {
@@ -43,6 +53,7 @@ impl AcmeProviderService {
             persist: AcmePersistKey::create(pool, handle),
             domain: domain.clone(),
             client: CloudflareClient::new(token, domain)?,
+            resolver,
         })
     }
 
@@ -154,22 +165,29 @@ impl AcmeProviderService {
 
     async fn wait_for_propogation(&self, challenge: String) -> Result<()> {
         let domain_proof_str = Self::create_proof_domain(&self.domain);
+        let box_challenge: Box<[u8]> = challenge.as_bytes().into();
         loop {
-            let output = Command::new("dig")
-                .arg(domain_proof_str.clone())
-                .arg("TXT")
-                .output()
-                .await?;
-            let output_str = String::from_utf8(output.stdout)?;
-            for line in output_str.lines() {
-                if line.starts_with(&domain_proof_str) {
-                    let line_parts: Vec<&str> = line.split_terminator('"').collect();
-                    if let Some(found) = line_parts.get(1) {
-                        if *found == challenge {
-                            return Ok(());
-                        }
-                    }
+            let proof_value = match self
+                .resolver
+                .lookup(domain_proof_str.clone() + ".", RecordType::TXT)
+                .await
+            {
+                Ok(l) => l
+                    .into_iter()
+                    .filter_map(|r| match r {
+                        RData::TXT(t) => Some(t),
+                        _ => None,
+                    })
+                    .flat_map(|x| x.txt_data().to_owned())
+                    .any(|x| x == box_challenge),
+                Err(e) => {
+                    debug!("Resolver Error looking for proof of {}", e);
+                    false
                 }
+            };
+
+            if proof_value {
+                return Ok(());
             }
 
             sleep(Duration::from_secs(60)).await;

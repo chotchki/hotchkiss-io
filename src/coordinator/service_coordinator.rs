@@ -10,11 +10,13 @@ use crate::{
 /// The goal of the coordinator is to start up the various dependancies of the server AND
 /// be able to reconfigure it automatically at runtime.
 use anyhow::Result;
+use hickory_resolver::TokioAsyncResolver;
 use sqlx::{Pool, Sqlite};
-use tokio::sync::broadcast;
+use tokio::{runtime::Runtime, sync::broadcast};
 
 pub struct ServiceCoordinator {
     pool: Pool<Sqlite>,
+    resolver: TokioAsyncResolver,
     ip_provider_service: IpProviderService,
     dns_provider_service: DnsProviderService,
     acme_provider_service: AcmeProviderService,
@@ -24,16 +26,25 @@ pub struct ServiceCoordinator {
 impl ServiceCoordinator {
     pub async fn create(settings: Settings) -> Result<Self> {
         let pool = DatabaseHandle::create(&settings.database_path).await?;
+        let resolver = TokioAsyncResolver::tokio_from_system_conf()?;
 
         let ip_provider_service = IpProviderService::create()?;
-        let dns_provider_service =
-            DnsProviderService::create(settings.cloudflare_token.clone(), settings.domain.clone())?;
-        let acme_provider_service =
-            AcmeProviderService::create(pool.clone(), settings.cloudflare_token, settings.domain)?;
+        let dns_provider_service = DnsProviderService::create(
+            resolver.clone(),
+            settings.cloudflare_token.clone(),
+            settings.domain.clone(),
+        )?;
+        let acme_provider_service = AcmeProviderService::create(
+            pool.clone(),
+            resolver.clone(),
+            settings.cloudflare_token,
+            settings.domain,
+        )?;
         let endpoints_provider_service = EndpointsProviderService::create(pool.clone())?;
 
         Ok(Self {
             pool,
+            resolver,
             //installation_status_service,
             ip_provider_service,
             //dns_server_service,

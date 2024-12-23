@@ -2,13 +2,10 @@
 use anyhow::Context;
 use coordinator::service_coordinator::ServiceCoordinator;
 use rustls::crypto::ring;
-use serde::{Deserialize, Serialize};
 use std::{env, fs, io};
-use tracing::{error, info, Level};
+use tracing::{info, Level};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use tracing_subscriber::{
-    filter, fmt, layer::SubscriberExt, registry, util::SubscriberInitExt, Layer,
-};
+use tracing_subscriber::{filter, fmt, layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
 mod coordinator;
 pub mod db;

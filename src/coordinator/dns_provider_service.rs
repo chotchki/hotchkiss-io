@@ -1,5 +1,6 @@
 use super::dns::cloudflare_client::CloudflareClient;
 use anyhow::Result;
+use hickory_resolver::TokioAsyncResolver;
 use std::{collections::HashSet, net::IpAddr};
 use tokio::{net::lookup_host, sync::broadcast::Receiver};
 use tracing::{debug, info};
@@ -7,13 +8,15 @@ use tracing::{debug, info};
 pub struct DnsProviderService {
     domain: String,
     client: CloudflareClient,
+    resolver: TokioAsyncResolver,
 }
 
 impl DnsProviderService {
-    pub fn create(token: String, domain: String) -> Result<Self> {
+    pub fn create(resolver: TokioAsyncResolver, token: String, domain: String) -> Result<Self> {
         Ok(Self {
             domain: domain.clone(),
             client: CloudflareClient::new(token, domain)?,
+            resolver,
         })
     }
 
@@ -37,12 +40,15 @@ impl DnsProviderService {
     }
 
     async fn lookup_dns(&self) -> Result<HashSet<IpAddr>> {
-        let hosts = match lookup_host(self.domain.to_string() + ":443").await {
-            Ok(o) => o.collect(),
-            Err(_) => vec![],
+        let lookup_result = match self.resolver.ipv4_lookup(self.domain.clone() + ".").await {
+            Ok(o) => o,
+            Err(e) => {
+                debug!("DNS lookup of {} failed with {}", self.domain, e);
+                return Ok(HashSet::new());
+            }
         };
 
-        let hash: HashSet<IpAddr> = hosts.iter().map(|x| x.ip()).collect();
+        let hash: HashSet<IpAddr> = lookup_result.iter().map(|x| IpAddr::V4(x.0)).collect();
 
         Ok(hash)
     }
