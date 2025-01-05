@@ -5,7 +5,10 @@ use axum::{
     routing::get,
     Router,
 };
+use build_time::build_time_utc;
 use rust_embed::RustEmbed;
+
+const BUILD_TIME: &str = build_time_utc!("%a, %d %b %Y %H:%M:%S GMT");
 
 pub fn static_content() -> Router {
     Router::new()
@@ -46,6 +49,7 @@ where
                 let mime = mime_guess::from_path(path).first_or_octet_stream();
                 Response::builder()
                     .header(header::CONTENT_TYPE, mime.as_ref())
+                    .header(header::LAST_MODIFIED, BUILD_TIME)
                     .body(Body::from(content.data))
                     .unwrap()
             }
