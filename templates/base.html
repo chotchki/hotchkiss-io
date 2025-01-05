@@ -15,31 +15,36 @@
     <!-- Site, centered -->
     <div class="flex flex-col justify-center items-center">
         <!-- Jumbotron image -->
-        <div class="mb-2 py-4 flex flex-row items-end">
+        <div class="mb-2 py-4 max-w-lg flex flex-row items-end">
             <img class="size-40 m-2 rounded-full border-8 border-navy" src="/images/Photo.jpeg" />
             <div class="mb-2">
-                <h1 class="font-display text-xl text-navy underline underline-offset-8 decoration-yellow">
-                    CHRISTOPHER HOTCHKISS
+                <h1 class="font-display text-xl text-navy uppercase underline underline-offset-8 decoration-yellow">
+                    Christopher Hotchkiss
                 </h1>
-                <p class="py-2 font-content text-lg text-navy">Crafting Solutions, Shaping Products: From Concept to
+                <p class="py-2 font-content text-m text-navy">Crafting Solutions, Shaping Products: From Concept to
                     Code</p>
             </div>
         </div>
-        <!-- Navigation -->
-        <div class="max-w-screen-md">
-            <ul class="list-none flex flex-row justify-around">
-                <li><a class="bg-green-500 m-2 p-2 min-w-40 rounded-md text-center underline"
-                        href="/projects">Projects</a></li>
-                <li><a class="bg-green-500 m-2 p-2 min-w-40 rounded-md text-center underline" href="/resume">Resume</a>
-                </li>
-                <li><a class="bg-green-500 m-2 p-2 min-w-40 rounded-md text-center underline" href="/contact">Contact
-                        Me</a></li>
-            </ul>
-        </div>
 
-        <!-- Content -->
-        <div class="bg-cyan-50 m-2 p-8 rounded-md">
-            {% block content %}{% endblock %}
+        <div class="m-2">
+            <!-- Navigation -->
+            <div class="max-w-screen-md pl-2">
+                <ul class="list-none flex flex-row">
+                    <li><a class="bg-navy py-1 px-8 min-w-40 rounded-t font-display text-center text-sm underline decoration-2 underline-offset-8 text-yellow uppercase"
+                            href="/projects">Projects</a></li>
+                    <li><a class="bg-navy py-1 px-8 min-w-40 rounded-t font-display text-center text-sm text-div-grey uppercase"
+                            href="/resume">Resume</a>
+                    </li>
+                    <li><a class="bg-navy py-1 px-8 min-w-40 rounded-t font-display text-center text-sm text-div-grey uppercase"
+                            href="/contact">Contact
+                            Me</a></li>
+                </ul>
+            </div>
+
+            <!-- Content -->
+            <div class="bg-div-grey p-8 rounded-md border-4 border-navy">
+                {% block content %}{% endblock %}
+            </div>
         </div>
 
         <!-- Footer -->
