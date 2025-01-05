@@ -2,7 +2,7 @@ use acme_lib::{create_p256_key, Certificate, Directory, DirectoryUrl};
 use anyhow::{bail, Result};
 use axum_server::tls_rustls::RustlsConfig;
 use hickory_resolver::{
-    proto::rr::{rdata::TXT, RData, RecordType},
+    proto::rr::{RData, RecordType},
     TokioAsyncResolver,
 };
 use rustls::{
@@ -14,7 +14,7 @@ use std::{
     sync::{Arc, LazyLock},
     time::Duration,
 };
-use tokio::{process::Command, runtime::Handle, sync::broadcast::Sender, time::sleep};
+use tokio::{runtime::Handle, sync::broadcast::Sender, time::sleep};
 use tracing::{debug, info, instrument};
 
 use super::{acme::acme_persist_key::AcmePersistKey, dns::cloudflare_client::CloudflareClient};

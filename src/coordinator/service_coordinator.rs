@@ -12,7 +12,7 @@ use crate::{
 use anyhow::Result;
 use hickory_resolver::TokioAsyncResolver;
 use sqlx::{Pool, Sqlite};
-use tokio::{runtime::Runtime, sync::broadcast};
+use tokio::sync::broadcast;
 
 pub struct ServiceCoordinator {
     pool: Pool<Sqlite>,
