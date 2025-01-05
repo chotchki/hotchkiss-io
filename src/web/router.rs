@@ -5,6 +5,7 @@ use axum::{
     routing::get,
     Router,
 };
+use build_time::build_time_utc;
 use reqwest::StatusCode;
 use tower::ServiceBuilder;
 use tower_http::{
@@ -12,6 +13,8 @@ use tower_http::{
     trace::{DefaultMakeSpan, DefaultOnRequest, TraceLayer},
 };
 use tracing::Level;
+
+const BUILD_TIME_CACHE_BUST: &str = build_time_utc!("%s");
 
 pub fn create_router() -> Router {
     Router::new()
@@ -32,30 +35,43 @@ pub fn create_router() -> Router {
         )
 }
 
-async fn contact() -> impl IntoResponse {
-    let template = ContactTemplate {};
-    HtmlTemplate(template)
-}
-
 #[derive(Template)]
 #[template(path = "contact.html")]
-struct ContactTemplate;
+struct ContactTemplate<'a> {
+    cache_bust: &'a str,
+}
 
-async fn projects() -> impl IntoResponse {
-    let template = ProjectsTemplate {};
+async fn contact() -> impl IntoResponse {
+    let template = ContactTemplate {
+        cache_bust: BUILD_TIME_CACHE_BUST,
+    };
+
     HtmlTemplate(template)
 }
 
 #[derive(Template)]
 #[template(path = "projects.html")]
-struct ProjectsTemplate;
+struct ProjectsTemplate<'a> {
+    cache_bust: &'a str,
+}
+
+async fn projects() -> impl IntoResponse {
+    let template = ProjectsTemplate {
+        cache_bust: BUILD_TIME_CACHE_BUST,
+    };
+    HtmlTemplate(template)
+}
 
 #[derive(Template)]
 #[template(path = "resume.html")]
-struct ResumeTemplate;
+struct ResumeTemplate<'a> {
+    cache_bust: &'a str,
+}
 
 async fn resume() -> impl IntoResponse {
-    let template = ResumeTemplate {};
+    let template = ResumeTemplate {
+        cache_bust: BUILD_TIME_CACHE_BUST,
+    };
     HtmlTemplate(template)
 }
 

@@ -50,6 +50,7 @@ where
                 Response::builder()
                     .header(header::CONTENT_TYPE, mime.as_ref())
                     .header(header::LAST_MODIFIED, BUILD_TIME)
+                    .header(header::CACHE_CONTROL, "max-age=86400")
                     .body(Body::from(content.data))
                     .unwrap()
             }
