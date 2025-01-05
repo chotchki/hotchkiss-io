@@ -1,3 +1,15 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+    @font-face {
+        font-family: 'Oswald';
+        src: url(/vendor/fonts/Oswald-Regular.woff2) format('woff2');
+    }
+
+    @font-face {
+        font-family: 'Quattrocento';
+        src: url(/vendor/fonts/Quattrocento-Regular.woff2) format('woff2');
+    }
+}

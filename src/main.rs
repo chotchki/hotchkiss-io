@@ -29,7 +29,9 @@ async fn main() -> anyhow::Result<()> {
         format!("Failed to parse settings file to settings struct content:{config}")
     })?;
 
-    let app_filter = filter::Targets::new().with_target("hotchkiss_io", Level::DEBUG);
+    let app_filter = filter::Targets::new()
+        .with_target("hotchkiss_io", Level::DEBUG)
+        .with_target("hotchkiss_io::web::static_content", Level::INFO);
     let access_filter = filter::Targets::new().with_target("tower_http", Level::DEBUG);
 
     let app_rolling =
