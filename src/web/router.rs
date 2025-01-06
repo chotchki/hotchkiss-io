@@ -14,7 +14,7 @@ use tower_http::{
 };
 use tracing::Level;
 
-const BUILD_TIME_CACHE_BUST: &str = build_time_utc!("%s");
+pub const BUILD_TIME_CACHE_BUST: &str = build_time_utc!("%s");
 
 pub fn create_router() -> Router {
     Router::new()
@@ -35,15 +35,22 @@ pub fn create_router() -> Router {
         )
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum NavSetting {
+    Contact,
+    Projects,
+    Resume,
+}
+
 #[derive(Template)]
 #[template(path = "contact.html")]
-struct ContactTemplate<'a> {
-    cache_bust: &'a str,
+struct ContactTemplate {
+    nav: NavSetting,
 }
 
 async fn contact() -> impl IntoResponse {
     let template = ContactTemplate {
-        cache_bust: BUILD_TIME_CACHE_BUST,
+        nav: NavSetting::Contact,
     };
 
     HtmlTemplate(template)
@@ -51,26 +58,26 @@ async fn contact() -> impl IntoResponse {
 
 #[derive(Template)]
 #[template(path = "projects.html")]
-struct ProjectsTemplate<'a> {
-    cache_bust: &'a str,
+struct ProjectsTemplate {
+    nav: NavSetting,
 }
 
 async fn projects() -> impl IntoResponse {
     let template = ProjectsTemplate {
-        cache_bust: BUILD_TIME_CACHE_BUST,
+        nav: NavSetting::Projects,
     };
     HtmlTemplate(template)
 }
 
 #[derive(Template)]
 #[template(path = "resume.html")]
-struct ResumeTemplate<'a> {
-    cache_bust: &'a str,
+struct ResumeTemplate {
+    nav: NavSetting,
 }
 
 async fn resume() -> impl IntoResponse {
     let template = ResumeTemplate {
-        cache_bust: BUILD_TIME_CACHE_BUST,
+        nav: NavSetting::Resume,
     };
     HtmlTemplate(template)
 }

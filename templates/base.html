@@ -3,8 +3,8 @@
 
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="/styles/main.css?cb={{cache_bust}}" rel="stylesheet" />
-    <link href="/images/favicon.ico?cb={{cache_bust}}" rel="shortcut icon" />
+    <link href="/styles/main.css?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" rel="stylesheet" />
+    <link href="/images/favicon.ico?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" rel="shortcut icon" />
 
     <title>{% block title %}{{ title }}{% endblock %}</title>
 
@@ -16,7 +16,7 @@
     <div class="flex flex-col justify-center items-center">
         <!-- Jumbotron image -->
         <div class="mb-2 py-4 max-w-lg flex flex-row items-end">
-            <img class="size-40 m-2 rounded-full border-8 border-navy" src="/images/Photo.jpeg?cb={{cache_bust}}" />
+            <img class="size-40 m-2 rounded-full border-8 border-navy" src="/images/Photo.jpeg?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" />
             <div class="mb-2">
                 <h1 class="font-display text-xl text-navy uppercase underline underline-offset-8 decoration-yellow">
                     Christopher Hotchkiss
@@ -30,13 +30,22 @@
             <!-- Navigation -->
             <div class="max-w-screen-md pl-2">
                 <ul class="list-none flex flex-row">
-                    <li><a class="bg-navy py-1 px-8 min-w-40 rounded-t font-display text-center text-sm underline decoration-2 underline-offset-8 text-yellow uppercase"
-                            href="/projects">Projects</a></li>
-                    <li><a class="bg-navy py-1 px-8 min-w-40 rounded-t font-display text-center text-sm text-div-grey uppercase"
-                            href="/resume">Resume</a>
-                    </li>
-                    <li><a class="bg-navy py-1 px-8 min-w-40 rounded-t font-display text-center text-sm text-div-grey uppercase"
-                            href="/contact">Contact</a></li>
+                    {% let regular_link = "bg-navy py-1 px-8 min-w-40 rounded-t font-display text-center text-sm text-div-grey uppercase" %}
+                    {% let active_link = "bg-navy py-1 px-8 min-w-40 rounded-t font-display text-center text-sm underline decoration-2 underline-offset-8 text-yellow uppercase" %}
+                    {% match nav %}
+                    {% when NavSetting::Projects %}
+                    <li><a class="{{active_link}}" href="/projects">Projects</a></li>
+                    <li><a class="{{regular_link}}" href="/resume">Resume</a></li>
+                    <li><a class="{{regular_link}}" href="/contact">Contact</a></li>
+                    {% when NavSetting::Resume %}
+                    <li><a class="{{regular_link}}" href="/projects">Projects</a></li>
+                    <li><a class="{{active_link}}" href="/resume">Resume</a></li>
+                    <li><a class="{{regular_link}}" href="/contact">Contact</a></li>
+                    {% when NavSetting::Contact %}
+                    <li><a class="{{regular_link}}" href="/projects">Projects</a></li>
+                    <li><a class="{{regular_link}}" href="/resume">Resume</a></li>
+                    <li><a class="{{active_link}}" href="/contact">Contact</a></li>
+                    {% endmatch %}
                 </ul>
             </div>
 
@@ -52,7 +61,7 @@
                 not
                 any employer.
             </div>
-            <img class="size-24" src="/images/HotchkissLogo.svg?cb={{cache_bust}}" />
+            <img class="size-24" src="/images/HotchkissLogo.svg?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" />
         </footer>
     </div>
 </body>
