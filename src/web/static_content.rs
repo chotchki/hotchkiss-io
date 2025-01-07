@@ -13,10 +13,10 @@ const BUILD_TIME: &str = build_time_utc!("%a, %d %b %Y %H:%M:%S GMT");
 pub fn static_content() -> Router {
     Router::new()
         //.route("/favicon.ico", get(static_handler))
-        .route("/images/*file", get(static_handler))
+        .route("/images/{*file}", get(static_handler))
         .route("/robots.txt", get(static_handler))
-        .route("/styles/*file", get(static_handler))
-        .route("/vendor/*file", get(static_handler))
+        .route("/styles/{*file}", get(static_handler))
+        .route("/vendor/{*file}", get(static_handler))
 }
 
 async fn static_handler(uri: Uri) -> impl IntoResponse {

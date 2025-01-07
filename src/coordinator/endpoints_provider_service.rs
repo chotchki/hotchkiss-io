@@ -1,12 +1,12 @@
 use crate::web::router::create_router;
 use anyhow::Result;
 use axum::{
-    extract::Host,
     handler::HandlerWithoutStateExt,
     http::{uri::Authority, Uri},
     response::Redirect,
     BoxError,
 };
+use axum_extra::extract::Host;
 use axum_server::tls_rustls::RustlsConfig;
 use reqwest::StatusCode;
 use sqlx::SqlitePool;
