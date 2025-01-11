@@ -40,7 +40,7 @@ impl ServiceCoordinator {
             settings.cloudflare_token,
             settings.domain,
         )?;
-        let endpoints_provider_service = EndpointsProviderService::create(pool.clone())?;
+        let endpoints_provider_service = EndpointsProviderService::create(pool.clone()).await?;
 
         Ok(Self {
             pool,

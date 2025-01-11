@@ -12,17 +12,26 @@ use reqwest::StatusCode;
 use sqlx::SqlitePool;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::sync::broadcast::Receiver;
+use tower_sessions::ExpiredDeletion;
+use tower_sessions_sqlx_store::SqliteStore;
 
 pub const HTTP_PORT: u16 = 80;
 pub const HTTPS_PORT: u16 = 443;
 
 pub struct EndpointsProviderService {
     pool: SqlitePool,
+    session_store: SqliteStore,
 }
 
 impl EndpointsProviderService {
-    pub fn create(pool: SqlitePool) -> Result<Self> {
-        Ok(Self { pool })
+    pub async fn create(pool: SqlitePool) -> Result<Self> {
+        let session_store = SqliteStore::new(pool.clone());
+        session_store.migrate().await?;
+
+        Ok(Self {
+            pool,
+            session_store,
+        })
     }
 
     pub async fn start(&self, mut tls_config_reciever: Receiver<RustlsConfig>) -> Result<()> {
@@ -32,15 +41,25 @@ impl EndpointsProviderService {
         let https_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), HTTPS_PORT);
 
         let http = tokio::spawn(Self::http_server(http_addr));
-        let https = tokio::spawn(Self::https_server(https_addr, config));
+        let https = tokio::spawn(Self::https_server(
+            https_addr,
+            self.session_store.clone(),
+            config,
+        ));
+
+        let deletion_task = tokio::task::spawn(
+            self.session_store
+                .clone()
+                .continuously_delete_expired(tokio::time::Duration::from_secs(60)),
+        );
 
         // Ignore errors.
-        let _ = tokio::join!(http, https);
+        let _ = tokio::try_join!(http, https, deletion_task);
 
         Ok(())
     }
 
-    async fn http_server(addr: SocketAddr) {
+    async fn http_server(addr: SocketAddr) -> Result<()> {
         tracing::info!("HTTP Server listening on {}", addr);
 
         let redirect = move |Host(host): Host, uri: Uri| async move {
@@ -55,17 +74,23 @@ impl EndpointsProviderService {
 
         axum_server::bind(addr)
             .serve(redirect.into_make_service())
-            .await
-            .unwrap();
+            .await?;
+
+        Ok(())
     }
 
-    async fn https_server(addr: SocketAddr, config: RustlsConfig) {
+    async fn https_server(
+        addr: SocketAddr,
+        session_store: SqliteStore,
+        config: RustlsConfig,
+    ) -> Result<()> {
         tracing::info!("HTTPS Server listening on {}", addr);
 
         axum_server::bind_rustls(addr, config)
-            .serve(create_router().into_make_service())
-            .await
-            .unwrap();
+            .serve(create_router(session_store).await?.into_make_service())
+            .await?;
+
+        Ok(())
     }
 }
 

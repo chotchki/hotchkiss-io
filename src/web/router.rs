@@ -1,4 +1,5 @@
 use super::static_content::static_content;
+use anyhow::Result;
 use askama::Template;
 use axum::{
     response::{Html, IntoResponse, Response},
@@ -7,17 +8,33 @@ use axum::{
 };
 use build_time::build_time_utc;
 use reqwest::StatusCode;
+use sqlx::SqlitePool;
+use time::Duration;
 use tower::ServiceBuilder;
 use tower_http::{
     compression::CompressionLayer,
     trace::{DefaultMakeSpan, DefaultOnRequest, TraceLayer},
 };
+use tower_sessions::{
+    cookie::Key,
+    session_store::{self, ExpiredDeletion},
+    Expiry, SessionManagerLayer,
+};
+use tower_sessions_sqlx_store::SqliteStore;
 use tracing::Level;
 
 pub const BUILD_TIME_CACHE_BUST: &str = build_time_utc!("%s");
 
-pub fn create_router() -> Router {
-    Router::new()
+pub async fn create_router(session_store: SqliteStore) -> Result<Router> {
+    // Generate a cryptographic key to sign the session cookie.
+    let key = Key::generate();
+
+    let session_layer = SessionManagerLayer::new(session_store)
+        .with_secure(true)
+        .with_expiry(Expiry::OnInactivity(Duration::days(1)))
+        .with_signed(key);
+
+    Ok(Router::new()
         .route("/", get(projects))
         .route("/contact", get(contact))
         .route("/projects", get(projects))
@@ -32,7 +49,7 @@ pub fn create_router() -> Router {
                         .on_response(()),
                 )
                 .layer(CompressionLayer::new()),
-        )
+        ))
 }
 
 #[derive(Clone, Copy, Debug)]

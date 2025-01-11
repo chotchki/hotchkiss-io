@@ -20,6 +20,7 @@ async fn main() -> Result<()> {
     let schema_url = "sqlite://".to_string() + &out_dir + "/schema.db";
 
     env::set_var(schema_key, schema_url.clone());
+    println!("cargo::rustc-env={schema_key}={schema_url}");
 
     //Run a migration for sqlx so it can compile queries
     let con_opts = SqliteConnectOptions::from_str(&schema_url)
