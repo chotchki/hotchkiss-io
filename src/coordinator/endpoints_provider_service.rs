@@ -1,5 +1,5 @@
-use crate::web::router::create_router;
-use anyhow::Result;
+use crate::{settings::Settings, web::router::create_router};
+use anyhow::{Context, Result};
 use axum::{
     handler::HandlerWithoutStateExt,
     http::{uri::Authority, Uri},
@@ -14,6 +14,8 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::sync::broadcast::Receiver;
 use tower_sessions::ExpiredDeletion;
 use tower_sessions_sqlx_store::SqliteStore;
+use url::Url;
+use webauthn_rs::{Webauthn, WebauthnBuilder};
 
 pub const HTTP_PORT: u16 = 80;
 pub const HTTPS_PORT: u16 = 443;
@@ -21,16 +23,23 @@ pub const HTTPS_PORT: u16 = 443;
 pub struct EndpointsProviderService {
     pool: SqlitePool,
     session_store: SqliteStore,
+    webauthn: Webauthn,
 }
 
 impl EndpointsProviderService {
-    pub async fn create(pool: SqlitePool) -> Result<Self> {
+    pub async fn create(settings: Settings, pool: SqlitePool) -> Result<Self> {
         let session_store = SqliteStore::new(pool.clone());
         session_store.migrate().await?;
+
+        let origin = Url::parse(&format!("https://{}/", settings.domain))
+            .context("Parsing the rp_origin")?;
+
+        let webauthn = WebauthnBuilder::new(&settings.domain, &origin)?.build()?;
 
         Ok(Self {
             pool,
             session_store,
+            webauthn,
         })
     }
 

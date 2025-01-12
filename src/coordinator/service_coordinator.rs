@@ -37,10 +37,11 @@ impl ServiceCoordinator {
         let acme_provider_service = AcmeProviderService::create(
             pool.clone(),
             resolver.clone(),
-            settings.cloudflare_token,
-            settings.domain,
+            settings.cloudflare_token.clone(),
+            settings.domain.clone(),
         )?;
-        let endpoints_provider_service = EndpointsProviderService::create(pool.clone()).await?;
+        let endpoints_provider_service =
+            EndpointsProviderService::create(settings, pool.clone()).await?;
 
         Ok(Self {
             pool,

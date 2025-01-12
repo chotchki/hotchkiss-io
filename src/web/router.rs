@@ -1,5 +1,5 @@
 use super::{
-    features::{contact::contact, projects::projects, resume::resume},
+    features::{contact::contact, login::loginPage, projects::projects, resume::resume},
     static_content::static_content,
 };
 use anyhow::Result;
@@ -29,6 +29,7 @@ pub async fn create_router(session_store: SqliteStore) -> Result<Router> {
     Ok(Router::new()
         .route("/", get(projects))
         .route("/contact", get(contact))
+        .route("/login", get(loginPage))
         .route("/projects", get(projects))
         .route("/resume", get(resume))
         .merge(static_content())
