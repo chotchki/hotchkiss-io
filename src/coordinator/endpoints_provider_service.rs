@@ -1,4 +1,7 @@
-use crate::{settings::Settings, web::router::create_router};
+use crate::{
+    settings::Settings,
+    web::{app_state::AppState, router::create_router},
+};
 use anyhow::{Context, Result};
 use axum::{
     handler::HandlerWithoutStateExt,
@@ -46,15 +49,17 @@ impl EndpointsProviderService {
     pub async fn start(&self, mut tls_config_reciever: Receiver<RustlsConfig>) -> Result<()> {
         let config = tls_config_reciever.recv().await?;
 
+        let app_state = AppState {
+            session_store: self.session_store.clone(),
+            pool: self.pool.clone(),
+            webauthn: self.webauthn.clone(),
+        };
+
         let http_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), HTTP_PORT);
         let https_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), HTTPS_PORT);
 
         let http = tokio::spawn(Self::http_server(http_addr));
-        let https = tokio::spawn(Self::https_server(
-            https_addr,
-            self.session_store.clone(),
-            config,
-        ));
+        let https = tokio::spawn(Self::https_server(https_addr, app_state, config));
 
         let deletion_task = tokio::task::spawn(
             self.session_store
@@ -90,13 +95,13 @@ impl EndpointsProviderService {
 
     async fn https_server(
         addr: SocketAddr,
-        session_store: SqliteStore,
+        app_state: AppState,
         config: RustlsConfig,
     ) -> Result<()> {
         tracing::info!("HTTPS Server listening on {}", addr);
 
         axum_server::bind_rustls(addr, config)
-            .serve(create_router(session_store).await?.into_make_service())
+            .serve(create_router(app_state).await?.into_make_service())
             .await?;
 
         Ok(())

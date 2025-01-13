@@ -1,5 +1,5 @@
 htmx.defineExtension('webauthn-autofill', {
-    onEvent: function (name, evt) {
+    init: function (api) {
         console.log("Fired Webauthn Autofill check");
         (async () => {
             if (
@@ -12,18 +12,23 @@ htmx.defineExtension('webauthn-autofill', {
                     try {
                         // Retrieve authentication options for `navigator.credentials.get()`
                         // from your server.
-                        const authOptions = await getAuthenticationOptions();
-                        // This call to `navigator.credentials.get()` is "set and forget."
-                        // The Promise will only resolve if the user successfully interacts
-                        // with the browser's autofill UI to select a passkey.
-                        const webAuthnResponse = await navigator.credentials.get({
-                            mediation: "conditional",
-                            publicKey: {
-                                ...authOptions,
-                                // see note about userVerification below
-                                userVerification: "preferred",
-                            }
-                        });
+                        const response = await fetch("/login/getAuthOptions");
+                        if (!response.ok) {
+                            throw new Error('Response from auth options: ${response.status}');
+                        }
+
+                        let authOptions = await response.json();
+                        authOptions["mediation"] = "conditional";
+                        if (typeof window.PublicKeyCredential.parseCreationOptionsFromJSON === 'function') {
+                            authOptions = PublicKeyCredential.parseCreationOptionsFromJSON(authOptions);
+                        } else {
+                            //Due to a Safari bug, hand create our authOptions object
+                            //note we're using a fromBase64 function is not availible in Chrome yet so fingers crossed
+                            authOptions["publicKey"]["challenge"] = Uint8Array.fromBase64(authOptions["publicKey"]["challenge"], { alphabet: 'base64url' });
+                        }
+
+                        const webAuthnResponse = await navigator.credentials.get(authOptions);
+
                         // Send the response to your server for verification and
                         // authenticate the user if the response is valid.
                         await verifyAutoFillResponse(webAuthnResponse);
@@ -34,4 +39,14 @@ htmx.defineExtension('webauthn-autofill', {
             }
         })();
     }
-})
+});
+
+htmx.defineExtension('webauthn-register', {
+    onEvent: function (name, evt) {
+        if (name !== "htmx:beforeRequest") {
+            return;
+        }
+        console.log("Fired Webauthn Register");
+
+    }
+});

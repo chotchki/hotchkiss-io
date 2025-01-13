@@ -11,6 +11,7 @@ use std::{env, process::Command};
 #[tokio::main]
 async fn main() -> Result<()> {
     // TailwindCSS and Sqlx Migrations Change Tracking
+    println!("cargo::rerun-if-changed=assets/scripts");
     println!("cargo::rerun-if-changed=templates");
     println!("cargo::rerun-if-changed=migrations");
 

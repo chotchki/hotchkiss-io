@@ -46,7 +46,6 @@ impl AcmeProviderService {
         token: String,
         domain: String,
     ) -> Result<Self> {
-        debug!("Starting acme for domain {}", domain);
         let handle = Arc::new(Handle::current());
         Ok(Self {
             handle: handle.clone(),
@@ -58,6 +57,7 @@ impl AcmeProviderService {
     }
 
     pub async fn start(&self, tls_config_sender: Sender<RustlsConfig>) -> Result<()> {
+        debug!("Starting acme for domain {}", self.domain);
         let acme_cert = self.get_certificate().await?;
 
         let mut rustls_certs: Vec<CertificateDer<'static>> = vec![];
@@ -96,13 +96,16 @@ impl AcmeProviderService {
 
     #[instrument]
     pub async fn get_certificate(&self) -> Result<Certificate> {
+        debug!("Creating directory");
         let dir = Directory::from_url(self.persist.clone(), BASE_URL.clone())?;
 
+        debug!("Looking up account");
         let acc = self
             .handle
             .spawn_blocking(move || dir.account(CERT_EMAIL))
             .await??;
 
+        debug!("Accessing pre-existing cert");
         let acc2 = acc.clone();
         let domain2 = self.domain.clone();
         let maybe_cert = self
@@ -112,10 +115,12 @@ impl AcmeProviderService {
 
         if let Some(cert) = maybe_cert {
             if cert.valid_days_left() > 30 {
+                debug!("Certificate is valid for more than 30 days");
                 return Ok(cert);
             }
         }
 
+        debug!("Ordering new certificate");
         let acc3 = acc.clone();
         let domain3 = self.domain.clone();
         let mut ord_new = self
@@ -155,11 +160,13 @@ impl AcmeProviderService {
         let pkey_pri = create_p256_key();
         let ord_cert = ord_csr.finalize_pkey(pkey_pri, 5000)?;
 
+        debug!("Downloading new ceritifcate");
         let cert = self
             .handle
             .spawn_blocking(move || ord_cert.download_and_save_cert())
             .await??;
 
+        debug!("Certificate is good");
         Ok(cert)
     }
 

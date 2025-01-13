@@ -1,5 +1,3 @@
-use std::backtrace::Backtrace;
-
 use super::acme_provider_service::AcmeProviderService;
 use super::dns_provider_service::DnsProviderService;
 use super::endpoints_provider_service::EndpointsProviderService;
@@ -9,14 +7,11 @@ use crate::{
 };
 /// The goal of the coordinator is to start up the various dependancies of the server AND
 /// be able to reconfigure it automatically at runtime.
-use anyhow::Result;
+use anyhow::{Context, Result};
 use hickory_resolver::TokioAsyncResolver;
-use sqlx::{Pool, Sqlite};
 use tokio::sync::broadcast;
 
 pub struct ServiceCoordinator {
-    pool: Pool<Sqlite>,
-    resolver: TokioAsyncResolver,
     ip_provider_service: IpProviderService,
     dns_provider_service: DnsProviderService,
     acme_provider_service: AcmeProviderService,
@@ -44,8 +39,6 @@ impl ServiceCoordinator {
             EndpointsProviderService::create(settings, pool.clone()).await?;
 
         Ok(Self {
-            pool,
-            resolver,
             //installation_status_service,
             ip_provider_service,
             //dns_server_service,
@@ -56,38 +49,21 @@ impl ServiceCoordinator {
         })
     }
 
-    pub async fn start(&mut self) -> Result<()> {
+    pub async fn start(self) -> Result<()> {
         let (ip_provider_sender, ip_provider_reciever) = broadcast::channel(1);
         let (tls_config_sender, tls_config_reciever) = broadcast::channel(1);
 
-        //let (https_ready_sender, https_ready_reciever) = broadcast::channel(1);
-
-        tokio::select! {
-            r = self.ip_provider_service.start(ip_provider_sender) => {
-                match r {
-                    Ok(()) => tracing::debug!("IP Provider exited."),
-                    Err(e) => tracing::error!("IP Provider had an error |{}|{}", e, Backtrace::capture())
-                }
-            }
-            r = self.dns_provider_service.start(ip_provider_reciever) => {
-                 match r {
-                     Ok(()) => tracing::debug!("Cloudflare A/AAAA record service exited."),
-                     Err(e) => tracing::error!("Cloudflare A/AAAA had an error |{}|{}", e, Backtrace::capture())
-                 }
-            }
-            r = self.acme_provider_service.start(tls_config_sender) => {
-                 match r {
-                     Ok(()) => tracing::debug!("Acme Service exited."),
-                     Err(e) => tracing::error!("Acme Service had an error |{}|{}", e, Backtrace::capture())
-                 }
-            }
-            r = self.endpoints_provider_service.start(tls_config_reciever) => {
-                 match r {
-                     Ok(()) => tracing::debug!("Endpoints exited."),
-                     Err(e) => tracing::error!("Endpoints had an error |{}|{}", e, Backtrace::capture())
-                 }
-            }
-        }
+        let ips = self.ip_provider_service;
+        let dps = self.dns_provider_service;
+        let aps = self.acme_provider_service;
+        let eps = self.endpoints_provider_service;
+        let _ = tokio::try_join!(
+            tokio::spawn(async move { ips.start(ip_provider_sender).await }),
+            tokio::spawn(async move { dps.start(ip_provider_reciever).await }),
+            tokio::spawn(async move { aps.start(tls_config_sender).await }),
+            tokio::spawn(async move { eps.start(tls_config_reciever).await })
+        )
+        .context("A subservice failed")?;
 
         Ok(())
     }

@@ -2,10 +2,15 @@
 
 {% block title %}Login{% endblock %}
 
+{% block head %}
+<script src="/scripts/htmx-webauthn.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+{% endblock %}
+
 {% block content %}
 <h1>Login / Register</h1>
-<div>
+<form hx-ext="webauthn-autofill,webauthn-register" hx-webauthn-autofill>
     <label for="username">Username:</label>
-    <input name="username" id="loginform.username" autocomplete="username webauthn">
-</div>
+    <input name="username" id="username" autocomplete="username webauthn">
+    <button type="button" hx-post="/login/register" hx-webauthn-register>Register using Passkey</button>
+</form>
 {% endblock %}

@@ -27,7 +27,7 @@ impl IpProviderService {
     /// This schedules a task to periodically wake up and see
     /// if the IP addresses for the machine have changed, if so
     /// they are broadcoast
-    pub async fn start(&mut self, ip_changed: Sender<HashSet<IpAddr>>) -> Result<()> {
+    pub async fn start(&self, ip_changed: Sender<HashSet<IpAddr>>) -> Result<()> {
         let mut duration = interval(Duration::from_millis(60 * 60 * 1000));
         duration.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -55,7 +55,7 @@ impl IpProviderService {
         }
     }
 
-    async fn server_ips(&mut self) -> Result<HashSet<IpAddr>> {
+    async fn server_ips(&self) -> Result<HashSet<IpAddr>> {
         let current_ip = if cfg!(debug_assertions) {
             IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
         } else {
