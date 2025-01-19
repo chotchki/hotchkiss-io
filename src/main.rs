@@ -2,7 +2,7 @@
 use anyhow::Context;
 use coordinator::service_coordinator::ServiceCoordinator;
 use rustls::crypto::ring;
-use std::{env, fs, io};
+use std::{env, fs, io, sync::Arc};
 use tracing::{info, Level};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{filter, fmt, layer::SubscriberExt, util::SubscriberInitExt, Layer};
@@ -25,9 +25,9 @@ async fn main() -> anyhow::Result<()> {
         args.first()
             .with_context(|| format!("First argument must be the config file, got {args:?}"))?,
     )?;
-    let settings: Settings = serde_json::from_str(&config).with_context(|| {
+    let settings: Arc<Settings> = Arc::new(serde_json::from_str(&config).with_context(|| {
         format!("Failed to parse settings file to settings struct content:{config}")
-    })?;
+    })?);
 
     let app_filter = filter::Targets::new()
         .with_target("hotchkiss_io", Level::DEBUG)

@@ -1,16 +1,11 @@
-use std::time::Duration;
-
 use anyhow::{bail, Result};
-use hickory_resolver::{
-    proto::rr::{RData, RecordType},
-    TokioAsyncResolver,
-};
 use instant_acme::{
     Account, AuthorizationStatus, ChallengeType, Identifier, LetsEncrypt, NewAccount, NewOrder,
     OrderStatus,
 };
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use sqlx::SqlitePool;
+use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, error, info};
 
@@ -79,14 +74,15 @@ impl InstantAcmeDomain {
         }
     }
 
-    pub async fn order_cert(
-        &self,
-        domain: String,
-        resolver: &TokioAsyncResolver,
-    ) -> Result<(String, String)> {
-        info!("Ordering a new certificate for {domain}");
+    pub async fn order_cert(&self) -> Result<(String, String)> {
+        info!("Ordering a new certificate for {}", self.domain);
 
-        let identifier = Identifier::Dns(domain);
+        debug!("Clearing old proofs");
+        self.client
+            .clean_proof(&Self::create_proof_domain(&self.domain))
+            .await?;
+
+        let identifier = Identifier::Dns(self.domain.clone());
 
         debug!("Creating a new order");
         let mut order = self
@@ -116,11 +112,10 @@ impl InstantAcmeDomain {
 
             debug!("Setting dns proof");
             self.client
-                .create_proof(&Self::create_proof_domain(&self.domain), &challenge.token)
-                .await?;
-
-            debug!("Waiting for dns propogation");
-            self.wait_for_propogation(&challenge.token, resolver)
+                .create_proof(
+                    &Self::create_proof_domain(&self.domain),
+                    &order.key_authorization(challenge).dns_value(),
+                )
                 .await?;
 
             challenges.push((identifier, &challenge.url));
@@ -173,53 +168,6 @@ impl InstantAcmeDomain {
         };
 
         Ok((cert_chain_pem, private_key.serialize_pem()))
-    }
-
-    async fn wait_for_propogation(
-        &self,
-        challenge: &str,
-        resolver: &TokioAsyncResolver,
-    ) -> Result<()> {
-        let domain_proof_str = Self::create_proof_domain(&self.domain);
-        let box_challenge: Box<[u8]> = challenge.as_bytes().into();
-
-        debug!("Looking for {challenge} on {domain_proof_str}");
-
-        loop {
-            resolver.clear_cache(); //We're getting old values!
-
-            let proof_value = match resolver
-                .lookup(domain_proof_str.clone() + ".", RecordType::TXT)
-                .await
-            {
-                Ok(l) => l
-                    .into_iter()
-                    .filter_map(|r| match r {
-                        RData::TXT(t) => Some(t),
-                        _ => None,
-                    })
-                    .flat_map(|x| {
-                        debug!("Found txt {x}");
-                        x.txt_data().to_owned()
-                    })
-                    .any(|x| x == box_challenge),
-                Err(e) => {
-                    debug!("Resolver Error looking for proof of {}", e);
-                    false
-                }
-            };
-
-            if proof_value {
-                return Ok(());
-            }
-
-            sleep(Duration::from_secs(60)).await;
-            tracing::debug!(
-                "Domain {} with value {} not found",
-                domain_proof_str,
-                challenge
-            );
-        }
     }
 
     fn create_proof_domain(domain: &str) -> String {

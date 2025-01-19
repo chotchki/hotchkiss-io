@@ -2,10 +2,10 @@ use super::dns::cloudflare_client::CloudflareClient;
 use crate::{
     coordinator::acme::{certificate_loader::CertificateLoader, instant_acme::InstantAcmeDomain},
     db::dao::certificate::{self, CertificateDao},
+    settings::Settings,
 };
 use anyhow::Result;
 use axum_server::tls_rustls::RustlsConfig;
-use hickory_resolver::TokioAsyncResolver;
 use rustls::ServerConfig;
 use sqlx::SqlitePool;
 use std::{sync::Arc, time::Duration};
@@ -16,25 +16,30 @@ const CERT_REFRESH: Duration = Duration::new(6 * 60 * 60, 0);
 
 #[derive(Debug)]
 pub struct AcmeProviderService {
+    settings: Arc<Settings>,
     pool: SqlitePool,
-    domain: String,
+    client: CloudflareClient,
 }
 
 impl AcmeProviderService {
-    pub fn create(pool: SqlitePool, domain: String) -> Result<Self> {
-        Ok(Self { pool, domain })
+    pub fn create(
+        settings: Arc<Settings>,
+        pool: SqlitePool,
+        client: CloudflareClient,
+    ) -> Result<Self> {
+        Ok(Self {
+            settings,
+            pool,
+            client,
+        })
     }
 
-    pub async fn start(
-        &self,
-        tls_config_sender: Sender<RustlsConfig>,
-        token: String,
-        resolver: TokioAsyncResolver,
-    ) -> Result<()> {
+    pub async fn start(&self, tls_config_sender: Sender<RustlsConfig>) -> Result<()> {
         let mut current_certificate: Option<CertificateLoader> = None;
         loop {
             info!("Loading certificates");
-            let new_cert = CertificateLoader::maybe_load(&self.pool, self.domain.clone()).await?;
+            let new_cert =
+                CertificateLoader::maybe_load(&self.pool, self.settings.domain.clone()).await?;
             if current_certificate == new_cert && current_certificate.is_some() {
                 debug!("No certificate change, sleeping");
                 sleep(CERT_REFRESH).await;
@@ -60,24 +65,24 @@ impl AcmeProviderService {
                 //Sleeping to await the next refresh
                 sleep(CERT_REFRESH).await;
             } else {
-                info!("Ordering a certificate for  {}", self.domain);
-                let client = CloudflareClient::new(token.clone(), self.domain.clone())?;
+                info!("Ordering a certificate for  {}", self.settings.domain);
 
                 debug!("Getting account");
-                let instant_acme =
-                    InstantAcmeDomain::create_or_load(&self.pool, self.domain.clone(), client)
-                        .await?;
+                let instant_acme = InstantAcmeDomain::create_or_load(
+                    &self.pool,
+                    self.settings.domain.clone(),
+                    self.client.clone(),
+                )
+                .await?;
 
                 debug!("Submitting order");
-                let (cert_chain, private_key) = instant_acme
-                    .order_cert(self.domain.clone(), &resolver)
-                    .await?;
+                let (cert_chain, private_key) = instant_acme.order_cert().await?;
 
                 debug!("Saving new cert");
                 certificate::upsert(
                     &self.pool,
                     &CertificateDao {
-                        domain: self.domain.clone(),
+                        domain: self.settings.domain.clone(),
                         certificate_chain: cert_chain,
                         private_key,
                     },

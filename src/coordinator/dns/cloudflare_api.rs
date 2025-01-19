@@ -5,25 +5,28 @@ use reqwest::{Client, ClientBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::sync::LazyLock;
 use tracing::error;
 use url::Url;
 
+use crate::settings::Settings;
+
 static BASE_URL: LazyLock<Url> =
     LazyLock::new(|| Url::parse("https://api.cloudflare.com/client/v4/").unwrap());
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CloudflareApi {
-    token: String,
+    settings: Arc<Settings>,
     client: Client,
 }
 
 impl CloudflareApi {
-    pub fn new(token: String) -> Result<CloudflareApi> {
+    pub fn new(settings: Arc<Settings>) -> Result<CloudflareApi> {
         let builder = ClientBuilder::new().use_rustls_tls();
 
         Ok(CloudflareApi {
-            token,
+            settings,
             client: builder.build()?,
         })
     }
@@ -54,7 +57,7 @@ impl CloudflareApi {
         Self::transform_error(
             self.client
                 .post(url)
-                .bearer_auth(self.token.clone())
+                .bearer_auth(&self.settings.cloudflare_token)
                 .json(&content)
                 .send()
                 .await?,
@@ -75,13 +78,14 @@ impl CloudflareApi {
         let content = json!({
             "name": name,
             "content": format!("\"{}\"", value),
-            "type": "TXT"
+            "type": "TXT",
+            "ttl": 60
         });
 
         Self::transform_error(
             self.client
                 .post(url)
-                .bearer_auth(self.token.clone())
+                .bearer_auth(&self.settings.cloudflare_token)
                 .json(&content)
                 .send()
                 .await?,
@@ -97,7 +101,7 @@ impl CloudflareApi {
         Self::transform_error(
             self.client
                 .delete(url)
-                .bearer_auth(self.token.clone())
+                .bearer_auth(&self.settings.cloudflare_token)
                 .send()
                 .await?,
         )
@@ -117,7 +121,7 @@ impl CloudflareApi {
         let mut response = Self::transform_error(
             self.client
                 .get(url)
-                .bearer_auth(self.token.clone())
+                .bearer_auth(&self.settings.cloudflare_token)
                 .send()
                 .await?,
         )
@@ -144,7 +148,7 @@ impl CloudflareApi {
         let response = Self::transform_error(
             self.client
                 .get(url.clone())
-                .bearer_auth(self.token.clone())
+                .bearer_auth(&self.settings.cloudflare_token)
                 .send()
                 .await?,
         )

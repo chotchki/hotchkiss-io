@@ -13,7 +13,6 @@ use tracing::debug;
 
 #[derive(Debug)]
 pub struct IpProviderService {
-    //client: OmadaClient,
     client: IfconfigMe,
 }
 

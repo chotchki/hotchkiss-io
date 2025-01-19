@@ -13,7 +13,10 @@ use axum_extra::extract::Host;
 use axum_server::tls_rustls::RustlsConfig;
 use reqwest::StatusCode;
 use sqlx::SqlitePool;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::Arc,
+};
 use tokio::sync::broadcast::Receiver;
 use tower_sessions::ExpiredDeletion;
 use tower_sessions_sqlx_store::SqliteStore;
@@ -30,7 +33,7 @@ pub struct EndpointsProviderService {
 }
 
 impl EndpointsProviderService {
-    pub async fn create(settings: Settings, pool: SqlitePool) -> Result<Self> {
+    pub async fn create(settings: Arc<Settings>, pool: SqlitePool) -> Result<Self> {
         let session_store = SqliteStore::new(pool.clone());
         session_store.migrate().await?;
 
