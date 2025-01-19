@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub cloudflare_token: String,
     pub database_path: String,

@@ -2,8 +2,8 @@ use std::str::FromStr;
 
 use sqlx::{
     sqlite::{
-        SqliteConnectOptions, SqliteLockingMode::Exclusive, SqlitePoolOptions,
-        SqliteSynchronous::Normal,
+        SqliteConnectOptions, SqliteJournalMode::Wal, SqliteLockingMode::Normal, SqlitePoolOptions,
+        SqliteSynchronous,
     },
     Error, SqlitePool,
 };
@@ -17,9 +17,10 @@ impl DatabaseHandle {
         let con_opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path))?
             .create_if_missing(true)
             .foreign_keys(true)
-            .locking_mode(Exclusive)
+            .journal_mode(Wal)
+            .locking_mode(Normal)
             .shared_cache(true)
-            .synchronous(Normal);
+            .synchronous(SqliteSynchronous::Normal);
 
         let pool = pool_opts.connect_with(con_opts).await?;
 

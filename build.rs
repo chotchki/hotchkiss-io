@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
         .create_if_missing(true)
         .foreign_keys(true)
         .journal_mode(SqliteJournalMode::Wal)
-        .locking_mode(SqliteLockingMode::Exclusive)
+        .locking_mode(SqliteLockingMode::Normal)
         .shared_cache(true)
         .synchronous(SqliteSynchronous::Normal);
 

@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Hotchkiss IO Starting Up");
 
     //Build the coordinator
-    let mut coordinator = ServiceCoordinator::create(settings).await?;
+    let coordinator = ServiceCoordinator::create(settings).await?;
 
     info!("Starting up the coordinator");
     coordinator.start().await?; //This never returns

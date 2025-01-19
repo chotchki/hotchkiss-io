@@ -16,6 +16,8 @@ pub struct ServiceCoordinator {
     dns_provider_service: DnsProviderService,
     acme_provider_service: AcmeProviderService,
     endpoints_provider_service: EndpointsProviderService,
+    resolver: TokioAsyncResolver,
+    token: String,
 }
 
 impl ServiceCoordinator {
@@ -29,23 +31,18 @@ impl ServiceCoordinator {
             settings.cloudflare_token.clone(),
             settings.domain.clone(),
         )?;
-        let acme_provider_service = AcmeProviderService::create(
-            pool.clone(),
-            resolver.clone(),
-            settings.cloudflare_token.clone(),
-            settings.domain.clone(),
-        )?;
+        let acme_provider_service =
+            AcmeProviderService::create(pool.clone(), settings.domain.clone())?;
         let endpoints_provider_service =
-            EndpointsProviderService::create(settings, pool.clone()).await?;
+            EndpointsProviderService::create(settings.clone(), pool.clone()).await?;
 
         Ok(Self {
-            //installation_status_service,
             ip_provider_service,
-            //dns_server_service,
-            //install_endpoints,
             dns_provider_service,
             acme_provider_service,
             endpoints_provider_service,
+            resolver,
+            token: settings.cloudflare_token.clone(),
         })
     }
 
@@ -57,10 +54,12 @@ impl ServiceCoordinator {
         let dps = self.dns_provider_service;
         let aps = self.acme_provider_service;
         let eps = self.endpoints_provider_service;
+        let resolver = self.resolver.clone();
+        let token = self.token.clone();
         let _ = tokio::try_join!(
             tokio::spawn(async move { ips.start(ip_provider_sender).await }),
             tokio::spawn(async move { dps.start(ip_provider_reciever).await }),
-            tokio::spawn(async move { aps.start(tls_config_sender).await }),
+            tokio::spawn(async move { aps.start(tls_config_sender, token, resolver).await }),
             tokio::spawn(async move { eps.start(tls_config_reciever).await })
         )
         .context("A subservice failed")?;

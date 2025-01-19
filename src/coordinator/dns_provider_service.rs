@@ -1,7 +1,7 @@
 use super::dns::cloudflare_client::CloudflareClient;
 use anyhow::Result;
 use hickory_resolver::TokioAsyncResolver;
-use std::{collections::HashSet, net::IpAddr, thread::sleep, time::Duration};
+use std::{collections::HashSet, net::IpAddr};
 use tokio::sync::broadcast::Receiver;
 use tracing::{debug, info};
 
