@@ -28,7 +28,8 @@ impl DnsValidator {
         record_type: RecordType,
         mut values: Vec<RData>,
     ) -> Result<()> {
-        let timeout = Instant::now()
+        //TODO: The timeout loop fails in an awful way and I don't know why
+        let _timeout = Instant::now()
             .checked_add(TIMEOUT)
             .ok_or_else(|| anyhow!("Duration too long"))?;
 
@@ -91,7 +92,8 @@ impl DnsValidator {
     }
 
     pub async fn ensure_not_existing(&self, domain: &str, record_type: RecordType) -> Result<()> {
-        let timeout = Instant::now()
+        //TODO: The timeout loop fails in an awful way and I don't know why
+        let _timeout = Instant::now()
             .checked_add(TIMEOUT)
             .ok_or_else(|| anyhow!("Duration too long"))?;
 

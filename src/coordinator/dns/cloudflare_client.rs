@@ -119,7 +119,7 @@ impl CloudflareClient {
 
         self.dns_validator
             .ensure_exists(&self.settings.domain, RecordType::A, records)
-            .await;
+            .await?;
 
         Ok(())
     }
