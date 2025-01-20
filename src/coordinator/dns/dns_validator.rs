@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use hickory_resolver::{
     error::ResolveErrorKind,
     proto::rr::{RData, RecordType},
