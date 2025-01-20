@@ -1,7 +1,7 @@
 use super::roles::Roles;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use sqlx::{query, query_as, sqlite::SqliteRow, Error::ColumnDecode, FromRow, Row};
+use sqlx::{query, query_as, sqlite::SqliteRow, Error::ColumnDecode, FromRow, Row, SqlitePool};
 use std::str::FromStr;
 use uuid::Uuid;
 use webauthn_rs::prelude::Passkey;
@@ -34,12 +34,12 @@ impl FromRow<'_, SqliteRow> for User {
     }
 }
 
-pub async fn create(exec: impl sqlx::SqliteExecutor<'_>, user: &mut User) -> Result<()> {
+pub async fn create(pool: &SqlitePool, user: &mut User) -> Result<()> {
     let id = user.id.to_string();
     let keys = serde_json::to_string(&user.keys)?;
 
     //Handling the fist user
-    let rec = query(
+    let rec = query!(
         r#"
         insert into users (
             display_name,
@@ -57,24 +57,19 @@ pub async fn create(exec: impl sqlx::SqliteExecutor<'_>, user: &mut User) -> Res
         )
         RETURNING app_role
         "#,
+        user.display_name,
+        id,
+        keys
     )
-    .bind(user.display_name.clone())
-    .bind(id)
-    .bind(keys)
-    .fetch_one(exec)
+    .fetch_one(pool)
     .await?;
 
-    let real_role = rec.try_get(3)?;
-
-    user.role = Roles::from_str(real_role)?;
+    user.role = Roles::from_str(&rec.app_role)?;
 
     Ok(())
 }
 
-pub async fn find_by_passkey(
-    exec: impl sqlx::SqliteExecutor<'_>,
-    passkey: Passkey,
-) -> Result<Option<User>> {
+pub async fn find_by_passkey(pool: &SqlitePool, passkey: Passkey) -> Result<Option<User>> {
     Ok(query_as(
         r#"
         SELECT 
@@ -88,6 +83,6 @@ pub async fn find_by_passkey(
     "#,
     )
     .bind(serde_json::to_string(&passkey)?)
-    .fetch_optional(exec)
+    .fetch_optional(pool)
     .await?)
 }
