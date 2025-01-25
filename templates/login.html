@@ -7,10 +7,14 @@
 {% endblock %}
 
 {% block content %}
-<h1>Login / Register</h1>
-<form hx-ext="webauthn-autofill,webauthn-register" hx-webauthn-autofill>
-    <label for="username">Username:</label>
-    <input name="username" id="username" autocomplete="username webauthn">
-    <button type="button" hx-post="/login/register" hx-webauthn-register>Register using Passkey</button>
+<h1 class="text-xl">Login / Register</h1>
+<form class="rounded-md border-2 border-navy" hx-ext="webauthn-autofill,webauthn-register" hx-post="/login/register" hx-webauthn-autofill hx-webauthn-register>
+    <div class="p-2">
+        <label for="username">Username:</label>
+        <input name="username" id="username" autocomplete="username webauthn" type="text" required>
+    </div>
+    <div class="p-2">
+        <button type="submit">Fill in Username</button>
+    </div>
 </form>
 {% endblock %}

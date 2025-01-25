@@ -1,15 +1,21 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@source "templates";
 
-@layer base {
-    @font-face {
-        font-family: 'Oswald';
-        src: url(/vendor/fonts/Oswald-Regular.woff2) format('woff2');
-    }
+@theme {
+    --color-navy: #14213d;
+    --color-body-grey: #f5f5f5;
+    --color-div-grey: #e5e5e5;
+    --color-yellow: #ffc935;
+    --font-display: "Oswald", "ui-serif";
+    --font-content: "Quattrocento", "ui-serif";
+}
 
-    @font-face {
-        font-family: 'Quattrocento';
-        src: url(/vendor/fonts/Quattrocento-Regular.woff2) format('woff2');
-    }
+@font-face {
+    font-family: 'Oswald';
+    src: url(/vendor/fonts/Oswald-Regular.woff2) format('woff2');
+}
+
+@font-face {
+    font-family: 'Quattrocento';
+    src: url(/vendor/fonts/Quattrocento-Regular.woff2) format('woff2');
 }

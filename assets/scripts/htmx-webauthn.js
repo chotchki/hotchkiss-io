@@ -47,6 +47,17 @@ htmx.defineExtension('webauthn-register', {
             return;
         }
         console.log("Fired Webauthn Register");
+        evt.preventDefault();
+        (async () => {
+            if (!PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()) {
+                console.log("No platform authenticator availible!");
+                return;
+            }
 
+            const response = await fetch("/login/register/" + document.getElementById("username").value);
+            if (!response.ok) {
+                throw new Error('Response from auth options: ${response.status}');
+            }
+        })
     }
 });

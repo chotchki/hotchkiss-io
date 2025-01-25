@@ -2,7 +2,7 @@ use super::{
     app_state::AppState,
     features::{
         contact::contact,
-        login::{authenticationOptions, loginPage},
+        login::{authentication_options, login_page, start_registration},
         projects::projects,
         resume::resume,
     },
@@ -40,8 +40,9 @@ pub async fn create_router(app_state: AppState) -> Result<Router> {
     Ok(Router::new()
         .route("/", get(projects))
         .route("/contact", get(contact))
-        .route("/login", get(loginPage))
-        .route("/login/getAuthOptions", get(authenticationOptions))
+        .route("/login", get(login_page))
+        .route("/login/getAuthOptions", get(authentication_options))
+        .route("/login/register/{display_name}", get(start_registration))
         .route("/projects", get(projects))
         .route("/resume", get(resume))
         .with_state(app_state)

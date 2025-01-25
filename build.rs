@@ -5,8 +5,13 @@ use sqlx::sqlite::SqliteJournalMode;
 use sqlx::sqlite::SqliteLockingMode;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::sqlite::SqliteSynchronous;
+use std::fs::Permissions;
+use std::io::Cursor;
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::str::FromStr;
 use std::{env, process::Command};
+use tokio::fs::File;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -45,15 +50,24 @@ async fn main() -> Result<()> {
         .await
         .context("The build time migrations failed")?;
 
-    Command::new("npx")
-        .args([
-            "tailwindcss",
-            "-i",
-            "styles/tailwind.css",
-            "-o",
-            "assets/styles/main.css",
-        ])
+    //Get the tailwindcss cli
+    let cli_path = Path::new(&out_dir).join("tailwindcli");
+    if !cli_path.is_file() {
+        let response = reqwest::get("https://github.com/tailwindlabs/tailwindcss/releases/download/v4.0.0/tailwindcss-macos-arm64").await?;
+        let mut content = Cursor::new(response.bytes().await?);
+        let mut cli_file = File::create(cli_path.clone()).await?;
+        tokio::io::copy(&mut content, &mut cli_file).await?;
+        let meta = cli_file.metadata().await?;
+        let mut perms = meta.permissions();
+        perms.set_mode(0o755);
+        cli_file.set_permissions(perms).await?;
+    }
+
+    let output = Command::new(cli_path)
+        .args(["-i", "styles/tailwind.css", "-o", "assets/styles/main.css"])
         .output()?;
+
+    assert!(output.status.success());
 
     Ok(())
 }
