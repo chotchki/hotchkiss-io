@@ -1228,6 +1228,7 @@ dependencies = [
  "axum-server",
  "build-time",
  "hickory-resolver",
+ "http",
  "http-body-util",
  "instant-acme",
  "mime_guess",

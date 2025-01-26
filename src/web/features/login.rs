@@ -1,17 +1,4 @@
-use anyhow::{anyhow, Context};
-use askama::Template;
-use axum::{
-    extract::{Path, State},
-    response::{IntoResponse, Redirect},
-    Json,
-};
-use tower_sessions::Session;
-use uuid::Uuid;
-use webauthn_rs::prelude::{
-    CreationChallengeResponse, DiscoverableKey, PublicKeyCredential, RegisterPublicKeyCredential,
-    RequestChallengeResponse,
-};
-
+use crate::web::app_error::AppError;
 use crate::{
     db::dao::{
         roles::Role,
@@ -20,21 +7,44 @@ use crate::{
     web::{
         app_state::AppState,
         html_template::HtmlTemplate,
-        router::AppError,
         session::{AuthenticationState, SessionData},
     },
+};
+use anyhow::{anyhow, Context};
+use askama::Template;
+use axum::{
+    extract::{Path, State},
+    response::{IntoResponse, Redirect},
+    routing::{get, post},
+    Json, Router,
+};
+use tower_sessions::Session;
+use uuid::Uuid;
+use webauthn_rs::prelude::{
+    CreationChallengeResponse, DiscoverableKey, PublicKeyCredential, RegisterPublicKeyCredential,
+    RequestChallengeResponse,
 };
 
 use super::navigation_setting::NavSetting;
 
+pub fn login_router() -> Router<AppState> {
+    Router::new()
+        .route("/", get(login_page))
+        .route("/get_auth_opts", get(authentication_options))
+        .route("/finish_authentication", post(finish_authentication))
+        .route("/start_register", get(start_registration))
+        .route("/finish_register", post(finish_registration))
+        .route("/logout", get(logout))
+}
+
 #[derive(Template)]
 #[template(path = "login.html")]
-pub struct LoginTemplate {
+struct LoginTemplate {
     nav: NavSetting,
     auth_state: AuthenticationState,
 }
 
-pub async fn login_page(session_data: SessionData) -> impl IntoResponse {
+async fn login_page(session_data: SessionData) -> impl IntoResponse {
     let template = LoginTemplate {
         nav: NavSetting::Login,
         auth_state: session_data.auth_state,
@@ -43,7 +53,8 @@ pub async fn login_page(session_data: SessionData) -> impl IntoResponse {
     HtmlTemplate(template)
 }
 
-pub async fn authentication_options(
+#[axum::debug_handler]
+async fn authentication_options(
     State(state): State<AppState>,
     session: Session,
     mut session_data: SessionData,
@@ -54,13 +65,13 @@ pub async fn authentication_options(
     Ok(Json(challenge))
 }
 
-pub async fn finish_authentication(
+async fn finish_authentication(
     State(state): State<AppState>,
     session: Session,
     mut session_data: SessionData,
     Json(pkc): Json<PublicKeyCredential>,
 ) -> Result<Redirect, AppError> {
-    let (client_uuid, credential_id) = state.webauthn.identify_discoverable_authentication(&pkc)?;
+    let (client_uuid, _) = state.webauthn.identify_discoverable_authentication(&pkc)?;
 
     let mut user = find_by_uuid(&state.pool, &client_uuid)
         .await?
@@ -89,7 +100,7 @@ pub async fn finish_authentication(
     }
 }
 
-pub async fn start_registration(
+async fn start_registration(
     State(state): State<AppState>,
     session: Session,
     Path(display_name): Path<String>,
@@ -120,7 +131,7 @@ pub async fn start_registration(
     Ok(Json(ccr))
 }
 
-pub async fn finish_registration(
+async fn finish_registration(
     State(state): State<AppState>,
     session: Session,
     mut session_data: SessionData,
@@ -148,7 +159,7 @@ pub async fn finish_registration(
     }
 }
 
-pub async fn logout(session: Session, mut session_data: SessionData) -> Result<Redirect, AppError> {
+async fn logout(session: Session, mut session_data: SessionData) -> Result<Redirect, AppError> {
     session_data.auth_state = AuthenticationState::Anonymous;
     SessionData::update_session(&session, &session_data).await;
     Ok(Redirect::to("/"))
