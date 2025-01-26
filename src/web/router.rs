@@ -3,7 +3,6 @@ use super::{
     features::{contact::contact, login::login_router, projects::projects, resume::resume},
     static_content::static_content,
 };
-use crate::web::app_error::AppError;
 use anyhow::Result;
 use axum::{http::Uri, routing::get, Router};
 use build_time::build_time_utc;
