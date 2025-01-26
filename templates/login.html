@@ -4,17 +4,28 @@
 
 {% block head %}
 <script src="/scripts/htmx-webauthn.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<script src="/vendor/webauthn-json/webauthn-json.browser-global.2.1.1.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+
 {% endblock %}
 
 {% block content %}
 <h1 class="text-xl">Login / Register</h1>
-<form class="rounded-md border-2 border-navy" hx-ext="webauthn-autofill,webauthn-register" hx-post="/login/register" hx-webauthn-autofill hx-webauthn-register>
+{% match auth_state %}
+{% when AuthenticationState::Authenticated with (user) %}
+<form class="rounded-md border-2 border-navy" hx-get="/login/logout">
     <div class="p-2">
-        <label for="username">Username:</label>
-        <input name="username" id="username" autocomplete="username webauthn" type="text" required>
-    </div>
-    <div class="p-2">
-        <button type="submit">Fill in Username</button>
+        <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Logout {{user.display_name}}</button>
     </div>
 </form>
+{% else %}
+<form class="rounded-md border-2 border-navy" hx-ext="webauthn-autofill,webauthn-register" hx-post="/login/finish_register" hx-webauthn-autofill hx-webauthn-register>
+    <div class="p-2">
+        <label for="username">Username:</label>
+        <input class="border border-navy" name="username" id="username" autocomplete="username webauthn" type="text" required>
+    </div>
+    <div class="p-2">
+        <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Register</button>
+    </div>
+</form>
+{% endmatch %}
 {% endblock %}

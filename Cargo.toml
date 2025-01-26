@@ -86,5 +86,6 @@ tower-sessions = { version = "0.14.0", default-features = false, features = [
 tower-sessions-sqlx-store = { version = "0.15.0", features = ["sqlite"] }
 uuid = "1.11.0"
 webauthn-rs = { version = "0.5.1", features = [
+    "conditional-ui",
     "danger-allow-state-serialisation",
 ] }

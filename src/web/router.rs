@@ -2,7 +2,10 @@ use super::{
     app_state::AppState,
     features::{
         contact::contact,
-        login::{authentication_options, login_page, start_registration},
+        login::{
+            authentication_options, finish_authentication, finish_registration, login_page, logout,
+            start_registration,
+        },
         projects::projects,
         resume::resume,
     },
@@ -12,7 +15,7 @@ use anyhow::Result;
 use axum::{
     http::Uri,
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use build_time::build_time_utc;
@@ -42,7 +45,10 @@ pub async fn create_router(app_state: AppState) -> Result<Router> {
         .route("/contact", get(contact))
         .route("/login", get(login_page))
         .route("/login/getAuthOptions", get(authentication_options))
+        .route("/login/finish_authentication", post(finish_authentication))
         .route("/login/register/{display_name}", get(start_registration))
+        .route("/login/finish_register", post(finish_registration))
+        .route("/login/logout", get(logout))
         .route("/projects", get(projects))
         .route("/resume", get(resume))
         .with_state(app_state)

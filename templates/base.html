@@ -9,7 +9,6 @@
     <title>{% block title %}{{ title }}{% endblock %}</title>
 
     <script src="/vendor/htmx/htmx-2.0.4.min.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
-    <script src="/vendor/hyperscript/hyperscript-0.9.13.min.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
     {% block head %}{% endblock %}
 </head>
 
@@ -60,7 +59,7 @@
             </div>
 
             <!-- Content -->
-            <div class="bg-div-grey p-8 rounded-md border-4 border-navy min-w-full">
+            <div class="bg-div-grey p-8 rounded-md border-4 border-navy">
                 {% block content %}{% endblock %}
             </div>
         </div>

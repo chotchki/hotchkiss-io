@@ -5,7 +5,6 @@ use sqlx::sqlite::SqliteJournalMode;
 use sqlx::sqlite::SqliteLockingMode;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::sqlite::SqliteSynchronous;
-use std::fs::Permissions;
 use std::io::Cursor;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
