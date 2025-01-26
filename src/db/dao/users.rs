@@ -110,8 +110,7 @@ pub async fn update(pool: &SqlitePool, user: &mut User) -> Result<()> {
     let keys = serde_json::to_string(&user.keys)?;
     let role = user.role.to_string();
 
-    //Handling the fist user
-    let rec = query!(
+    query!(
         r#"
         update users
         set 
