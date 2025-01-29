@@ -1,4 +1,5 @@
 use crate::db::dao::users::User;
+use anyhow::Result;
 use axum::{
     extract::FromRequestParts,
     http::{self, request::Parts},
@@ -9,7 +10,7 @@ use webauthn_rs::prelude::{
     DiscoverableAuthentication, PasskeyAuthentication, PasskeyRegistration,
 };
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum AuthenticationState {
     Anonymous,
     AuthOptions(DiscoverableAuthentication),
@@ -18,7 +19,7 @@ pub enum AuthenticationState {
     Authenticated(User),
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SessionData {
     pub auth_state: AuthenticationState,
 }
@@ -26,11 +27,10 @@ pub struct SessionData {
 impl SessionData {
     const SESSION_DATA_KEY: &str = "session_data";
 
-    pub async fn update_session(session: &Session, session_data: &SessionData) {
-        session
+    pub async fn update_session(session: &Session, session_data: &SessionData) -> Result<()> {
+        Ok(session
             .insert(Self::SESSION_DATA_KEY, session_data.clone())
-            .await
-            .unwrap()
+            .await?)
     }
 }
 

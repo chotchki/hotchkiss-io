@@ -1,3 +1,5 @@
+use crate::db::dao::crypto_key::get_or_create;
+
 use super::{
     app_state::AppState,
     features::{contact::contact, login::login_router, projects::projects, resume::resume},
@@ -13,19 +15,19 @@ use tower_http::{
     compression::CompressionLayer,
     trace::{DefaultMakeSpan, DefaultOnRequest, TraceLayer},
 };
-use tower_sessions::{cookie::Key, Expiry, SessionManagerLayer};
+use tower_sessions::{Expiry, SessionManagerLayer};
 use tracing::Level;
 
 pub const BUILD_TIME_CACHE_BUST: &str = build_time_utc!("%s");
 
 pub async fn create_router(app_state: AppState) -> Result<Router> {
     // Generate a cryptographic key to sign the session cookie.
-    let key = Key::generate();
+    let key = get_or_create(&app_state.pool, 1).await?;
 
     let session_layer = SessionManagerLayer::new(app_state.session_store.clone())
         .with_secure(true)
         .with_expiry(Expiry::OnInactivity(Duration::days(1)))
-        .with_signed(key);
+        .with_signed(key.key_value);
 
     Ok(Router::new()
         .route("/", get(projects))

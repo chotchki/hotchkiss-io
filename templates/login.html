@@ -3,8 +3,9 @@
 {% block title %}Login{% endblock %}
 
 {% block head %}
-<script src="/scripts/htmx-webauthn.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 <script src="/vendor/webauthn-json/webauthn-json.browser-global.2.1.1.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<script src="/scripts/htmx-webauthn.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+
 
 {% endblock %}
 
@@ -18,10 +19,11 @@
     </div>
 </form>
 {% else %}
-<form class="rounded-md border-2 border-navy" hx-ext="webauthn-autofill,webauthn-register" hx-post="/login/finish_register" hx-webauthn-register>
+<form class="rounded-md border-2 border-navy" hx-ext="webauthn-autofill,webauthn-register" webauthn-autofill hx-webauthn-register>
+    <div id="error_message"></div>
     <div class="p-2">
         <label for="username">Username:</label>
-        <input class="border border-navy" name="username" id="username" autocomplete="username webauthn" type="text" hx-webauthn-autofill-opt-url="" required />
+        <input class="border border-navy" name="username" id="username" autocomplete="username webauthn" type="text" required />
     </div>
     <div class="p-2">
         <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Register</button>

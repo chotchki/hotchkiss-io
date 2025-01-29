@@ -35,7 +35,7 @@
             return false;
         }
 
-        let auth_opt_json = await response.json();
+        let auth_opt_json = await auth_opt_response.json();
 
         //Due to a Safari bug, having to use a ponyfill
         const auth_response = await (await polyfill_webauthn.get(auth_opt_json));
@@ -97,99 +97,33 @@
 
     htmx.defineExtension('webauthn-autofill', {
         init: function (api) {
+            webauthn_conditional_support()
+                .then(wcs => webauthn_authenticate("/login/get_auth_opts", "/login/finish_authentication"))
+                .then(auth => {
+                    if (auth) {
+                        window.location.href = "/";
+                    } else {
+                        document.getElementById("error_message").innerHTML = "Error logging in";
+                    }
+                });
+        }
+    });
+
+    htmx.defineExtension('webauthn-register', {
+        onEvent: function (name, evt) {
+            if (name !== "htmx:beforeRequest") {
+                return;
+            }
+            console.log("Fired Webauthn Register");
+            evt.preventDefault();
+
+            webauthn_conditional_support().then(wcs => webauthn_register("/login/start_register", "/login/finish_register")).then(register => {
+                if (register) {
+                    window.location.href = "/";
+                } else {
+                    document.getElementById("error_message").innerHTML = "Error registering";
+                }
+            });
         }
     });
 })();
-
-htmx.defineExtension('webauthn-autofill', {
-    init: function (api) {
-        console.log("Fired Webauthn Autofill check");
-        (async () => {
-            if (
-                typeof window.PublicKeyCredential !== 'undefined'
-                && typeof window.PublicKeyCredential.isConditionalMediationAvailable === 'function'
-            ) {
-                const available = await PublicKeyCredential.isConditionalMediationAvailable();
-
-                if (available) {
-                    try {
-                        // Retrieve authentication options for `navigator.credentials.get()`
-                        // from your server.
-                        const response = await fetch("/login/getAuthOptions");
-                        if (!response.ok) {
-                            throw new Error('Response from auth options: ${response.status}');
-                        }
-
-                        let authOptions = await response.json();
-
-                        //Due to a Safari bug, having to use a ponyfill
-                        const polyfill_webauthn = window.webauthnJSON;
-                        const authResponse = await (await polyfill_webauthn.get(authOptions));
-                        const authResponseJson = JSON.stringify(authResponse);
-
-                        // Send the response to your server for verification and
-                        // authenticate the user if the response is valid.
-                        const finish_auth = await fetch("/login/finish_authentication", {
-                            method: "POST",
-                            headers: {
-                                "Content-Type": "application/json",
-                            },
-                            body: authResponseJson
-                        });
-
-                        if (!finish_auth.ok && !finish_auth.redirected) {
-                            console.error("Response from auth options: ${finish_auth.status}");
-                            return;
-                        }
-
-                        console.log("Success!")
-                    } catch (err) {
-                        console.error('Error with conditional UI:', err);
-                    }
-                }
-            }
-        })();
-    }
-});
-
-htmx.defineExtension('webauthn-register', {
-    onEvent: function (name, evt) {
-        if (name !== "htmx:beforeRequest") {
-            return;
-        }
-        console.log("Fired Webauthn Register");
-        evt.preventDefault();
-        (async () => {
-            if (!PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()) {
-                console.error("No platform authenticator availible!");
-                return;
-            }
-
-            const response = await fetch("/login/register/" + document.getElementById("username").value);
-            if (!response.ok) {
-                console.error('Response from auth options: ${response.status}');
-            }
-
-            const registerOptions = await response.json();
-            //Due to a Safari bug, having to use a ponyfill
-            const polyfill_webauthn = window.webauthnJSON;
-            const registerResponse = await polyfill_webauthn.create(registerOptions);
-            const registerResponseJson = JSON.stringify(registerResponse);
-
-            const finish_response = await fetch("/login/finish_register", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: registerResponseJson
-            });
-
-            if (!finish_response.ok && !finish_response.redirected) {
-                console.error("Response from auth options: ${finish_response.status}");
-                return;
-            }
-
-            console.log("Success!");
-        })();
-    }
-});

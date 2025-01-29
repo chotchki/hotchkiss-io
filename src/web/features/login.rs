@@ -19,6 +19,7 @@ use axum::{
     Json, Router,
 };
 use tower_sessions::Session;
+use tracing::debug;
 use uuid::Uuid;
 use webauthn_rs::prelude::{
     CreationChallengeResponse, DiscoverableKey, PublicKeyCredential, RegisterPublicKeyCredential,
@@ -61,7 +62,7 @@ async fn authentication_options(
 ) -> Result<Json<RequestChallengeResponse>, AppError> {
     let (challenge, discoverable_auth) = state.webauthn.start_discoverable_authentication()?;
     session_data.auth_state = AuthenticationState::AuthOptions(discoverable_auth);
-    SessionData::update_session(&session, &session_data).await;
+    SessionData::update_session(&session, &session_data).await?;
     Ok(Json(challenge))
 }
 
@@ -91,8 +92,10 @@ async fn finish_authentication(
             update(&state.pool, &mut user).await?;
         }
 
+        debug!("Logged in {:#?}", user);
+
         session_data.auth_state = AuthenticationState::Authenticated(user);
-        SessionData::update_session(&session, &session_data).await;
+        SessionData::update_session(&session, &session_data).await?;
 
         Ok(Redirect::to("/"))
     } else {
@@ -127,7 +130,7 @@ async fn start_registration(
     };
 
     session_data.auth_state = AuthenticationState::RegistrationStarted((passkey_reg, user));
-    SessionData::update_session(&session, &session_data).await;
+    SessionData::update_session(&session, &session_data).await?;
     Ok(Json(ccr))
 }
 
@@ -151,7 +154,7 @@ async fn finish_registration(
 
         session_data.auth_state = AuthenticationState::Authenticated(user);
 
-        SessionData::update_session(&session, &session_data).await;
+        SessionData::update_session(&session, &session_data).await?;
 
         Ok(Redirect::to("/"))
     } else {
@@ -160,7 +163,8 @@ async fn finish_registration(
 }
 
 async fn logout(session: Session, mut session_data: SessionData) -> Result<Redirect, AppError> {
+    debug!("Logging out {:#?}", session_data.auth_state);
     session_data.auth_state = AuthenticationState::Anonymous;
-    SessionData::update_session(&session, &session_data).await;
+    SessionData::update_session(&session, &session_data).await?;
     Ok(Redirect::to("/"))
 }
