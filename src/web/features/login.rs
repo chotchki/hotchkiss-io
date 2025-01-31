@@ -10,7 +10,7 @@ use crate::{
         session::{AuthenticationState, SessionData},
     },
 };
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use askama::Template;
 use axum::{
     extract::{Path, State},
@@ -60,6 +60,10 @@ async fn authentication_options(
     session: Session,
     mut session_data: SessionData,
 ) -> Result<Json<RequestChallengeResponse>, AppError> {
+    if let AuthenticationState::Authenticated(_) = session_data.auth_state {
+        return Err(anyhow!("Already logged in").into());
+    }
+
     let (challenge, discoverable_auth) = state.webauthn.start_discoverable_authentication()?;
     session_data.auth_state = AuthenticationState::AuthOptions(discoverable_auth);
     SessionData::update_session(&session, &session_data).await?;

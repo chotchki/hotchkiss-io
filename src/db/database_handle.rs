@@ -4,7 +4,7 @@ use sqlx::{
         SqliteConnectOptions, SqliteJournalMode::Wal, SqliteLockingMode::Normal, SqlitePoolOptions,
         SqliteSynchronous,
     },
-    Error, SqlitePool,
+    SqlitePool,
 };
 use std::str::FromStr;
 use tracing::debug;

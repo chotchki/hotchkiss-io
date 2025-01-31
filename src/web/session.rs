@@ -6,6 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tower_sessions::Session;
+use tracing::debug;
 use webauthn_rs::prelude::{
     DiscoverableAuthentication, PasskeyAuthentication, PasskeyRegistration,
 };
@@ -50,11 +51,16 @@ where
 
     async fn from_request_parts(req: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let session = Session::from_request_parts(req, state).await?;
+
+        debug!("Found session! {:?}", session.id());
+
         let session_data: SessionData = session
             .get(Self::SESSION_DATA_KEY)
             .await
             .unwrap() //Unsure how to do this without an unwrap
             .unwrap_or_default();
+
+        debug!("Session auth state {:?}", session_data.auth_state);
 
         Ok(session_data)
     }

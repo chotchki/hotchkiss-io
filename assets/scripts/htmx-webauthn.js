@@ -95,7 +95,11 @@
     }
 
     htmx.defineExtension('webauthn-autofill', {
-        init: function (api) {
+        onEvent: function (name, evt) {
+            if (name !== "htmx:afterProcessNode") {
+                return;
+            }
+            console.log("Fired Webauthn Autofill");
             webauthn_conditional_support()
                 .then(wcs => webauthn_authenticate("/login/get_auth_opts", "/login/finish_authentication"))
                 .then(auth => {
@@ -105,7 +109,11 @@
                         document.getElementById("error_message").innerHTML = "Error logging in";
                     }
                 });
-        }
+        },
+
+        getSelectors: function () {
+            return ['[webauthn-autofill]']
+        },
     });
 
     htmx.defineExtension('webauthn-register', {
