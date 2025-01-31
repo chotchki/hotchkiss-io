@@ -15,6 +15,7 @@
 {% when AuthenticationState::Authenticated with (user) %}
 <form class="rounded-md border-2 border-navy" action="/login/logout">
     <div class="p-2">
+        <div>Role: {{user.role}}</div>
         <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Logout {{user.display_name}}</button>
     </div>
 </form>
