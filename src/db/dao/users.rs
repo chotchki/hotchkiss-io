@@ -2,7 +2,7 @@ use super::roles::Role;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::{query, query_as, sqlite::SqliteRow, Error::ColumnDecode, FromRow, Row, SqlitePool};
-use std::str::FromStr;
+use std::{fmt::Display, str::FromStr};
 use uuid::Uuid;
 use webauthn_rs::prelude::Passkey;
 
@@ -12,6 +12,16 @@ pub struct User {
     pub id: Uuid,
     pub keys: Vec<Passkey>,
     pub role: Role,
+}
+
+impl Display for User {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "User name:{}, id:{}, role: {}",
+            self.display_name, self.id, self.role
+        )
+    }
 }
 
 impl FromRow<'_, SqliteRow> for User {

@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::db::dao::users::User;
 use anyhow::Result;
 use axum::{
@@ -7,17 +9,29 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tower_sessions::Session;
 use tracing::debug;
-use webauthn_rs::prelude::{
-    DiscoverableAuthentication, PasskeyAuthentication, PasskeyRegistration,
-};
+use webauthn_rs::prelude::{DiscoverableAuthentication, PasskeyRegistration};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum AuthenticationState {
     Anonymous,
     AuthOptions(DiscoverableAuthentication),
-    AuthenticationStarted(PasskeyAuthentication),
     RegistrationStarted((PasskeyRegistration, User)),
     Authenticated(User),
+}
+
+impl Display for AuthenticationState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthenticationState::Anonymous => write!(f, "AuthState: Anonymous"),
+            AuthenticationState::AuthOptions(_) => write!(f, "AuthState: AuthOptions"),
+            AuthenticationState::RegistrationStarted((_, u)) => {
+                write!(f, "AuthState: RegistrationStarted for {}", u)
+            }
+            AuthenticationState::Authenticated(u) => {
+                write!(f, "AuthState: Authenticated for {}", u)
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -60,7 +74,7 @@ where
             .unwrap() //Unsure how to do this without an unwrap
             .unwrap_or_default();
 
-        debug!("Session auth state {:?}", session_data.auth_state);
+        debug!("Session auth state {}", session_data.auth_state);
 
         Ok(session_data)
     }
