@@ -10,7 +10,7 @@ use crate::{
         session::{AuthenticationState, SessionData},
     },
 };
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, Context};
 use askama::Template;
 use axum::{
     extract::{Path, State},
