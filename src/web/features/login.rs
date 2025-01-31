@@ -33,7 +33,7 @@ pub fn login_router() -> Router<AppState> {
         .route("/", get(login_page))
         .route("/get_auth_opts", get(authentication_options))
         .route("/finish_authentication", post(finish_authentication))
-        .route("/start_register", get(start_registration))
+        .route("/start_register/{:display_name}", get(start_registration))
         .route("/finish_register", post(finish_registration))
         .route("/logout", get(logout))
 }

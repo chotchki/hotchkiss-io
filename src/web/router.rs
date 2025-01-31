@@ -16,19 +16,22 @@ use tower_http::{
     trace::{DefaultMakeSpan, DefaultOnRequest, TraceLayer},
 };
 use tower_sessions::{Expiry, SessionManagerLayer};
-use tracing::Level;
+use tracing::{debug, Level};
 
 pub const BUILD_TIME_CACHE_BUST: &str = build_time_utc!("%s");
 
 pub async fn create_router(app_state: AppState) -> Result<Router> {
     // Generate a cryptographic key to sign the session cookie.
+    debug!("Getting cookie key");
     let key = get_or_create(&app_state.pool, 1).await?;
 
+    debug!("Making session layer");
     let session_layer = SessionManagerLayer::new(app_state.session_store.clone())
         .with_secure(true)
         .with_expiry(Expiry::OnInactivity(Duration::days(1)))
         .with_signed(key.key_value);
 
+    debug!("Making router");
     Ok(Router::new()
         .route("/", get(projects))
         .route("/contact", get(contact))

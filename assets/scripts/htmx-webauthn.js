@@ -61,12 +61,11 @@
 
     /// Attempt to authenticate using the conditional api
     async function webauthn_register(start_register_url, finish_register_url, display_name) {
-        const register_opt_response = await fetch(start_register_url, {
-            method: "POST",
+        const register_opt_response = await fetch(start_register_url + "/" + display_name, {
+            method: "GET",
             headers: {
                 "Content-Type": "application/json",
-            },
-            body: JSON.stringify(display_name)
+            }
         });
         if (!register_opt_response.ok) {
             console.error('Response from start registration: ${register_opt_response.status}');
@@ -117,7 +116,9 @@
             console.log("Fired Webauthn Register");
             evt.preventDefault();
 
-            webauthn_conditional_support().then(wcs => webauthn_register("/login/start_register", "/login/finish_register")).then(register => {
+            const username = document.getElementById("username").value;
+
+            webauthn_conditional_support().then(wcs => webauthn_register("/login/start_register", "/login/finish_register", username)).then(register => {
                 if (register) {
                     window.location.href = "/";
                 } else {

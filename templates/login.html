@@ -19,7 +19,7 @@
     </div>
 </form>
 {% else %}
-<form class="rounded-md border-2 border-navy" hx-ext="webauthn-autofill,webauthn-register" webauthn-autofill hx-webauthn-register>
+<form class="rounded-md border-2 border-navy" hx-ext="webauthn-autofill,webauthn-register" webauthn-autofill hx-webauthn-register hx-post="/login/not-needed">
     <div id="error_message"></div>
     <div class="p-2">
         <label for="username">Username:</label>

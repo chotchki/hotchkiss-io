@@ -2,7 +2,7 @@ use crate::{
     settings::Settings,
     web::{app_state::AppState, router::create_router},
 };
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use axum::{
     handler::HandlerWithoutStateExt,
     http::{uri::Authority, Uri},
@@ -17,9 +17,10 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
 };
-use tokio::sync::broadcast::Receiver;
+use tokio::{sync::broadcast::Receiver, task::JoinSet};
 use tower_sessions::ExpiredDeletion;
 use tower_sessions_sqlx_store::SqliteStore;
+use tracing::debug;
 use url::Url;
 use webauthn_rs::{Webauthn, WebauthnBuilder};
 
@@ -61,17 +62,36 @@ impl EndpointsProviderService {
         let http_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), HTTP_PORT);
         let https_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), HTTPS_PORT);
 
-        let http = tokio::spawn(Self::http_server(http_addr));
-        let https = tokio::spawn(Self::https_server(https_addr, app_state, config));
+        //let http = tokio::spawn(Self::http_server(http_addr));
+        //let https = tokio::spawn(Self::https_server(https_addr, app_state, config));
 
-        let deletion_task = tokio::task::spawn(
-            self.session_store
-                .clone()
-                .continuously_delete_expired(tokio::time::Duration::from_secs(60)),
-        );
+        //let deletion_task = tokio::task::spawn(
+        //    self.session_store
+        //        .clone()
+        //        .continuously_delete_expired(tokio::time::Duration::from_secs(60)),
+        //);
 
-        // Ignore errors.
-        let _ = tokio::try_join!(http, https, deletion_task);
+        let mut set = JoinSet::new();
+        set.spawn(Self::https_server(https_addr, app_state, config));
+        set.spawn(Self::http_server(http_addr));
+
+        let session_store = self.session_store.clone();
+        set.spawn(async move {
+            session_store
+                .continuously_delete_expired(tokio::time::Duration::from_secs(60))
+                .await
+                .map_err(|e| anyhow!(e))
+        });
+
+        let output = set.join_all().await;
+        for o in output {
+            match o {
+                Ok(_) => (),
+                Err(e) => {
+                    bail!(e)
+                }
+            }
+        }
 
         Ok(())
     }
@@ -81,7 +101,10 @@ impl EndpointsProviderService {
 
         let redirect = move |Host(host): Host, uri: Uri| async move {
             match make_https(&host, uri, HTTPS_PORT) {
-                Ok(uri) => Ok(Redirect::permanent(&uri.to_string())),
+                Ok(uri) => {
+                    debug!("Got connnection, redirecting");
+                    Ok(Redirect::permanent(&uri.to_string()))
+                }
                 Err(error) => {
                     tracing::warn!(%error, "failed to convert URI to HTTPS");
                     Err(StatusCode::BAD_REQUEST)
