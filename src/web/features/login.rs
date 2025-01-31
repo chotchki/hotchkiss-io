@@ -54,7 +54,6 @@ async fn login_page(session_data: SessionData) -> impl IntoResponse {
     HtmlTemplate(template)
 }
 
-#[axum::debug_handler]
 async fn authentication_options(
     State(state): State<AppState>,
     session: Session,

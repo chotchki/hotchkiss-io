@@ -1,32 +1,13 @@
 use anyhow::Result;
-use serde_json::json;
-use sqlx::Error::ColumnDecode;
-use sqlx::{prelude::FromRow, query, query_as, sqlite::SqliteRow, Row, SqlitePool};
-use tower_sessions::cookie::Key;
+use sqlx::{prelude::FromRow, query, query_as, SqlitePool};
 use tracing::debug;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct ContentPage {
     pub page_name: String,
     pub page_markdown: String,
     pub page_order: i64,
     pub special_page: bool,
-}
-
-impl FromRow<'_, SqliteRow> for ContentPage {
-    fn from_row(row: &SqliteRow) -> sqlx::Result<Self> {
-        debug!("Decoding using FromRow");
-
-        Ok(ContentPage {
-            page_name: row.try_get("page_name")?,
-            page_markdown: row.try_get("page_markdown")?,
-            page_order: row.try_get("page_order")?,
-            special_page: match row.try_get::<i64, &str>("special_page")? {
-                0 => false,
-                _ => true,
-            },
-        })
-    }
 }
 
 pub async fn save(pool: &SqlitePool, cp: &ContentPage) -> Result<()> {
@@ -110,6 +91,27 @@ mod tests {
             page_markdown: "test content".to_string(),
             page_order: 1,
             special_page: true,
+        };
+
+        save(&pool, &cp).await?;
+
+        let found_cp = get_page_by_name(&pool, "test").await?;
+        assert_eq!(cp, found_cp);
+
+        let page_titles = find_page_titles(&pool).await?;
+
+        assert_eq!(vec!["test".to_string()], page_titles);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn roundtrip_not_special(pool: SqlitePool) -> Result<()> {
+        let cp = ContentPage {
+            page_name: "test".to_string(),
+            page_markdown: "test content".to_string(),
+            page_order: 1,
+            special_page: false,
         };
 
         save(&pool, &cp).await?;
