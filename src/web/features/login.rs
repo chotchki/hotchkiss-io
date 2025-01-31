@@ -98,6 +98,7 @@ async fn finish_authentication(
 
         debug!("Logged in {:#?}", user);
 
+        session.cycle_id().await?;
         session_data.auth_state = AuthenticationState::Authenticated(user);
         SessionData::update_session(&session, &session_data).await?;
 
@@ -156,6 +157,7 @@ async fn finish_registration(
 
         create(&state.pool, &mut user).await?;
 
+        session.cycle_id().await?;
         session_data.auth_state = AuthenticationState::Authenticated(user);
 
         SessionData::update_session(&session, &session_data).await?;
