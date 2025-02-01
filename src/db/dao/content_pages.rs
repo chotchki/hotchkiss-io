@@ -43,6 +43,21 @@ pub async fn save(pool: &SqlitePool, cp: &ContentPage) -> Result<()> {
     Ok(())
 }
 
+pub async fn delete(pool: &SqlitePool, page_name: &str) -> Result<()> {
+    query!(
+        r#"
+        DELETE FROM content_pages
+        WHERE page_name = ?1
+        and special_page = false
+        "#,
+        page_name
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn find_page_titles(pool: &SqlitePool) -> Result<Vec<String>> {
     let title_recs = query!(
         r#"
@@ -59,6 +74,23 @@ pub async fn find_page_titles(pool: &SqlitePool) -> Result<Vec<String>> {
     let titles: Vec<String> = title_recs.into_iter().map(|r| r.page_name).collect();
 
     Ok(titles)
+}
+
+pub async fn find_page_titles_and_special(pool: &SqlitePool) -> Result<Vec<(String, bool)>> {
+    let title_recs: Vec<(String, bool)> = query_as(
+        r#"
+        select 
+            page_name, 
+            special_page
+        from
+            content_pages
+        order by page_order
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(title_recs)
 }
 
 pub async fn get_page_by_name(pool: &SqlitePool, page_name: &str) -> Result<ContentPage> {

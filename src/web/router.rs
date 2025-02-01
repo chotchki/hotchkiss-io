@@ -1,12 +1,7 @@
-use crate::db::dao::crypto_key::get_or_create;
-
-use super::{
-    app_state::AppState,
-    features::{contact::contact, login::login_router, projects::projects, resume::resume},
-    static_content::static_content,
-};
+use super::{app_state::AppState, features::login::login_router, static_content::static_content};
+use crate::{db::dao::crypto_key::get_or_create, web::features::pages::pages_router};
 use anyhow::Result;
-use axum::{http::Uri, routing::get, Router};
+use axum::{http::Uri, response::Redirect, routing::get, Router};
 use build_time::build_time_utc;
 use reqwest::StatusCode;
 use time::Duration;
@@ -33,10 +28,8 @@ pub async fn create_router(app_state: AppState) -> Result<Router> {
 
     debug!("Making router");
     Ok(Router::new()
-        .route("/", get(projects))
-        .route("/contact", get(contact))
-        .route("/projects", get(projects))
-        .route("/resume", get(resume))
+        .route("/", get(redirect_to_pages))
+        .nest("/pages", pages_router())
         .nest("/login", login_router())
         .with_state(app_state)
         .merge(static_content())
@@ -52,6 +45,10 @@ pub async fn create_router(app_state: AppState) -> Result<Router> {
                 .layer(session_layer)
                 .layer(CompressionLayer::new()),
         ))
+}
+
+async fn redirect_to_pages() -> Redirect {
+    Redirect::temporary("/pages")
 }
 
 //TDOO: We should make our 404s fancy

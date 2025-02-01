@@ -1,3 +1,4 @@
+use crate::db::dao::content_pages;
 use crate::web::app_error::AppError;
 use crate::{
     db::dao::{
@@ -14,7 +15,7 @@ use anyhow::{anyhow, Context};
 use askama::Template;
 use axum::{
     extract::{Path, State},
-    response::{IntoResponse, Redirect},
+    response::Redirect,
     routing::{get, post},
     Json, Router,
 };
@@ -26,7 +27,7 @@ use webauthn_rs::prelude::{
     RequestChallengeResponse,
 };
 
-use super::navigation_setting::NavSetting;
+use super::top_bar::TopBar;
 
 pub fn login_router() -> Router<AppState> {
     Router::new()
@@ -41,17 +42,22 @@ pub fn login_router() -> Router<AppState> {
 #[derive(Template)]
 #[template(path = "login.html")]
 struct LoginTemplate {
-    nav: NavSetting,
+    top_bar: TopBar,
     auth_state: AuthenticationState,
 }
 
-async fn login_page(session_data: SessionData) -> impl IntoResponse {
+async fn login_page(
+    State(state): State<AppState>,
+    session_data: SessionData,
+) -> Result<HtmlTemplate<LoginTemplate>, AppError> {
+    let top_bar =
+        TopBar::new(content_pages::find_page_titles(&state.pool).await?).make_active("login");
     let template = LoginTemplate {
-        nav: NavSetting::Login,
+        top_bar,
         auth_state: session_data.auth_state,
     };
 
-    HtmlTemplate(template)
+    Ok(HtmlTemplate(template))
 }
 
 async fn authentication_options(
