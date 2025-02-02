@@ -9,5 +9,14 @@
         <li>{{page.0}}</li>
         {% endfor %}
     </ul>
+    <form hx-put="./edit">
+        <div class="p-2">
+            <label for="username">Page Name:</label>
+            <input class="border border-navy" name="page_name" id="page_name" type="text" required />
+        </div>
+        <div class="p-2">
+            <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Create Page</button>
+        </div>
+    </form>
 </div>
 {% endblock %}

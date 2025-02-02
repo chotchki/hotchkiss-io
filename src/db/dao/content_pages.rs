@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sqlx::{prelude::FromRow, query, query_as, SqlitePool};
+use sqlx::{prelude::FromRow, query, query_as, Executor, Sqlite, SqlitePool};
 use tracing::debug;
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
@@ -10,7 +10,7 @@ pub struct ContentPage {
     pub special_page: bool,
 }
 
-pub async fn save(pool: &SqlitePool, cp: &ContentPage) -> Result<()> {
+pub async fn save(executor: impl sqlx::SqliteExecutor<'_>, cp: &ContentPage) -> Result<()> {
     debug!("Saving Content Page {}", cp.page_name);
 
     query!(
@@ -37,7 +37,7 @@ pub async fn save(pool: &SqlitePool, cp: &ContentPage) -> Result<()> {
         cp.page_order,
         cp.special_page
     )
-    .execute(pool)
+    .execute(executor)
     .await?;
 
     Ok(())
@@ -93,7 +93,10 @@ pub async fn find_page_titles_and_special(pool: &SqlitePool) -> Result<Vec<(Stri
     Ok(title_recs)
 }
 
-pub async fn get_page_by_name(pool: &SqlitePool, page_name: &str) -> Result<ContentPage> {
+pub async fn get_page_by_name(
+    executor: impl sqlx::SqliteExecutor<'_>,
+    page_name: &str,
+) -> Result<Option<ContentPage>> {
     Ok(query_as(
         r#"
         select
@@ -108,7 +111,7 @@ pub async fn get_page_by_name(pool: &SqlitePool, page_name: &str) -> Result<Cont
     "#,
     )
     .bind(page_name)
-    .fetch_one(pool)
+    .fetch_optional(executor)
     .await?)
 }
 
@@ -128,7 +131,7 @@ mod tests {
         save(&pool, &cp).await?;
 
         let found_cp = get_page_by_name(&pool, "test").await?;
-        assert_eq!(cp, found_cp);
+        assert_eq!(cp, found_cp.unwrap());
 
         let page_titles = find_page_titles(&pool).await?;
 
@@ -149,7 +152,7 @@ mod tests {
         save(&pool, &cp).await?;
 
         let found_cp = get_page_by_name(&pool, "test").await?;
-        assert_eq!(cp, found_cp);
+        assert_eq!(cp, found_cp.unwrap());
 
         let page_titles = find_page_titles(&pool).await?;
 
