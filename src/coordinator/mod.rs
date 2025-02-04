@@ -1,5 +1,6 @@
 mod acme;
 mod acme_provider_service;
+mod browser_relaunch_service;
 pub mod dns;
 mod dns_provider_service;
 mod endpoints_provider_service;

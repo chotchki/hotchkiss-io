@@ -4,11 +4,15 @@
 
 {% block content %}
 <div>
-    <ul>
-        {% for page in pages %}
-        <li>{{page.0}}</li>
-        {% endfor %}
-    </ul>
+    <div class="p-2">
+        <h2 class="text-lg">Current Pages</h2>
+        <ul class="p-2 list-disc">
+            {% for page in pages %}
+            <li>{{page.0}}</li>
+            {% endfor %}
+        </ul>
+    </div>
+
     <form hx-put="./edit">
         <div class="p-2">
             <label for="username">Page Name:</label>

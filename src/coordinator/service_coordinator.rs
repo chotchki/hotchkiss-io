@@ -6,7 +6,11 @@ use super::dns::dns_validator::DnsValidator;
 use super::dns_provider_service::DnsProviderService;
 use super::endpoints_provider_service::EndpointsProviderService;
 use crate::{
-    coordinator::ip_provider_service::IpProviderService, db::database_handle::DatabaseHandle,
+    coordinator::{
+        browser_relaunch_service::{self, BrowserRelaunchService},
+        ip_provider_service::IpProviderService,
+    },
+    db::database_handle::DatabaseHandle,
     Settings,
 };
 /// The goal of the coordinator is to start up the various dependancies of the server AND
@@ -52,17 +56,23 @@ impl ServiceCoordinator {
     pub async fn start(self) -> Result<()> {
         let (ip_provider_sender, ip_provider_reciever) = broadcast::channel(1);
         let (tls_config_sender, tls_config_reciever) = broadcast::channel(1);
+        let (endpoint_started_sender, endpoint_started_receiver) = broadcast::channel(1);
 
         let ips = self.ip_provider_service;
         let dps = self.dns_provider_service;
         let aps = self.acme_provider_service;
         let eps = self.endpoints_provider_service;
+        let brs = BrowserRelaunchService::create().await?;
 
         let _ = tokio::try_join!(
             tokio::spawn(async move { ips.start(ip_provider_sender).await }),
             tokio::spawn(async move { dps.start(ip_provider_reciever).await }),
             tokio::spawn(async move { aps.start(tls_config_sender).await }),
-            tokio::spawn(async move { eps.start(tls_config_reciever).await })
+            tokio::spawn(async move {
+                eps.start(tls_config_reciever, endpoint_started_sender)
+                    .await
+            }),
+            tokio::spawn(async move { brs.start(endpoint_started_receiver).await })
         )
         .context("A subservice failed")?;
 
