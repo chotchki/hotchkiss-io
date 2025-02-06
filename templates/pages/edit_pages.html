@@ -2,15 +2,21 @@
 
 {% block title %}Edit Pages{% endblock %}
 
+{% block head %}
+<script src="/vendor/sortable/sortable-1.15.6.min.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<script src="/scripts/htmx-sortable.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+{% endblock %}
+
 {% block content %}
 <div>
     <div class="p-2">
         <h2 class="text-lg">Current Pages</h2>
-        <ul class="p-2 list-disc">
+        <form class="sortable" hx-patch="./edit" hx-trigger="end">
+            <div class="htmx-indicator">Updating...</div>
             {% for page in pages %}
-            <li>{{page.0}}</li>
+            <div><input type='hidden' name='titles' value='{{page.0}}' />{{page.0}}</div>
             {% endfor %}
-        </ul>
+        </form>
     </div>
 
     <form hx-put="./edit">

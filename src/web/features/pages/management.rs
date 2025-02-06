@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use crate::{
     db::dao::{
         content_pages::{self, get_page_by_name, save, ContentPage},
@@ -19,10 +17,12 @@ use axum::{
     extract::{Path, State},
     response::{IntoResponse, Redirect, Response},
     routing::{delete, get, patch, put},
-    Form, Json, Router,
+    Json, Router,
 };
+use axum_extra::extract::Form;
 use http::HeaderMap;
 use serde::Deserialize;
+use std::collections::HashSet;
 
 pub fn management_router() -> Router<AppState> {
     Router::new()
@@ -60,10 +60,15 @@ pub async fn edit_pages_view(
     }))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ReorderPageForm {
+    titles: Vec<String>,
+}
+
 pub async fn reorder_pages(
     State(state): State<AppState>,
     session_data: SessionData,
-    Json(title_order): Json<Vec<String>>,
+    Form(title_order): Form<ReorderPageForm>,
 ) -> Result<(), AppError> {
     if let AuthenticationState::Authenticated(ref user) = session_data.auth_state {
         if user.role != Role::Admin {
@@ -74,16 +79,21 @@ pub async fn reorder_pages(
     let pages = content_pages::find_page_titles_and_special(&state.pool).await?;
     let page_titles: Vec<String> = pages.into_iter().map(|(t, _)| t).collect();
 
-    let title_order_set: HashSet<&String> = title_order.iter().collect();
+    let title_order_set: HashSet<&String> = title_order.titles.iter().collect();
     let page_titles_set: HashSet<&String> = page_titles.iter().collect();
 
     if title_order_set != page_titles_set {
-        return Err(anyhow!("Missing pages, cannot reorder").into());
+        return Err(anyhow!(
+            "Missing pages, cannot reorder {:?} vs {:?}",
+            title_order_set,
+            page_titles_set
+        )
+        .into());
     }
 
     //Now we can reorder the pages in the database
     let mut transaction = state.pool.begin().await?;
-    for (i, title) in title_order.iter().enumerate() {
+    for (i, title) in title_order.titles.iter().enumerate() {
         let mut page = get_page_by_name(&mut *transaction, title)
             .await?
             .ok_or_else(|| anyhow!("Unable to load page to reorder"))?;
