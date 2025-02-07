@@ -17,9 +17,10 @@ use axum::{
     extract::{Path, State},
     response::{IntoResponse, Redirect, Response},
     routing::{delete, get, patch, put},
-    Json, Router,
+    Form, Json, Router,
 };
 use http::HeaderMap;
+use serde::Deserialize;
 
 pub fn content_router() -> Router<AppState> {
     Router::new()
@@ -36,6 +37,7 @@ pub struct PagesTemplate {
     pub top_bar: TopBar,
     pub auth_state: AuthenticationState,
     pub page_name: String,
+    pub markdown: String,
     pub rendered_markdown: String,
 }
 
@@ -68,6 +70,7 @@ pub async fn page_by_title(
         top_bar,
         auth_state: session_data.auth_state,
         page_name,
+        markdown: page.page_markdown.clone(),
         rendered_markdown: markdown::to_html(&page.page_markdown),
     };
 
@@ -101,12 +104,17 @@ pub async fn delete_page(
     Ok(headers)
 }
 
+#[derive(Debug, Deserialize)]
+pub struct EditForm {
+    markdown: String,
+}
+
 pub async fn edit_page(
     State(state): State<AppState>,
     session_data: SessionData,
     Path(page_name): Path<String>,
-    Json(page_markdown): Json<String>,
-) -> Result<(), AppError> {
+    Form(page_markdown): Form<EditForm>,
+) -> Result<impl IntoResponse, AppError> {
     if let AuthenticationState::Authenticated(user) = session_data.auth_state {
         if user.role != Role::Admin {
             return Err(anyhow!("Invalid Permission").into());
@@ -118,22 +126,30 @@ pub async fn edit_page(
         .unwrap_or_else(|| ContentPage {
             page_name,
             page_order: 0,
-            page_markdown: page_markdown.clone(),
+            page_markdown: page_markdown.markdown.clone(),
             special_page: false,
         });
 
-    page.page_markdown = page_markdown;
+    page.page_markdown = page_markdown.markdown;
 
     save(&state.pool, &page).await?;
 
-    Ok(())
+    let mut headers = HeaderMap::new();
+    headers.insert("HX-Refresh", "true".parse()?);
+
+    Ok(headers)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PreviewForm {
+    markdown: String,
 }
 
 pub async fn preview_page(
     State(state): State<AppState>,
     session_data: SessionData,
     Path(page_name): Path<String>,
-    Json(page_markdown): Json<String>,
+    Form(page_markdown): Form<PreviewForm>,
 ) -> Result<Response, AppError> {
     let top_bar =
         TopBar::new(content_pages::find_page_titles(&state.pool).await?).make_active(&page_name);
@@ -142,7 +158,8 @@ pub async fn preview_page(
         top_bar,
         auth_state: session_data.auth_state,
         page_name,
-        rendered_markdown: markdown::to_html(&page_markdown),
+        markdown: page_markdown.markdown.clone(),
+        rendered_markdown: markdown::to_html(&page_markdown.markdown),
     };
 
     Ok(HtmlTemplate(pt).into_response())

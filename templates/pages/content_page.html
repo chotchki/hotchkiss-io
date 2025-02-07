@@ -3,7 +3,22 @@
 {% block title %}{{page_name}}{% endblock %}
 
 {% block content %}
-<div class="prose">
-    {{rendered_markdown}}
+{% if let AuthenticationState::Authenticated(user) = auth_state %}
+{% if user.role == Role::Admin %}
+<form hx-put="./{{page_name}}">
+    <div class="m-2">
+        <textarea hx-patch="./{{page_name}}/preview" hx-swap="outerHTML" hx-select="#rendered" hx-target="#rendered" hx-trigger="keyup changed delay:500ms" hx-sync="closest form:abort" id="markdown"
+            name="markdown" class="outline w-full min-h-40">{{markdown}}</textarea>
+    </div>
+
+    <div class="m-2 flex flex-row-reverse">
+        <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Save Edits</button>
+    </div>
+</form>
+<hr class="m-4" />
+{% endif %}
+{% endif %}
+<div class="prose" id="rendered">
+    {{rendered_markdown|safe}}
 </div>
 {% endblock %}
