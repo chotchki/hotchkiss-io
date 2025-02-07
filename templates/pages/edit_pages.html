@@ -11,20 +11,28 @@
 <div>
     <div class="p-2">
         <h2 class="text-lg">Current Pages</h2>
+        <h3 class="text-sm">Drag to Reorder</h3>
         <form class="sortable" hx-patch="./edit" hx-trigger="end">
             <div class="htmx-indicator">Updating...</div>
             {% for page in pages %}
-            <div><input type='hidden' name='titles' value='{{page.0}}' />{{page.0}}</div>
+            <div class="outline p-2 flex">
+                <input type='hidden' name='titles' value='{{page.0}}' />
+                <p class="p-1">{{page.0}}</p>
+                <div class="grow"></div>
+                {% if page.1 == false %}
+                <button hx-delete="./{{page.0}}" class="p-1 bg-red-500 text-white">Delete</button>
+                {% endif %}
+            </div>
             {% endfor %}
         </form>
     </div>
 
+    <hr class="m-2" />
+
     <div class="p-2">
         <form hx-put="./edit">
-            <label for="username">Page Name:</label>
-            <input class="border border-navy" name="page_name" id="page_name" type="text" required />
-
-            <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Create Page</button>
+            <input class="border border-navy" name="page_name" id="page_name" type="text" placeholder="Page Name" required />
+            <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Create New Page</button>
         </form>
     </div>
 </div>

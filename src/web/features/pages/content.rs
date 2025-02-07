@@ -19,6 +19,7 @@ use axum::{
     routing::{delete, get, patch, put},
     Json, Router,
 };
+use http::HeaderMap;
 
 pub fn content_router() -> Router<AppState> {
     Router::new()
@@ -77,7 +78,7 @@ pub async fn delete_page(
     State(state): State<AppState>,
     session_data: SessionData,
     Path(page_name): Path<String>,
-) -> Result<(), AppError> {
+) -> Result<impl IntoResponse, AppError> {
     if let AuthenticationState::Authenticated(user) = session_data.auth_state {
         if user.role != Role::Admin {
             return Err(anyhow!("Invalid Permission").into());
@@ -94,7 +95,10 @@ pub async fn delete_page(
 
     content_pages::delete(&state.pool, &page_name).await?;
 
-    Ok(())
+    let mut headers = HeaderMap::new();
+    headers.insert("HX-Refresh", "true".parse()?);
+
+    Ok(headers)
 }
 
 pub async fn edit_page(
