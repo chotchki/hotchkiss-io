@@ -69,7 +69,7 @@ pub async fn reorder_pages(
     State(state): State<AppState>,
     session_data: SessionData,
     Form(title_order): Form<ReorderPageForm>,
-) -> Result<(), AppError> {
+) -> Result<impl IntoResponse, AppError> {
     if let AuthenticationState::Authenticated(ref user) = session_data.auth_state {
         if user.role != Role::Admin {
             return Err(anyhow!("Invalid Permission").into());
@@ -103,7 +103,10 @@ pub async fn reorder_pages(
     }
     transaction.commit().await?;
 
-    Ok(())
+    let mut headers = HeaderMap::new();
+    headers.insert("HX-Refresh", "true".parse()?);
+
+    Ok(headers)
 }
 
 #[derive(Debug, Deserialize)]

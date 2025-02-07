@@ -19,14 +19,13 @@
         </form>
     </div>
 
-    <form hx-put="./edit">
-        <div class="p-2">
+    <div class="p-2">
+        <form hx-put="./edit">
             <label for="username">Page Name:</label>
             <input class="border border-navy" name="page_name" id="page_name" type="text" required />
-        </div>
-        <div class="p-2">
+
             <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Create Page</button>
-        </div>
-    </form>
+        </form>
+    </div>
 </div>
 {% endblock %}
