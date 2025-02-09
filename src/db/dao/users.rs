@@ -14,6 +14,105 @@ pub struct User {
     pub role: Role,
 }
 
+impl User {
+    pub async fn create(&mut self, pool: &SqlitePool) -> Result<()> {
+        let id = self.id.to_string();
+        let keys = serde_json::to_string(&self.keys)?;
+
+        //Handling the fist user
+        let rec = query!(
+            r#"
+        insert into users (
+            display_name,
+            id,
+            keys,
+            app_role
+        ) VALUES (
+            ?1,
+            ?2,
+            ?3,
+            CASE WHEN (SELECT COUNT(*) from users) == 0
+            THEN 'Admin'
+            ELSE 'Registered'
+            END
+        )
+        RETURNING app_role
+        "#,
+            self.display_name,
+            id,
+            keys
+        )
+        .fetch_one(pool)
+        .await?;
+
+        self.role = Role::from_str(&rec.app_role)?;
+
+        Ok(())
+    }
+
+    pub async fn find_by_passkey(pool: &SqlitePool, passkey: &Passkey) -> Result<Option<User>> {
+        Ok(query_as(
+            r#"
+        SELECT 
+            display_name,
+            id,
+            keys,
+            app_role as role
+        FROM users
+        WHERE
+            EXISTS (SELECT 1 FROM json_each(keys) WHERE value = ?1)
+    "#,
+        )
+        .bind(serde_json::to_string(passkey)?)
+        .fetch_optional(pool)
+        .await?)
+    }
+
+    pub async fn find_by_uuid(pool: &SqlitePool, uuid: &Uuid) -> Result<Option<User>> {
+        Ok(query_as(
+            r#"
+        SELECT 
+            display_name,
+            id,
+            keys,
+            app_role as role
+        FROM users
+        WHERE
+            id = ?1
+    "#,
+        )
+        .bind(uuid.to_string())
+        .fetch_optional(pool)
+        .await?)
+    }
+
+    pub async fn update(&self, pool: &SqlitePool) -> Result<()> {
+        let id = self.id.to_string();
+        let keys = serde_json::to_string(&self.keys)?;
+        let role = self.role.to_string();
+
+        query!(
+            r#"
+        update users
+        set 
+            display_name = ?1,
+            keys = ?2,
+            app_role = ?3
+        where
+            id = ?4
+        "#,
+            self.display_name,
+            keys,
+            role,
+            id
+        )
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+}
+
 impl Display for User {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -42,101 +141,4 @@ impl FromRow<'_, SqliteRow> for User {
             })?,
         })
     }
-}
-
-pub async fn create(pool: &SqlitePool, user: &mut User) -> Result<()> {
-    let id = user.id.to_string();
-    let keys = serde_json::to_string(&user.keys)?;
-
-    //Handling the fist user
-    let rec = query!(
-        r#"
-        insert into users (
-            display_name,
-            id,
-            keys,
-            app_role
-        ) VALUES (
-            ?1,
-            ?2,
-            ?3,
-            CASE WHEN (SELECT COUNT(*) from users) == 0
-            THEN 'Admin'
-            ELSE 'Registered'
-            END
-        )
-        RETURNING app_role
-        "#,
-        user.display_name,
-        id,
-        keys
-    )
-    .fetch_one(pool)
-    .await?;
-
-    user.role = Role::from_str(&rec.app_role)?;
-
-    Ok(())
-}
-
-pub async fn find_by_passkey(pool: &SqlitePool, passkey: &Passkey) -> Result<Option<User>> {
-    Ok(query_as(
-        r#"
-        SELECT 
-            display_name,
-            id,
-            keys,
-            app_role as role
-        FROM users
-        WHERE
-            EXISTS (SELECT 1 FROM json_each(keys) WHERE value = ?1)
-    "#,
-    )
-    .bind(serde_json::to_string(passkey)?)
-    .fetch_optional(pool)
-    .await?)
-}
-
-pub async fn find_by_uuid(pool: &SqlitePool, uuid: &Uuid) -> Result<Option<User>> {
-    Ok(query_as(
-        r#"
-        SELECT 
-            display_name,
-            id,
-            keys,
-            app_role as role
-        FROM users
-        WHERE
-            id = ?1
-    "#,
-    )
-    .bind(uuid.to_string())
-    .fetch_optional(pool)
-    .await?)
-}
-
-pub async fn update(pool: &SqlitePool, user: &mut User) -> Result<()> {
-    let id = user.id.to_string();
-    let keys = serde_json::to_string(&user.keys)?;
-    let role = user.role.to_string();
-
-    query!(
-        r#"
-        update users
-        set 
-            display_name = ?1,
-            keys = ?2,
-            app_role = ?3
-        where
-            id = ?4
-        "#,
-        user.display_name,
-        keys,
-        role,
-        id
-    )
-    .execute(pool)
-    .await?;
-
-    Ok(())
 }

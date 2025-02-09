@@ -1,9 +1,9 @@
+use crate::web::app_state::AppState;
 use axum::Router;
 use content::content_router;
 use management::management_router;
 
-use crate::web::app_state::AppState;
-
+pub mod attachments;
 pub mod content;
 pub mod management;
 

@@ -1,10 +1,7 @@
-use crate::db::dao::content_pages;
+use crate::db::dao::content_pages::ContentPageDao;
 use crate::web::app_error::AppError;
 use crate::{
-    db::dao::{
-        roles::Role,
-        users::{create, find_by_passkey, find_by_uuid, update, User},
-    },
+    db::dao::{roles::Role, users::User},
     web::{
         app_state::AppState,
         html_template::HtmlTemplate,
@@ -51,7 +48,7 @@ async fn login_page(
     session_data: SessionData,
 ) -> Result<HtmlTemplate<LoginTemplate>, AppError> {
     let top_bar =
-        TopBar::new(content_pages::find_page_titles(&state.pool).await?).make_active("login");
+        TopBar::new(ContentPageDao::find_page_titles(&state.pool).await?).make_active("login");
     let template = LoginTemplate {
         top_bar,
         auth_state: session_data.auth_state,
@@ -83,7 +80,7 @@ async fn finish_authentication(
 ) -> Result<Redirect, AppError> {
     let (client_uuid, _) = state.webauthn.identify_discoverable_authentication(&pkc)?;
 
-    let mut user = find_by_uuid(&state.pool, &client_uuid)
+    let mut user = User::find_by_uuid(&state.pool, &client_uuid)
         .await?
         .ok_or(anyhow!("User not found"))?;
 
@@ -98,7 +95,7 @@ async fn finish_authentication(
                 x.update_credential(&auth_result);
             });
 
-            update(&state.pool, &mut user).await?;
+            user.update(&state.pool).await?;
         }
 
         debug!("Logged in {:#?}", user);
@@ -153,14 +150,17 @@ async fn finish_registration(
     if let AuthenticationState::RegistrationStarted((rs, mut user)) = session_data.auth_state {
         let passkey = state.webauthn.finish_passkey_registration(&rpc, &rs)?;
 
-        if find_by_passkey(&state.pool, &passkey).await?.is_some() {
+        if User::find_by_passkey(&state.pool, &passkey)
+            .await?
+            .is_some()
+        {
             return Err(anyhow!("Passkey already registered").into());
         };
 
         user.keys = vec![passkey];
         user.role = Role::Registered;
 
-        create(&state.pool, &mut user).await?;
+        user.create(&state.pool).await?;
 
         session.cycle_id().await?;
         session_data.auth_state = AuthenticationState::Authenticated(user);

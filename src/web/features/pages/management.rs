@@ -1,8 +1,5 @@
 use crate::{
-    db::dao::{
-        content_pages::{self, get_page_by_name, save, ContentPage},
-        roles::Role,
-    },
+    db::dao::{content_pages::ContentPageDao, roles::Role},
     web::{
         app_error::AppError,
         app_state::AppState,
@@ -14,10 +11,10 @@ use crate::{
 use anyhow::anyhow;
 use askama::Template;
 use axum::{
-    extract::{Path, State},
-    response::{IntoResponse, Redirect, Response},
-    routing::{delete, get, patch, put},
-    Json, Router,
+    extract::State,
+    response::IntoResponse,
+    routing::{get, patch, put},
+    Router,
 };
 use axum_extra::extract::Form;
 use http::HeaderMap;
@@ -49,9 +46,9 @@ pub async fn edit_pages_view(
         }
     }
 
-    let top_bar = TopBar::new(content_pages::find_page_titles(&state.pool).await?);
+    let top_bar = TopBar::new(ContentPageDao::find_page_titles(&state.pool).await?);
 
-    let pages = content_pages::find_page_titles_and_special(&state.pool).await?;
+    let pages = ContentPageDao::find_page_titles_and_special(&state.pool).await?;
 
     Ok(HtmlTemplate(EditPagesTemplate {
         top_bar,
@@ -76,7 +73,7 @@ pub async fn reorder_pages(
         }
     }
 
-    let pages = content_pages::find_page_titles_and_special(&state.pool).await?;
+    let pages = ContentPageDao::find_page_titles_and_special(&state.pool).await?;
     let page_titles: Vec<String> = pages.into_iter().map(|(t, _)| t).collect();
 
     let title_order_set: HashSet<&String> = title_order.titles.iter().collect();
@@ -94,12 +91,12 @@ pub async fn reorder_pages(
     //Now we can reorder the pages in the database
     let mut transaction = state.pool.begin().await?;
     for (i, title) in title_order.titles.iter().enumerate() {
-        let mut page = get_page_by_name(&mut *transaction, title)
+        let mut page = ContentPageDao::get_page_by_name(&mut *transaction, title)
             .await?
             .ok_or_else(|| anyhow!("Unable to load page to reorder"))?;
 
         page.page_order = i64::try_from(i)?;
-        save(&mut *transaction, &page).await?;
+        page.save(&mut *transaction).await?;
     }
     transaction.commit().await?;
 
@@ -125,19 +122,19 @@ pub async fn create_page(
         }
     }
 
-    let page = get_page_by_name(&state.pool, &form.page_name).await?;
+    let page = ContentPageDao::get_page_by_name(&state.pool, &form.page_name).await?;
     if page.is_some() {
         return Err(anyhow!("Page Already Exists").into());
     }
 
-    let cp = ContentPage {
+    let cp = ContentPageDao {
         page_name: form.page_name,
         page_markdown: "".to_string(),
         page_order: 0,
         special_page: false,
     };
 
-    save(&state.pool, &cp).await?;
+    cp.save(&state.pool).await?;
 
     let mut headers = HeaderMap::new();
     headers.insert("HX-Refresh", "true".parse()?);

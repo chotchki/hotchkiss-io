@@ -21,3 +21,4 @@ Christopher Hotchkiss's personal site / CRM system
 - Need to figure out how to control navigation tabs without having to pass it around like crazy
 - Need to figure out codesigning the server executable
     - Dylan has a great example here: https://github.com/dylanwh/lilguy/blob/main/macos/build.sh
+- Fix the sticky footer issue

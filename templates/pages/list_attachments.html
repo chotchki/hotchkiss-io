@@ -1,0 +1,20 @@
+<div class="p-2">
+    {% if attachment_names.len() == 0 %}
+    <p>No attachements</p>
+    {% else %}
+    {% for name in attachment_names %}
+    <div class="outline p-2 flex">
+        <a href="/attachments/{{parent_page}}/{{name}}" class="p-1">{{name}}</a>
+        <div class="grow"></div>
+        <button hx-delete="/attachments/{{parent_page}}/{{name}}" class="p-1 bg-red-500 text-white">Delete</button>
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    <div class="p-2">
+        <form hx-put="/attachments/{{parent_page}}" enctype="multipart/form-data">
+            <input class="border border-navy" name="attachments" id="attachments" type="file" multiple="true" required />
+            <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Upload Attachments</button>
+        </form>
+    </div>
+</div>

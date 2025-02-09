@@ -1,11 +1,9 @@
-use std::time::Duration;
-
+use crate::db::dao::certificate::CertificateDao;
 use anyhow::Result;
 use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 use sqlx::SqlitePool;
+use std::time::Duration;
 use x509_parser::parse_x509_certificate;
-
-use crate::db::dao::certificate;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct CertificateLoader {
@@ -18,7 +16,7 @@ impl CertificateLoader {
         pool: &SqlitePool,
         domain: String,
     ) -> Result<Option<CertificateLoader>> {
-        match certificate::find_by_domain(pool, &domain).await? {
+        match CertificateDao::find_by_domain(pool, &domain).await? {
             Some(cd) => {
                 let mut cc = vec![];
                 for cert in CertificateDer::pem_slice_iter(cd.certificate_chain.as_bytes()) {

@@ -1,8 +1,5 @@
 use crate::{
-    db::dao::{
-        content_pages::{self, get_page_by_name, save, ContentPage},
-        roles::Role,
-    },
+    db::dao::{content_pages::ContentPageDao, roles::Role},
     web::{
         app_error::AppError,
         app_state::AppState,
@@ -17,7 +14,7 @@ use axum::{
     extract::{Path, State},
     response::{IntoResponse, Redirect, Response},
     routing::{delete, get, patch, put},
-    Form, Json, Router,
+    Form, Router,
 };
 use http::HeaderMap;
 use serde::Deserialize;
@@ -42,7 +39,7 @@ pub struct PagesTemplate {
 }
 
 pub async fn default_page(State(state): State<AppState>) -> Result<Redirect, AppError> {
-    let titles = content_pages::find_page_titles(&state.pool).await?;
+    let titles = ContentPageDao::find_page_titles(&state.pool).await?;
 
     match titles.first() {
         Some(f) => Ok(Redirect::temporary(&format!("/pages/{f}"))),
@@ -55,7 +52,7 @@ pub async fn page_by_title(
     session_data: SessionData,
     Path(page_name): Path<String>,
 ) -> Result<Response, AppError> {
-    let page = get_page_by_name(&state.pool, &page_name)
+    let page = ContentPageDao::get_page_by_name(&state.pool, &page_name)
         .await?
         .ok_or_else(|| anyhow!("Unknown page"))?;
 
@@ -64,7 +61,7 @@ pub async fn page_by_title(
     }
 
     let top_bar =
-        TopBar::new(content_pages::find_page_titles(&state.pool).await?).make_active(&page_name);
+        TopBar::new(ContentPageDao::find_page_titles(&state.pool).await?).make_active(&page_name);
 
     let pt = PagesTemplate {
         top_bar,
@@ -88,7 +85,7 @@ pub async fn delete_page(
         }
     }
 
-    let page = get_page_by_name(&state.pool, &page_name)
+    let page = ContentPageDao::get_page_by_name(&state.pool, &page_name)
         .await?
         .ok_or_else(|| anyhow!("Unknown page"))?;
 
@@ -96,7 +93,7 @@ pub async fn delete_page(
         return Err(anyhow!("Cannot delete special pages").into());
     }
 
-    content_pages::delete(&state.pool, &page_name).await?;
+    page.delete(&state.pool).await?;
 
     let mut headers = HeaderMap::new();
     headers.insert("HX-Refresh", "true".parse()?);
@@ -121,9 +118,9 @@ pub async fn edit_page(
         }
     }
 
-    let mut page = get_page_by_name(&state.pool, &page_name)
+    let mut page = ContentPageDao::get_page_by_name(&state.pool, &page_name)
         .await?
-        .unwrap_or_else(|| ContentPage {
+        .unwrap_or_else(|| ContentPageDao {
             page_name,
             page_order: 0,
             page_markdown: page_markdown.markdown.clone(),
@@ -132,7 +129,7 @@ pub async fn edit_page(
 
     page.page_markdown = page_markdown.markdown;
 
-    save(&state.pool, &page).await?;
+    page.save(&state.pool).await?;
 
     let mut headers = HeaderMap::new();
     headers.insert("HX-Refresh", "true".parse()?);
@@ -151,8 +148,14 @@ pub async fn preview_page(
     Path(page_name): Path<String>,
     Form(page_markdown): Form<PreviewForm>,
 ) -> Result<Response, AppError> {
+    if let AuthenticationState::Authenticated(user) = &session_data.auth_state {
+        if user.role != Role::Admin {
+            return Err(anyhow!("Invalid Permission").into());
+        }
+    }
+
     let top_bar =
-        TopBar::new(content_pages::find_page_titles(&state.pool).await?).make_active(&page_name);
+        TopBar::new(ContentPageDao::find_page_titles(&state.pool).await?).make_active(&page_name);
 
     let pt = PagesTemplate {
         top_bar,

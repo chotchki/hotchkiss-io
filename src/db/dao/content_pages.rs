@@ -1,20 +1,21 @@
 use anyhow::Result;
-use sqlx::{prelude::FromRow, query, query_as, Executor, Sqlite, SqlitePool};
+use sqlx::{prelude::FromRow, query, query_as, SqliteExecutor, SqlitePool};
 use tracing::debug;
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
-pub struct ContentPage {
+pub struct ContentPageDao {
     pub page_name: String,
     pub page_markdown: String,
     pub page_order: i64,
     pub special_page: bool,
 }
 
-pub async fn save(executor: impl sqlx::SqliteExecutor<'_>, cp: &ContentPage) -> Result<()> {
-    debug!("Saving Content Page {}", cp.page_name);
+impl ContentPageDao {
+    pub async fn save(&self, executor: impl SqliteExecutor<'_>) -> Result<()> {
+        debug!("Saving Content Page {}", self.page_name);
 
-    query!(
-        r#"
+        query!(
+            r#"
         INSERT INTO content_pages (
             page_name,
             page_markdown,
@@ -32,53 +33,53 @@ pub async fn save(executor: impl sqlx::SqliteExecutor<'_>, cp: &ContentPage) -> 
                 page_order = ?3,
                 special_page = ?4
         "#,
-        cp.page_name,
-        cp.page_markdown,
-        cp.page_order,
-        cp.special_page
-    )
-    .execute(executor)
-    .await?;
+            self.page_name,
+            self.page_markdown,
+            self.page_order,
+            self.special_page
+        )
+        .execute(executor)
+        .await?;
 
-    Ok(())
-}
+        Ok(())
+    }
 
-pub async fn delete(pool: &SqlitePool, page_name: &str) -> Result<()> {
-    query!(
-        r#"
-        DELETE FROM content_pages
-        WHERE page_name = ?1
-        and special_page = false
-        "#,
-        page_name
-    )
-    .execute(pool)
-    .await?;
+    pub async fn delete(&self, pool: &SqlitePool) -> Result<()> {
+        query!(
+            r#"
+            DELETE FROM content_pages
+            WHERE page_name = ?1
+            and special_page = false
+            "#,
+            self.page_name
+        )
+        .execute(pool)
+        .await?;
 
-    Ok(())
-}
+        Ok(())
+    }
 
-pub async fn find_page_titles(pool: &SqlitePool) -> Result<Vec<String>> {
-    let title_recs = query!(
-        r#"
+    pub async fn find_page_titles(pool: &SqlitePool) -> Result<Vec<String>> {
+        let title_recs = query!(
+            r#"
         select 
             page_name
         from
             content_pages
         order by page_order
         "#
-    )
-    .fetch_all(pool)
-    .await?;
+        )
+        .fetch_all(pool)
+        .await?;
 
-    let titles: Vec<String> = title_recs.into_iter().map(|r| r.page_name).collect();
+        let titles: Vec<String> = title_recs.into_iter().map(|r| r.page_name).collect();
 
-    Ok(titles)
-}
+        Ok(titles)
+    }
 
-pub async fn find_page_titles_and_special(pool: &SqlitePool) -> Result<Vec<(String, bool)>> {
-    let title_recs: Vec<(String, bool)> = query_as(
-        r#"
+    pub async fn find_page_titles_and_special(pool: &SqlitePool) -> Result<Vec<(String, bool)>> {
+        let title_recs: Vec<(String, bool)> = query_as(
+            r#"
         select 
             page_name, 
             special_page
@@ -86,19 +87,19 @@ pub async fn find_page_titles_and_special(pool: &SqlitePool) -> Result<Vec<(Stri
             content_pages
         order by page_order
         "#,
-    )
-    .fetch_all(pool)
-    .await?;
+        )
+        .fetch_all(pool)
+        .await?;
 
-    Ok(title_recs)
-}
+        Ok(title_recs)
+    }
 
-pub async fn get_page_by_name(
-    executor: impl sqlx::SqliteExecutor<'_>,
-    page_name: &str,
-) -> Result<Option<ContentPage>> {
-    Ok(query_as(
-        r#"
+    pub async fn get_page_by_name(
+        executor: impl sqlx::SqliteExecutor<'_>,
+        page_name: &str,
+    ) -> Result<Option<ContentPageDao>> {
+        Ok(query_as(
+            r#"
         select
             page_name,
             page_markdown,
@@ -109,10 +110,11 @@ pub async fn get_page_by_name(
         where
             page_name = ?1
     "#,
-    )
-    .bind(page_name)
-    .fetch_optional(executor)
-    .await?)
+        )
+        .bind(page_name)
+        .fetch_optional(executor)
+        .await?)
+    }
 }
 
 #[cfg(test)]
@@ -121,19 +123,19 @@ mod tests {
 
     #[sqlx::test]
     async fn roundtrip(pool: SqlitePool) -> Result<()> {
-        let cp = ContentPage {
+        let cp = ContentPageDao {
             page_name: "test".to_string(),
             page_markdown: "test content".to_string(),
             page_order: 1,
             special_page: true,
         };
 
-        save(&pool, &cp).await?;
+        cp.save(&pool).await?;
 
-        let found_cp = get_page_by_name(&pool, "test").await?;
+        let found_cp = ContentPageDao::get_page_by_name(&pool, "test").await?;
         assert_eq!(cp, found_cp.unwrap());
 
-        let page_titles = find_page_titles(&pool).await?;
+        let page_titles = ContentPageDao::find_page_titles(&pool).await?;
 
         assert_eq!(vec!["test".to_string()], page_titles);
 
@@ -142,19 +144,19 @@ mod tests {
 
     #[sqlx::test]
     async fn roundtrip_not_special(pool: SqlitePool) -> Result<()> {
-        let cp = ContentPage {
+        let cp = ContentPageDao {
             page_name: "test".to_string(),
             page_markdown: "test content".to_string(),
             page_order: 1,
             special_page: false,
         };
 
-        save(&pool, &cp).await?;
+        cp.save(&pool).await?;
 
-        let found_cp = get_page_by_name(&pool, "test").await?;
+        let found_cp = ContentPageDao::get_page_by_name(&pool, "test").await?;
         assert_eq!(cp, found_cp.unwrap());
 
-        let page_titles = find_page_titles(&pool).await?;
+        let page_titles = ContentPageDao::find_page_titles(&pool).await?;
 
         assert_eq!(vec!["test".to_string()], page_titles);
 

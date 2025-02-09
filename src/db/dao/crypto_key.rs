@@ -11,6 +11,71 @@ pub struct CryptoKey {
     pub key_value: Key,
 }
 
+impl CryptoKey {
+    pub async fn create(&self, pool: &SqlitePool) -> Result<()> {
+        debug!("Creating key");
+
+        let master_key = json!(self.key_value.master());
+        query!(
+            r#"
+        INSERT INTO crypto_keys (
+            id,
+            key_value
+        ) VALUES (
+            ?1,
+            ?2
+        )
+        "#,
+            self.id,
+            master_key
+        )
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn find_by_id(pool: &SqlitePool, id: i64) -> Result<Option<CryptoKey>> {
+        debug!("Finding key id {id}");
+        let key: Option<CryptoKey> = query_as(
+            r#"
+            select 
+                id,
+                key_value
+            from 
+                crypto_keys
+            where id = ?1
+        "#,
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+
+        debug!("Sql returned");
+
+        Ok(key)
+    }
+
+    pub async fn get_or_create(pool: &SqlitePool, id: i64) -> Result<CryptoKey> {
+        match Self::find_by_id(pool, id).await? {
+            Some(s) => {
+                debug!("Found key");
+                Ok(s)
+            }
+            None => {
+                debug!("Didn't find, creating");
+
+                let key = CryptoKey {
+                    id,
+                    key_value: Key::generate(),
+                };
+                key.create(pool).await?;
+                Ok(key)
+            }
+        }
+    }
+}
+
 impl FromRow<'_, SqliteRow> for CryptoKey {
     fn from_row(row: &SqliteRow) -> sqlx::Result<Self> {
         debug!("Decoding using FromRow");
@@ -33,69 +98,6 @@ impl FromRow<'_, SqliteRow> for CryptoKey {
     }
 }
 
-pub async fn create(pool: &SqlitePool, key: &CryptoKey) -> Result<()> {
-    debug!("Creating key");
-
-    let master_key = json!(key.key_value.master());
-    query!(
-        r#"
-        INSERT INTO crypto_keys (
-            id,
-            key_value
-        ) VALUES (
-            ?1,
-            ?2
-        )
-        "#,
-        key.id,
-        master_key
-    )
-    .execute(pool)
-    .await?;
-
-    Ok(())
-}
-
-pub async fn find_by_id(pool: &SqlitePool, id: i64) -> Result<Option<CryptoKey>> {
-    debug!("Finding key id {id}");
-    let key: Option<CryptoKey> = query_as(
-        r#"
-            select 
-                id,
-                key_value
-            from 
-                crypto_keys
-            where id = ?1
-        "#,
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
-
-    debug!("Sql returned");
-
-    Ok(key)
-}
-
-pub async fn get_or_create(pool: &SqlitePool, id: i64) -> Result<CryptoKey> {
-    match find_by_id(pool, id).await? {
-        Some(s) => {
-            debug!("Found key");
-            Ok(s)
-        }
-        None => {
-            debug!("Didn't find, creating");
-
-            let key = CryptoKey {
-                id,
-                key_value: Key::generate(),
-            };
-            create(pool, &key).await?;
-            Ok(key)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,9 +109,9 @@ mod tests {
             key_value: Key::generate(),
         };
 
-        create(&pool, &ck).await?;
+        ck.create(&pool).await?;
 
-        let found_ck = find_by_id(&pool, 2)
+        let found_ck = CryptoKey::find_by_id(&pool, 2)
             .await?
             .expect("We just inserted this value");
 

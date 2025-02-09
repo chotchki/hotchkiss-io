@@ -1,7 +1,7 @@
 use super::dns::cloudflare_client::CloudflareClient;
 use crate::{
     coordinator::acme::{certificate_loader::CertificateLoader, instant_acme::InstantAcmeDomain},
-    db::dao::certificate::{self, CertificateDao},
+    db::dao::certificate::CertificateDao,
     settings::Settings,
 };
 use anyhow::Result;
@@ -79,15 +79,12 @@ impl AcmeProviderService {
                 let (cert_chain, private_key) = instant_acme.order_cert().await?;
 
                 debug!("Saving new cert");
-                certificate::upsert(
-                    &self.pool,
-                    &CertificateDao {
-                        domain: self.settings.domain.clone(),
-                        certificate_chain: cert_chain,
-                        private_key,
-                    },
-                )
-                .await?;
+                let cd = CertificateDao {
+                    domain: self.settings.domain.clone(),
+                    certificate_chain: cert_chain,
+                    private_key,
+                };
+                cd.save(&self.pool).await?;
             }
         }
     }

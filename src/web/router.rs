@@ -1,5 +1,8 @@
 use super::{app_state::AppState, features::login::login_router, static_content::static_content};
-use crate::{db::dao::crypto_key::get_or_create, web::features::pages::pages_router};
+use crate::{
+    db::dao::crypto_key::CryptoKey,
+    web::features::pages::{attachments::attachments_router, pages_router},
+};
 use anyhow::Result;
 use axum::{http::Uri, response::Redirect, routing::get, Router};
 use build_time::build_time_utc;
@@ -18,7 +21,7 @@ pub const BUILD_TIME_CACHE_BUST: &str = build_time_utc!("%s");
 pub async fn create_router(app_state: AppState) -> Result<Router> {
     // Generate a cryptographic key to sign the session cookie.
     debug!("Getting cookie key");
-    let key = get_or_create(&app_state.pool, 1).await?;
+    let key = CryptoKey::get_or_create(&app_state.pool, 1).await?;
 
     debug!("Making session layer");
     let session_layer = SessionManagerLayer::new(app_state.session_store.clone())
@@ -29,6 +32,7 @@ pub async fn create_router(app_state: AppState) -> Result<Router> {
     debug!("Making router");
     Ok(Router::new()
         .route("/", get(redirect_to_pages))
+        .nest("/attachments", attachments_router())
         .nest("/pages", pages_router())
         .nest("/login", login_router())
         .with_state(app_state)

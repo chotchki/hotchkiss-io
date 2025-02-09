@@ -10,8 +10,7 @@ use tokio::time::sleep;
 use tracing::{debug, error, info};
 
 use crate::{
-    coordinator::dns::cloudflare_client::CloudflareClient,
-    db::dao::acme_account::{self, AcmeAccountDao},
+    coordinator::dns::cloudflare_client::CloudflareClient, db::dao::acme_account::AcmeAccountDao,
 };
 
 pub struct InstantAcmeDomain {
@@ -26,7 +25,7 @@ impl InstantAcmeDomain {
         domain: String,
         client: CloudflareClient,
     ) -> Result<InstantAcmeDomain> {
-        match acme_account::find_by_domain(pool, &domain).await? {
+        match AcmeAccountDao::find_by_domain(pool, &domain).await? {
             Some(aa) => {
                 debug!("Found account");
                 let account_credentials = serde_json::from_str(&aa.account_credentials)?;
@@ -62,7 +61,7 @@ impl InstantAcmeDomain {
                     domain: domain.clone(),
                     account_credentials: serde_json::to_string(&credentials)?,
                 };
-                acme_account::create(pool, &aa).await?;
+                aa.create(pool).await?;
 
                 debug!("Returning credentials");
                 Ok(Self {
