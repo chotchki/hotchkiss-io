@@ -4,6 +4,8 @@
 
     /// This function is used to ensure browser functionality exists, do not call the other functions without it returning true
     async function webauthn_conditional_support() {
+        console.log("Performing conditional checks");
+
         if (!polyfill_webauthn.supported()) {
             console.error("Webauthn functions missing");
             return false;
@@ -14,13 +16,18 @@
             return false;
         }
 
-        if (!await PublicKeyCredential.isConditionalMediationAvailable()) {
-            console.error("Webauthn conditional mediation not availible");
-            return false;
-        }
+        try {
+            if (!await PublicKeyCredential.isConditionalMediationAvailable()) {
+                console.error("Webauthn conditional mediation not availible");
+                return false;
+            }
 
-        if (!await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()) {
-            console.error("Webauthn platform authenticator not availible");
+            if (!await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()) {
+                console.error("Webauthn platform authenticator not availible");
+                return false;
+            }
+        } catch (e) {
+            console.error("Platform checks failed with: " + e);
             return false;
         }
 
@@ -29,6 +36,7 @@
 
     /// Attempt to authenticate using the conditional api
     async function webauthn_authenticate(auth_opt_url, auth_finish_url) {
+        console.log("Calling webauthn_authenticate");
         const auth_opt_response = await fetch(auth_opt_url);
         if (!auth_opt_response.ok) {
             console.error("Response from auth options: ${response.status}");
@@ -99,15 +107,24 @@
             if (name !== "htmx:afterProcessNode") {
                 return;
             }
-            console.log("Fired Webauthn Autofill");
+            if (!evt.target.getAttribute('webauthn-autofill')) {
+                return;
+            }
+            console.log("Fired Webauthn Autofill for node " + evt.detail.elt);
             webauthn_conditional_support()
-                .then(wcs => webauthn_authenticate("/login/get_auth_opts", "/login/finish_authentication"))
+                .then(wcs => {
+                    console.log("Firing post conditional support check");
+                    return webauthn_authenticate("/login/get_auth_opts", "/login/finish_authentication");
+                })
                 .then(auth => {
                     if (auth) {
                         window.location.href = "/";
                     } else {
                         document.getElementById("error_message").innerHTML = "Error logging in";
                     }
+                })
+                .catch(err => {
+                    console.error("Had a problem " + err);
                 });
         },
 
@@ -121,7 +138,7 @@
             if (name !== "htmx:beforeRequest") {
                 return;
             }
-            console.log("Fired Webauthn Register");
+            console.log("Fired Webauthn Register for node " + evt.detail.elt);
             evt.preventDefault();
 
             const username = document.getElementById("username").value;

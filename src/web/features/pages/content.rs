@@ -17,6 +17,7 @@ use axum::{
     Form, Router,
 };
 use http::HeaderMap;
+use markdown::Options;
 use serde::Deserialize;
 
 pub fn content_router() -> Router<AppState> {
@@ -27,6 +28,11 @@ pub fn content_router() -> Router<AppState> {
         .route("/{:page_name}", delete(delete_page))
         .route("/{:page_name}/preview", patch(preview_page))
 }
+
+//const MARKDOWN_OPTIONS: Options = Options {
+//    parse: todo!(),
+//    compile: todo!(),
+//};
 
 #[derive(Template)]
 #[template(path = "pages/content_page.html")]
