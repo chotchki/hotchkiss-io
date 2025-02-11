@@ -5,6 +5,7 @@ use crate::{
         app_state::AppState,
         features::top_bar::TopBar,
         html_template::HtmlTemplate,
+        markdown::transformer::transform,
         session::{AuthenticationState, SessionData},
     },
 };
@@ -17,7 +18,6 @@ use axum::{
     Form, Router,
 };
 use http::HeaderMap;
-use markdown::Options;
 use serde::Deserialize;
 
 pub fn content_router() -> Router<AppState> {
@@ -74,7 +74,7 @@ pub async fn page_by_title(
         auth_state: session_data.auth_state,
         page_name,
         markdown: page.page_markdown.clone(),
-        rendered_markdown: markdown::to_html(&page.page_markdown),
+        rendered_markdown: transform(&page.page_markdown)?,
     };
 
     Ok(HtmlTemplate(pt).into_response())

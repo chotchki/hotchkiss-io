@@ -1,13 +1,25 @@
 {% extends "base.html" %}
 {% block title %}{{page_name}}{% endblock %}
 
+{% block head %}
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.173.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.173.0/examples/jsm/"
+    }
+  }
+</script>
+<script src="/scripts/htmx-stl-view.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" type="module"></script>
+{% endblock %}
+
 {% block content %}
 {% if let AuthenticationState::Authenticated(user) = auth_state %}
 {% if user.role == Role::Admin %}
 <form hx-put="./{{page_name}}">
     <div class="m-2">
         <textarea hx-patch="./{{page_name}}/preview" hx-swap="outerHTML" hx-select="#rendered" hx-target="#rendered" hx-trigger="keyup changed delay:500ms" hx-sync="closest form:abort" id="markdown"
-            name="markdown" class="outline w-full min-h-40">{{markdown}}</textarea>
+            name="markdown" class="outline w-full min-h-40 p-2">{{markdown}}</textarea>
     </div>
 
     <div class="m-2 flex flex-row-reverse">
