@@ -3,100 +3,194 @@ import Stats from 'three/addons/libs/stats.module.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 
-//Using the code from the STL Loader example here: https://threejs.org/examples/?q=stl#webgl_loader_stl
-function addShadowedLight(scene, x, y, z, color, intensity) {
+/*
+ * From: https://wejn.org/2020/12/cracking-the-threejs-object-fitting-nut/
+ * @author: Michal Jirku
+ *
+ * A small datatag handler to initialize custom StlViewer.
+ *
+ * This is inspired by:
+ * - https://tonybox.net/posts/simple-stl-viewer/
+ * - https://github.com/omrips/viewstl
+ * - https://github.com/mrdoob/three.js/issues/6784#issuecomment-315968779
+ * - https://themetalmuncher.github.io/fov-calc/
+ * - http://chrisjones.id.au/FOV/fovtext.htm
+ *
+ * License: MIT.
+ *
+ */
+(function () {
+    function StlViewer(elem, data) {
+        //if (!THREE.WEBGL.isWebGLAvailable()) {
+        //    elem.appendChild(THREE.WEBGL.getWebGLErrorMessage()); // FIXME: own (styled) message
+        //    return;
+        //}
 
-    const directionalLight = new THREE.DirectionalLight(color, intensity);
-    directionalLight.position.set(x, y, z);
-    scene.add(directionalLight);
+        var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        var camera = new THREE.PerspectiveCamera(50, elem.clientWidth / elem.clientHeight, 0.1, 1000);
 
-    directionalLight.castShadow = true;
+        renderer.setSize(elem.clientWidth, elem.clientHeight);
+        elem.appendChild(renderer.domElement);
 
-    const d = 1;
-    directionalLight.shadow.camera.left = - d;
-    directionalLight.shadow.camera.right = d;
-    directionalLight.shadow.camera.top = d;
-    directionalLight.shadow.camera.bottom = - d;
+        window.addEventListener('resize', function () {
+            renderer.setSize(elem.clientWidth, elem.clientHeight);
+            camera.aspect = elem.clientWidth / elem.clientHeight;
+            camera.updateProjectionMatrix();
+        }, false);
 
-    directionalLight.shadow.camera.near = 1;
-    directionalLight.shadow.camera.far = 4;
+        var controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.rotateSpeed = 0.5;
+        controls.dampingFactor = 0.25;
+        controls.enableZoom = true;
+        controls.enablePan = false;
+        controls.autoRotate = true;
 
-    directionalLight.shadow.bias = - 0.002;
+        var scene = new THREE.Scene();
 
-}
+        // Setup lights (dependent on camera); stolen from viewstl
+        scene.add(camera);
+        camera.add(new THREE.AmbientLight(0x202020));
+        let dl = new THREE.DirectionalLight(0xffffff, 0.75);
+        dl.position.x = 1;
+        dl.position.y = 1;
+        dl.position.z = 2;
+        dl.position.normalize();
+        camera.add(dl);
+        let pl = new THREE.PointLight(0xffffff, 0.3);
+        pl.position.x = 0;
+        pl.position.y = -25;
+        pl.position.z = 10;
+        pl.position.normalize();
+        camera.add(pl);
 
-htmx.onLoad(function (content) {
-    var stl_objects = content.querySelectorAll(".stl-view");
+        (new STLLoader()).load(data['filename'], function (geometry) {
 
-    for (const stl_o of stl_objects) {
-        const stl_url = stl_o.attributes['src'].nodeValue;
+            // Determine the color
+            var colorString = data['color'];
+            if (colorString != null) { var color = new THREE.Color(colorString); }
+            else { var color = 0x909090 }
 
-        let camera = new THREE.PerspectiveCamera(35, stl_o.clientWidth / stl_o.clientHeight, 1, 15);
-        camera.position.set(3, 0.15, 3);
-
-        let cameraTarget = new THREE.Vector3(0, - 0.25, 0);
-
-        let scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x72645b);
-        //scene.fog = new THREE.Fog(0x72645b, 2, 15);
-
-        // Ground
-        //const plane = new THREE.Mesh(
-        //    new THREE.PlaneGeometry(40, 40),
-        //    new THREE.MeshPhongMaterial({ color: 0xcbcbcb, specular: 0x474747 })
-        //);
-        //plane.rotation.x = - Math.PI / 2;
-        //plane.position.y = - 0.5;
-        //scene.add(plane);
-
-        //plane.receiveShadow = true;
-
-        // ASCII file
-
-        const loader = new STLLoader();
-        loader.load(stl_url, function (geometry) {
-
-            const material = new THREE.MeshPhongMaterial({ color: 0xff9c7c, specular: 0x494949, shininess: 200 });
-            const mesh = new THREE.Mesh(geometry, material);
-
-            //mesh.position.set(0.5, 0.2, 0);
-            mesh.position.set(0, - 0.25, 0.6);
-            mesh.rotation.set(0, - Math.PI / 2, 0);
-            mesh.scale.set(0.05, 0.05, 0.05);
-
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-
+            // Set up the material
+            var material = new THREE.MeshLambertMaterial({ color: color, wireframe: false, vertexColors: false });
+            var mesh = new THREE.Mesh(geometry, material);
             scene.add(mesh);
 
+            // Compute the middle
+            var middle = new THREE.Vector3();
+            geometry.computeBoundingBox();
+            geometry.boundingBox.getCenter(middle);
+
+            // Center it
+            mesh.geometry.applyMatrix4(new THREE.Matrix4().makeTranslation(-middle.x, -middle.y, -middle.z));
+
+            // Rotate, if desired
+            var to_rad = Math.PI / 180;
+            mesh.rotation.x = to_rad * (data['rotationx'] || 0);
+            mesh.rotation.y = to_rad * (data['rotationy'] || 0);
+            mesh.rotation.z = to_rad * (data['rotationz'] || 0);
+
+            var helper = null;
+            if (data['showbb']) {
+                // Show bounding box, if desired
+                var helper = new THREE.BoxHelper(mesh);
+                helper.material.color.set(0xbbddff);
+                scene.add(helper);
+            }
+
+            // Pull the camera away as needed
+            fitCameraToCenteredObject(camera, mesh, data['camoffset'] || 1, controls);
+
+            var animate = function () {
+                requestAnimationFrame(animate);
+                if (helper) {
+                    helper.update();
+                }
+                controls.update();
+                // console.log([data['filename'], JSON.stringify(camera.position)]);
+                renderer.render(scene, camera);
+            }; animate();
+
         });
-
-        // Lights
-
-        scene.add(new THREE.HemisphereLight(0x8d7c7c, 0x494966, 3));
-
-        addShadowedLight(scene, 1, 1, 1, 0xffffff, 3.5);
-        addShadowedLight(scene, 0.5, 1, - 1, 0xffd500, 3);
-
-        // renderer
-        let renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setPixelRatio(window.devicePixelRatio);
-        renderer.setSize(stl_o.clientWidth, stl_o.clientHeight);
-
-        renderer.shadowMap.enabled = true;
-
-        stl_o.appendChild(renderer.domElement);
-
-        let controls = new OrbitControls(camera, renderer.domElement);
-        controls.addEventListener('change', () => {
-            renderer.render(scene, camera);
-        });
-
-        camera.lookAt(cameraTarget);
-
-        renderer.render(scene, camera);
     }
 
+    const fitCameraToCenteredObject = function (camera, object, offset, orbitControls) {
+        const boundingBox = new THREE.Box3();
+        boundingBox.setFromObject(object);
 
+        var middle = new THREE.Vector3();
+        var size = new THREE.Vector3();
+        boundingBox.getSize(size);
 
-});
+        // figure out how to fit the box in the view:
+        // 1. figure out horizontal FOV (on non-1.0 aspects)
+        // 2. figure out distance from the object in X and Y planes
+        // 3. select the max distance (to fit both sides in)
+        //
+        // The reason is as follows:
+        //
+        // Imagine a bounding box (BB) is centered at (0,0,0).
+        // Camera has vertical FOV (camera.fov) and horizontal FOV
+        // (camera.fov scaled by aspect, see fovh below)
+        //
+        // Therefore if you want to put the entire object into the field of view,
+        // you have to compute the distance as: z/2 (half of Z size of the BB
+        // protruding towards us) plus for both X and Y size of BB you have to
+        // figure out the distance created by the appropriate FOV.
+        //
+        // The FOV is always a triangle:
+        //
+        //  (size/2)
+        // +--------+
+        // |       /
+        // |      /
+        // |     /
+        // | FÂ° /
+        // |   /
+        // |  /
+        // | /
+        // |/
+        //
+        // FÂ° is half of respective FOV, so to compute the distance (the length
+        // of the straight line) one has to: `size/2 / Math.tan(F)`.
+        //
+        // FTR, from https://threejs.org/docs/#api/en/cameras/PerspectiveCamera
+        // the camera.fov is the vertical FOV.
+
+        const fov = camera.fov * (Math.PI / 180);
+        const fovh = 2 * Math.atan(Math.tan(fov / 2) * camera.aspect);
+        let dx = size.z / 2 + Math.abs(size.x / 2 / Math.tan(fovh / 2));
+        let dy = size.z / 2 + Math.abs(size.y / 2 / Math.tan(fov / 2));
+        let cameraZ = Math.max(dx, dy);
+
+        // offset the camera, if desired (to avoid filling the whole canvas)
+        if (offset !== undefined && offset !== 0) cameraZ *= offset;
+
+        camera.position.set(0, 0, cameraZ);
+
+        // set the far plane of the camera so that it easily encompasses the whole object
+        const minZ = boundingBox.min.z;
+        const cameraToFarEdge = (minZ < 0) ? -minZ + cameraZ : cameraZ - minZ;
+
+        camera.far = cameraToFarEdge * 3;
+        camera.updateProjectionMatrix();
+
+        if (orbitControls !== undefined) {
+            // set camera to rotate around the center
+            orbitControls.target = new THREE.Vector3(0, 0, 0);
+
+            // prevent camera from zooming out far enough to create far plane cutoff
+            orbitControls.maxDistance = cameraToFarEdge * 2;
+        }
+    };
+
+    htmx.onLoad(function (content) {
+        var stl_objects = content.querySelectorAll(".stl-view");
+
+        for (const stl_o of stl_objects) {
+            const stl_url = stl_o.attributes['src'].nodeValue;
+
+            StlViewer(stl_o, { filename: stl_url });
+        }
+    });
+})();
