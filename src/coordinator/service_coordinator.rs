@@ -6,11 +6,7 @@ use super::dns::dns_validator::DnsValidator;
 use super::dns_provider_service::DnsProviderService;
 use super::endpoints_provider_service::EndpointsProviderService;
 use crate::{
-    coordinator::{
-        browser_relaunch_service::{self, BrowserRelaunchService},
-        ip_provider_service::IpProviderService,
-    },
-    db::database_handle::DatabaseHandle,
+    coordinator::ip_provider_service::IpProviderService, db::database_handle::DatabaseHandle,
     Settings,
 };
 /// The goal of the coordinator is to start up the various dependancies of the server AND
@@ -62,7 +58,6 @@ impl ServiceCoordinator {
         let dps = self.dns_provider_service;
         let aps = self.acme_provider_service;
         let eps = self.endpoints_provider_service;
-        let brs = BrowserRelaunchService::create().await?;
 
         let _ = tokio::try_join!(
             tokio::spawn(async move { ips.start(ip_provider_sender).await }),
@@ -71,8 +66,7 @@ impl ServiceCoordinator {
             tokio::spawn(async move {
                 eps.start(tls_config_reciever, endpoint_started_sender)
                     .await
-            }),
-            tokio::spawn(async move { brs.start(endpoint_started_receiver).await })
+            })
         )
         .context("A subservice failed")?;
 

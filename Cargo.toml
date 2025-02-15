@@ -80,6 +80,7 @@ rust-embed = "8.5.0"
 time = "0.3.37"
 tower = "0.5.2"
 tower-http = { version = "0.6.2", features = ["full"] }
+tower-livereload = "0.9.6"
 tower-sessions = { version = "0.14.0", default-features = false, features = [
     "axum-core",
     "signed",

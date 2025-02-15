@@ -13,6 +13,7 @@ use tower_http::{
     compression::CompressionLayer,
     trace::{DefaultMakeSpan, DefaultOnRequest, TraceLayer},
 };
+use tower_livereload::LiveReloadLayer;
 use tower_sessions::{Expiry, SessionManagerLayer};
 use tracing::{debug, Level};
 
@@ -30,25 +31,34 @@ pub async fn create_router(app_state: AppState) -> Result<Router> {
         .with_signed(key.key_value);
 
     debug!("Making router");
-    Ok(Router::new()
+    let mut router = Router::new()
         .route("/", get(redirect_to_pages))
         .nest("/attachments", attachments_router())
         .nest("/pages", pages_router())
         .nest("/login", login_router())
         .with_state(app_state)
         .merge(static_content())
-        .fallback(fallback)
-        .layer(
-            ServiceBuilder::new()
-                .layer(
-                    TraceLayer::new_for_http()
-                        .make_span_with(DefaultMakeSpan::new().include_headers(true))
-                        .on_request(DefaultOnRequest::new().level(Level::DEBUG))
-                        .on_response(()),
-                )
-                .layer(session_layer)
-                .layer(CompressionLayer::new()),
-        ))
+        .fallback(fallback);
+
+    let router = if cfg!(debug_assertions) {
+        router.layer(LiveReloadLayer::new())
+    } else {
+        router
+    };
+
+    let router = router.layer(
+        ServiceBuilder::new()
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(DefaultMakeSpan::new().include_headers(true))
+                    .on_request(DefaultOnRequest::new().level(Level::DEBUG))
+                    .on_response(()),
+            )
+            .layer(session_layer)
+            .layer(CompressionLayer::new()),
+    );
+
+    Ok(router)
 }
 
 async fn redirect_to_pages() -> Redirect {
