@@ -10,6 +10,7 @@ use markdown::to_mdast;
 use markdown::CompileOptions;
 use markdown::Options;
 use mdast_util_to_markdown::to_markdown;
+use tracing::debug;
 
 ///Function to take a markdown string, parse to nodes and then
 /// ensure the output HTML flags stl files for use in the viewer
@@ -27,7 +28,7 @@ pub fn transform(markdown: &str) -> Result<String> {
                 if image.url.ends_with(".stl") {
                     *node = Node::Html(Html {
                         value: format!(
-                            "<object class=\"stl-view w-40 h-40\" src=\"{}\"></object>",
+                            "<object class=\"stl-view size-40 m-2 rounded-md border-8 border-navy\" data-filename=\"{}\"></object>",
                             image.url
                         ),
                         position: None,
@@ -81,7 +82,7 @@ mod tests {
 
         assert_eq!(
             rendered,
-            "<p><object src=\"https://beta.hotchkiss.io/image.stl\"></object></p>\n"
+            "<p><object class=\"stl-view size-40 m-2 rounded-md border-8 border-navy\" data-filename=\"https://beta.hotchkiss.io/image.stl\"></object></p>\n"
         );
 
         Ok(())

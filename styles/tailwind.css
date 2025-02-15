@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @source "templates";
+@source "src/web/markdown";
 
 @theme {
     --color-navy: #14213d;

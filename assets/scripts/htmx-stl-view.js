@@ -21,6 +21,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
  */
 (function () {
     function StlViewer(elem, data) {
+        elem.innerHTML = '';
         //if (!THREE.WEBGL.isWebGLAvailable()) {
         //    elem.appendChild(THREE.WEBGL.getWebGLErrorMessage()); // FIXME: own (styled) message
         //    return;
@@ -65,7 +66,6 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
         camera.add(pl);
 
         (new STLLoader()).load(data['filename'], function (geometry) {
-
             // Determine the color
             var colorString = data['color'];
             if (colorString != null) { var color = new THREE.Color(colorString); }
@@ -188,7 +188,9 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
         var stl_objects = content.querySelectorAll(".stl-view");
 
         for (const stl_o of stl_objects) {
-            const stl_url = stl_o.attributes['src'].nodeValue;
+            stl_o.innerHTML = '<p class="text-xl">Loading STL... <i class="fa-solid fa-spinner animate-spin"></i></p>';
+
+            const stl_url = stl_o.dataset.filename;
 
             StlViewer(stl_o, { filename: stl_url });
         }

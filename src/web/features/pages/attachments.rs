@@ -71,6 +71,10 @@ pub async fn load_attachment(
                 header::CONTENT_DISPOSITION,
                 format!("attachment; filename=\"{}\"", attachment_name),
             ),
+            (
+                header::CONTENT_LENGTH,
+                a.attachment_content.len().to_string(),
+            ),
         ];
 
         Ok((headers, a.attachment_content))

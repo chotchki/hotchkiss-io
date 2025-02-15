@@ -2,7 +2,15 @@
 {% block title %}{{page_name}}{% endblock %}
 
 {% block head %}
-<script src="/scripts/index-Bm0e4K35.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" type="module"></script>
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.173.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.173.0/examples/jsm/"
+    }
+  }
+</script>
+<script src="/scripts/htmx-stl-view.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" type="module"></script>
 {% endblock %}
 
 {% block content %}
