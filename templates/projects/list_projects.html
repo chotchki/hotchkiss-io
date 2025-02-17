@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Projects{% endblock %}
+
+{% block head %}
+{% endblock %}
+
+{% block content %}
+
+<ul>
+    {% if projects.len() == 0 %}
+    <li>No Projects</li>
+    {% else %}
+    {% for project in projects %}
+    <li>
+        <img src="/attachments/{:project_name}/{:attachment_name}" </li>
+        {% endfor %}
+        {% endif %}
+
+        <div class="p-2">
+            <h2 class="text-lg">Current Pages</h2>
+            <h3 class="text-sm">Drag to Reorder</h3>
+            <form class="sortable" hx-patch="./edit" hx-trigger="end">
+                <div class="htmx-indicator">Updating...</div>
+                {% for page in pages %}
+                <div class="outline p-2 flex">
+                    <input type='hidden' name='titles' value='{{page.0}}' />
+                    <p class="p-1">{{page.0}}</p>
+                    <div class="grow"></div>
+                    {% if page.1 == false %}
+                    <button hx-delete="./{{page.0}}" class="p-1 bg-red-500 text-white">Delete</button>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </form>
+        </div>
+</ul>
+{% endblock %}

@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
         .await
         .context("Unable create the pool")?;
 
-    sqlx::migrate!("./migrations")
+    sqlx::migrate!("./src/db/migrations")
         .run(&pool)
         .await
         .context("The build time migrations failed")?;

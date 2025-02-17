@@ -1,7 +1,9 @@
 use super::{app_state::AppState, features::login::login_router, static_content::static_content};
 use crate::{
     db::dao::crypto_key::CryptoKey,
-    web::features::pages::{attachments::attachments_router, pages_router},
+    web::features::pages::{
+        attachments::attachments_router, pages_router, projects::projects_router,
+    },
 };
 use anyhow::Result;
 use axum::{http::Uri, response::Redirect, routing::get, Router};
@@ -31,10 +33,11 @@ pub async fn create_router(app_state: AppState) -> Result<Router> {
         .with_signed(key.key_value);
 
     debug!("Making router");
-    let mut router = Router::new()
+    let router = Router::new()
         .route("/", get(redirect_to_pages))
         .nest("/attachments", attachments_router())
         .nest("/pages", pages_router())
+        .nest("/projects", projects_router())
         .nest("/login", login_router())
         .with_state(app_state)
         .merge(static_content())

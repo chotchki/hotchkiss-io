@@ -27,7 +27,7 @@ impl DatabaseHandle {
 
         let pool = pool_opts.connect_with(con_opts).await?;
 
-        sqlx::migrate!("./migrations").run(&pool).await?;
+        sqlx::migrate!("./src/db/migrations").run(&pool).await?;
 
         Ok(pool)
     }
@@ -43,7 +43,7 @@ impl DatabaseHandle {
 
         let pool = pool_opts.connect_with(con_opts).await?;
 
-        sqlx::migrate!("./migrations").run(&pool).await?;
+        sqlx::migrate!("./src/db/migrations").run(&pool).await?;
         Ok(pool)
     }
 }
