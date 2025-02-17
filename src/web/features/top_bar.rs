@@ -1,38 +1,68 @@
+use crate::db::dao::content_pages::ContentPageDao;
+use anyhow::Result;
+use sqlx::SqliteExecutor;
+
 /// A wrapper type used to pass the navigation tabs and which one is active
 pub struct TopBar(pub Vec<(String, bool)>);
 
 impl TopBar {
-    pub fn new(pages: Vec<String>) -> Self {
-        Self(pages.into_iter().map(|p| (p, false)).collect())
-    }
-
-    pub fn make_active(mut self, page: &str) -> Self {
-        for (p, a) in self.0.iter_mut() {
-            *a = page == p
-        }
-
-        self
+    pub async fn create(executor: impl SqliteExecutor<'_>, active_page: &str) -> Result<Self> {
+        let pages = ContentPageDao::find_by_parent(executor, None)
+            .await?
+            .into_iter()
+            .map(|cpd| cpd.page_name)
+            .map(|name| {
+                let m = name == active_page;
+                (name, m)
+            })
+            .collect();
+        Ok(TopBar(pages))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use sqlx::SqlitePool;
+
     use super::*;
 
-    #[test]
-    fn activate() {
-        let tb = TopBar::new(vec!["Foo".to_string(), "Bar".to_string()]);
+    #[sqlx::test]
+    async fn activate(pool: SqlitePool) -> Result<()> {
+        ContentPageDao::create(
+            &pool,
+            None,
+            "first".to_string(),
+            None,
+            "first".to_string(),
+            None,
+        )
+        .await?;
+        ContentPageDao::create(
+            &pool,
+            None,
+            "second".to_string(),
+            None,
+            "second".to_string(),
+            None,
+        )
+        .await?;
 
-        assert_eq!(
-            tb.0,
-            vec![("Foo".to_string(), false), ("Bar".to_string(), false)]
-        );
+        let tb = TopBar::create(&pool, "first").await?;
+        for (title, active) in &tb.0 {
+            if title == "first" {
+                assert_eq!(*active, true);
+            } else {
+                assert_eq!(*active, false);
+            }
+        }
+        assert!(tb.0.len() > 0);
 
-        let tb = tb.make_active("Bar");
+        let tb = TopBar::create(&pool, "not here").await?;
+        for (_, active) in &tb.0 {
+            assert_eq!(*active, false);
+        }
+        assert!(tb.0.len() > 0);
 
-        assert_eq!(
-            tb.0,
-            vec![("Foo".to_string(), false), ("Bar".to_string(), true)]
-        );
+        Ok(())
     }
 }

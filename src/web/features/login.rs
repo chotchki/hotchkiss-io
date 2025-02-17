@@ -47,10 +47,8 @@ async fn login_page(
     State(state): State<AppState>,
     session_data: SessionData,
 ) -> Result<HtmlTemplate<LoginTemplate>, AppError> {
-    let top_bar =
-        TopBar::new(ContentPageDao::find_page_titles(&state.pool).await?).make_active("login");
     let template = LoginTemplate {
-        top_bar,
+        top_bar: TopBar::create(&state.pool, "login").await?,
         auth_state: session_data.auth_state,
     };
 

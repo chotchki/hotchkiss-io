@@ -1,6 +1,3 @@
-use std::collections::VecDeque;
-use std::default;
-
 use anyhow::anyhow;
 use anyhow::Result;
 use markdown::mdast::Html;
@@ -10,7 +7,7 @@ use markdown::to_mdast;
 use markdown::CompileOptions;
 use markdown::Options;
 use mdast_util_to_markdown::to_markdown;
-use tracing::debug;
+use std::collections::VecDeque;
 
 ///Function to take a markdown string, parse to nodes and then
 /// ensure the output HTML flags stl files for use in the viewer

@@ -143,6 +143,7 @@ impl AttachmentDao {
 #[cfg(test)]
 mod tests {
     use crate::db::dao::content_pages::ContentPageDao;
+    use sqlx::SqlitePool;
 
     use super::*;
 
