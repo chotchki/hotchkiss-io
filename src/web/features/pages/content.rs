@@ -29,11 +29,6 @@ pub fn content_router() -> Router<AppState> {
         .route("/{:page_name}/preview", patch(preview_page))
 }
 
-//const MARKDOWN_OPTIONS: Options = Options {
-//    parse: todo!(),
-//    compile: todo!(),
-//};
-
 #[derive(Template)]
 #[template(path = "pages/content_page.html")]
 pub struct PagesTemplate {

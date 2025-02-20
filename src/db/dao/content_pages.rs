@@ -1,6 +1,10 @@
 use anyhow::Result;
-use sqlx::{prelude::FromRow, query, query_as, SqliteExecutor, SqlitePool};
-use tracing::debug;
+use sqlx::{
+    prelude::FromRow,
+    query, query_as,
+    types::chrono::{self, DateTime, Utc},
+    SqliteExecutor,
+};
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct ContentPageDao {
@@ -42,18 +46,17 @@ impl ContentPageDao {
         ) RETURNING 
             page_id,
             page_order,
-            page_creation_date, 
-            page_modified_date,
+            page_creation_date as "page_creation_date: DateTime<Utc>",
+            page_modified_date as "page_modified_date: DateTime<Utc>",
             special_page
         "#,
             parent_page_id,
             page_name,
             page_category,
             page_markdown,
-            page_cover_attachment_id,
-            page_order
+            page_cover_attachment_id
         )
-        .execute(executor)
+        .fetch_one(executor)
         .await?;
 
         Ok(ContentPageDao {
@@ -74,10 +77,10 @@ impl ContentPageDao {
         query!(
             r#"
             DELETE FROM content_pages
-            WHERE page_name = ?1
+            WHERE page_id = ?1
             and special_page = false
             "#,
-            self.page_name
+            self.page_id
         )
         .execute(executor)
         .await?;
@@ -96,11 +99,11 @@ impl ContentPageDao {
             page_markdown = ?4,
             page_cover_attachment_id = ?5,
             page_order = ?6,
-            page_modified_date = datetime('now', 'utc'),
+            page_modified_date = datetime('now', 'utc')
         WHERE
             page_id = ?7
         RETURNING
-            page_modified_date
+            page_modified_date as "page_modified_date: DateTime<Utc>"
         "#,
             self.parent_page_id,
             self.page_name,
@@ -110,7 +113,7 @@ impl ContentPageDao {
             self.page_order,
             self.page_id
         )
-        .execute(executor)
+        .fetch_one(executor)
         .await?;
 
         self.page_modified_date = result.page_modified_date;
@@ -182,27 +185,133 @@ impl ContentPageDao {
 
         Ok(content_page)
     }
+
+    pub async fn find_by_path(
+        executor: impl sqlx::SqliteExecutor<'_> + Clone,
+        paths: &[&str],
+    ) -> Result<Vec<ContentPageDao>> {
+        let mut nodes: Vec<ContentPageDao> = vec![];
+        let mut current_parent_id: Option<i64> = None;
+
+        //I suspect there is a fancy iterator pattern I should use for this long term
+        for path in paths {
+            let found_node = Self::find_by_name(executor.clone(), current_parent_id, path).await?;
+
+            match found_node {
+                Some(node) => {
+                    let special_page = node.special_page;
+                    current_parent_id = Some(node.page_id);
+
+                    nodes.push(node);
+
+                    if special_page {
+                        break;
+                    }
+                }
+                None => return Ok(vec![]),
+            }
+        }
+
+        Ok(nodes)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use sqlx::SqlitePool;
+
     use super::*;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn create_basic(pool: SqlitePool) -> Result<()> {
+        let mut tx = pool.begin().await?;
+
+        ContentPageDao::create(
+            &mut *tx,
+            None,
+            "test".to_string(),
+            Some("test".to_string()),
+            "test".to_string(),
+            None,
+        )
+        .await?;
+
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
     async fn roundtrip(pool: SqlitePool) -> Result<()> {
-        let mut cp =
+        let mut parent_pg =
             ContentPageDao::create(&pool, None, "test".to_string(), None, "".to_string(), None)
                 .await?;
 
-        cp.page_category = Some("food".to_string());
+        let mut leaf_pg = ContentPageDao::create(
+            &pool,
+            Some(parent_pg.page_id),
+            "test".to_string(),
+            None,
+            "".to_string(),
+            None,
+        )
+        .await?;
 
-        cp.update(&pool).await?;
+        leaf_pg.page_category = Some("food".to_string());
 
-        let found_pages = ContentPageDao::find_by_parent(&pool, None).await?;
-        assert_eq!(vec![cp.clone()], found_pages);
+        leaf_pg.update(&pool).await?;
 
-        let found_cp = ContentPageDao::find_by_name(&pool, None, "test").await?;
-        assert_eq!(cp, found_cp.unwrap());
+        let found_pages = ContentPageDao::find_by_parent(&pool, Some(parent_pg.page_id)).await?;
+        assert_eq!(vec![leaf_pg.clone()], found_pages);
+
+        let found_cp = ContentPageDao::find_by_name(&pool, Some(parent_pg.page_id), "test").await?;
+        assert_eq!(leaf_pg.clone(), found_cp.unwrap());
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn find_path(pool: SqlitePool) -> Result<()> {
+        let root =
+            ContentPageDao::create(&pool, None, "root".to_string(), None, "".to_string(), None)
+                .await?;
+
+        let leaf = ContentPageDao::create(
+            &pool,
+            Some(root.page_id),
+            "leaf".to_string(),
+            None,
+            "".to_string(),
+            None,
+        )
+        .await?;
+
+        let deep_leaf = ContentPageDao::create(
+            &pool,
+            Some(leaf.page_id),
+            "deep_leaf".to_string(),
+            None,
+            "".to_string(),
+            None,
+        )
+        .await?;
+
+        assert_eq!(
+            vec![root.clone()],
+            ContentPageDao::find_by_path(&pool, &["root"]).await?
+        );
+
+        assert_eq!(
+            vec![root, leaf, deep_leaf],
+            ContentPageDao::find_by_path(&pool, &["root", "leaf", "deep_leaf"]).await?
+        );
+
+        assert_eq!(
+            0,
+            ContentPageDao::find_by_path(&pool, &["random"])
+                .await?
+                .len()
+        );
 
         Ok(())
     }

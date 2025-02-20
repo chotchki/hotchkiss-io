@@ -1,3 +1,4 @@
+use anyhow::Context;
 use anyhow::Result;
 use sqlx::{prelude::FromRow, query, query_as, SqliteExecutor};
 
@@ -38,11 +39,13 @@ impl AttachmentDao {
             mime_type,
             attachment_content
         )
-        .execute(executor)
+        .fetch_one(executor)
         .await?;
 
         Ok(AttachmentDao {
-            attachment_id: result.attachment_id,
+            attachment_id: result
+                .attachment_id
+                .context("Could not get the attachment id")?,
             page_id,
             attachment_name,
             mime_type,
@@ -68,7 +71,7 @@ impl AttachmentDao {
     }
 
     pub async fn update(&self, executor: impl SqliteExecutor<'_>) -> Result<()> {
-        let result = query!(
+        query!(
             r#"
         UPDATE attachments
         SET 
@@ -76,7 +79,7 @@ impl AttachmentDao {
             mime_type = ?2,
             attachment_content = ?3
         WHERE
-            attachment_id = ?7
+            attachment_id = ?4
         "#,
             self.attachment_name,
             self.mime_type,
@@ -100,7 +103,7 @@ impl AttachmentDao {
             page_id,
             attachment_name,
             mime_type,
-            attachment_content,
+            attachment_content
         from
             attachments
         where page_id = ?1
@@ -125,7 +128,7 @@ impl AttachmentDao {
             page_id,
             attachment_name,
             mime_type,
-            attachment_content,
+            attachment_content
         from
             attachments
         where attachment_id = ?1
@@ -147,7 +150,7 @@ mod tests {
 
     use super::*;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
     async fn roundtrip(pool: SqlitePool) -> Result<()> {
         let cp =
             ContentPageDao::create(&pool, None, "test".to_string(), None, "".to_string(), None)

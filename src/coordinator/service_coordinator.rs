@@ -52,7 +52,7 @@ impl ServiceCoordinator {
     pub async fn start(self) -> Result<()> {
         let (ip_provider_sender, ip_provider_reciever) = broadcast::channel(1);
         let (tls_config_sender, tls_config_reciever) = broadcast::channel(1);
-        let (endpoint_started_sender, endpoint_started_receiver) = broadcast::channel(1);
+        let (endpoint_started_sender, _) = broadcast::channel(1);
 
         let ips = self.ip_provider_service;
         let dps = self.dns_provider_service;

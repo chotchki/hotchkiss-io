@@ -1,12 +1,9 @@
 use super::{app_state::AppState, features::login::login_router, static_content::static_content};
 use crate::{
     db::dao::crypto_key::CryptoKey,
-    web::features::pages::{
-        attachments::attachments_router, pages_router, projects::projects_router,
-    },
+    web::features::pages::{pages_router, redirect_to_first_page},
 };
-use anyhow::Result;
-use axum::{http::Uri, response::Redirect, routing::get, Router};
+use axum::{http::Uri, routing::get, Router};
 use build_time::build_time_utc;
 use reqwest::StatusCode;
 use time::Duration;
@@ -21,7 +18,7 @@ use tracing::{debug, Level};
 
 pub const BUILD_TIME_CACHE_BUST: &str = build_time_utc!("%s");
 
-pub async fn create_router(app_state: AppState) -> Result<Router> {
+pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
     // Generate a cryptographic key to sign the session cookie.
     debug!("Getting cookie key");
     let key = CryptoKey::get_or_create(&app_state.pool, 1).await?;
@@ -34,11 +31,10 @@ pub async fn create_router(app_state: AppState) -> Result<Router> {
 
     debug!("Making router");
     let router = Router::new()
-        .route("/", get(redirect_to_pages))
-        .nest("/attachments", attachments_router())
-        .nest("/pages", pages_router())
-        .nest("/projects", projects_router())
+        .route("/", get(redirect_to_first_page))
         .nest("/login", login_router())
+        //.nest("/attachments", attachments_router())
+        .nest("/pages", pages_router())
         .with_state(app_state)
         .merge(static_content())
         .fallback(fallback);
@@ -62,10 +58,6 @@ pub async fn create_router(app_state: AppState) -> Result<Router> {
     );
 
     Ok(router)
-}
-
-async fn redirect_to_pages() -> Redirect {
-    Redirect::temporary("/pages")
 }
 
 //TDOO: We should make our 404s fancy

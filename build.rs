@@ -11,6 +11,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::{env, process::Command};
 use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -26,6 +27,10 @@ async fn main() -> Result<()> {
 
     env::set_var(schema_key, schema_url.clone());
     println!("cargo::rustc-env={schema_key}={schema_url}");
+    File::create(format!("{}/.env", env::var("CARGO_MANIFEST_DIR")?))
+        .await?
+        .write_all(format!("{}={}", schema_key, schema_url).as_bytes())
+        .await?;
 
     //Run a migration for sqlx so it can compile queries
     let con_opts = SqliteConnectOptions::from_str(&schema_url)

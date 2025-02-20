@@ -53,7 +53,7 @@ impl EndpointsProviderService {
     pub async fn start(
         &self,
         mut tls_config_reciever: Receiver<RustlsConfig>,
-        mut endpoints_started: Sender<()>,
+        endpoints_started: Sender<()>,
     ) -> Result<()> {
         let config = tls_config_reciever.recv().await?;
 

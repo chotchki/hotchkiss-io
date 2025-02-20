@@ -102,7 +102,7 @@ impl FromRow<'_, SqliteRow> for CryptoKey {
 mod tests {
     use super::*;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
     async fn roundtrip(pool: SqlitePool) -> Result<()> {
         let ck = CryptoKey {
             id: 2,

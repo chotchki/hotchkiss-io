@@ -26,7 +26,7 @@ mod tests {
 
     use super::*;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
     async fn activate(pool: SqlitePool) -> Result<()> {
         ContentPageDao::create(
             &pool,
@@ -50,18 +50,18 @@ mod tests {
         let tb = TopBar::create(&pool, "first").await?;
         for (title, active) in &tb.0 {
             if title == "first" {
-                assert_eq!(*active, true);
+                assert!(*active);
             } else {
-                assert_eq!(*active, false);
+                assert!(!*active);
             }
         }
-        assert!(tb.0.len() > 0);
+        assert!(!tb.0.is_empty());
 
         let tb = TopBar::create(&pool, "not here").await?;
         for (_, active) in &tb.0 {
-            assert_eq!(*active, false);
+            assert!(!*active);
         }
-        assert!(tb.0.len() > 0);
+        assert!(!tb.0.is_empty());
 
         Ok(())
     }

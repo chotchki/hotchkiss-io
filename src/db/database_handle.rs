@@ -9,9 +9,10 @@ use sqlx::{
 use std::str::FromStr;
 use tracing::debug;
 
+pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./src/db/migrations");
+
 pub struct DatabaseHandle;
 
-#[cfg(not(test))]
 impl DatabaseHandle {
     pub async fn create(path: &str) -> Result<SqlitePool> {
         debug!("Creating database on disk");
@@ -27,23 +28,8 @@ impl DatabaseHandle {
 
         let pool = pool_opts.connect_with(con_opts).await?;
 
-        sqlx::migrate!("./src/db/migrations").run(&pool).await?;
+        MIGRATOR.run(&pool).await?;
 
-        Ok(pool)
-    }
-}
-
-#[cfg(test)]
-impl DatabaseHandle {
-    pub async fn create(_: &str) -> Result<SqlitePool> {
-        debug!("Creating database in memory");
-        let pool_opts = SqlitePoolOptions::new().min_connections(2);
-
-        let con_opts = SqliteConnectOptions::new();
-
-        let pool = pool_opts.connect_with(con_opts).await?;
-
-        sqlx::migrate!("./src/db/migrations").run(&pool).await?;
         Ok(pool)
     }
 }
@@ -54,7 +40,7 @@ mod test {
 
     use super::*;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
     async fn test_handle(pool: SqlitePool) -> Result<()> {
         let result = query!("select * from users").fetch_optional(&pool).await?;
 
