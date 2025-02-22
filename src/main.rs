@@ -31,7 +31,8 @@ async fn main() -> anyhow::Result<()> {
 
     let app_filter = filter::Targets::new()
         .with_target("hotchkiss_io", Level::DEBUG)
-        .with_target("hotchkiss_io::web::static_content", Level::INFO);
+        .with_target("hotchkiss_io::web::static_content", Level::INFO)
+        .with_default(Level::INFO);
     let access_filter = filter::Targets::new().with_target("tower_http", Level::DEBUG);
 
     let app_rolling =

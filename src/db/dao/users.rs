@@ -1,8 +1,8 @@
 use super::roles::Role;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use sqlx::{query, query_as, sqlite::SqliteRow, Error::ColumnDecode, FromRow, Row, SqlitePool};
-use std::{fmt::Display, str::FromStr};
+use sqlx::{query, query_as, FromRow, SqlitePool};
+use std::fmt::Display;
 use uuid::Uuid;
 use webauthn_rs::prelude::Passkey;
 

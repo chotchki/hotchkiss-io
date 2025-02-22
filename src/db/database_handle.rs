@@ -20,13 +20,17 @@ impl DatabaseHandle {
         debug!("Creating database on disk");
         let pool_opts = SqlitePoolOptions::new().min_connections(2);
 
-        let con_opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path))?
+        let mut con_opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path))?
             .log_statements(LevelFilter::Debug)
             .create_if_missing(true)
             .foreign_keys(true)
             .journal_mode(Wal)
             .locking_mode(Normal)
             .synchronous(SqliteSynchronous::Normal);
+
+        if cfg!(debug_assertions) {
+            con_opts = con_opts.log_statements(LevelFilter::Info);
+        }
 
         let pool = pool_opts.connect_with(con_opts).await?;
 

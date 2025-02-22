@@ -52,7 +52,6 @@ impl ServiceCoordinator {
     pub async fn start(self) -> Result<()> {
         let (ip_provider_sender, ip_provider_reciever) = broadcast::channel(1);
         let (tls_config_sender, tls_config_reciever) = broadcast::channel(1);
-        let (endpoint_started_sender, _) = broadcast::channel(1);
 
         let ips = self.ip_provider_service;
         let dps = self.dns_provider_service;
@@ -63,10 +62,7 @@ impl ServiceCoordinator {
             tokio::spawn(async move { ips.start(ip_provider_sender).await }),
             tokio::spawn(async move { dps.start(ip_provider_reciever).await }),
             tokio::spawn(async move { aps.start(tls_config_sender).await }),
-            tokio::spawn(async move {
-                eps.start(tls_config_reciever, endpoint_started_sender)
-                    .await
-            })
+            tokio::spawn(async move { eps.start(tls_config_reciever).await })
         )
         .context("A subservice failed")?;
 

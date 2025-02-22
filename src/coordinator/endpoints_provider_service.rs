@@ -17,7 +17,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
 };
-use tokio::{sync::broadcast::Receiver, sync::broadcast::Sender, task::JoinSet};
+use tokio::{sync::broadcast::Receiver, task::JoinSet};
 use tower_sessions::ExpiredDeletion;
 use tower_sessions_sqlx_store::SqliteStore;
 use tracing::debug;
@@ -50,11 +50,7 @@ impl EndpointsProviderService {
         })
     }
 
-    pub async fn start(
-        &self,
-        mut tls_config_reciever: Receiver<RustlsConfig>,
-        endpoints_started: Sender<()>,
-    ) -> Result<()> {
+    pub async fn start(&self, mut tls_config_reciever: Receiver<RustlsConfig>) -> Result<()> {
         let config = tls_config_reciever.recv().await?;
 
         let app_state = AppState {
@@ -86,8 +82,6 @@ impl EndpointsProviderService {
                 .await
                 .map_err(|e| anyhow!(e))
         });
-
-        endpoints_started.send(())?;
 
         let output = set.join_all().await;
         for o in output {
