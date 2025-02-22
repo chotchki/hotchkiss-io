@@ -16,23 +16,27 @@ use axum::{
     Form, Router,
 };
 use http::{uri::PathAndQuery, HeaderMap, StatusCode};
+use preview::preview_router;
 use serde::Deserialize;
 
 use super::top_bar::TopBar;
 
-//pub mod attachments;
-//pub mod content;
-//pub mod management;
-//pub mod projects;
+pub mod preview;
 
 pub fn pages_router() -> Router<AppState> {
-    Router::new().route("/", get(redirect_to_first_page)).route(
-        "/{*page_path}",
-        get(get_page_path)
-            .delete(delete_page_path)
-            .put(put_page_path)
-            .post(post_page_path),
-    )
+    Router::new()
+        .route(
+            "/",
+            get(redirect_to_first_page).post(post_top_level_page_path),
+        )
+        .route(
+            "/{*page_path}",
+            get(get_page_path)
+                .delete(delete_page_path)
+                .put(put_page_path)
+                .post(post_page_path),
+        )
+        .merge(preview_router())
 }
 
 pub async fn redirect_to_first_page(State(state): State<AppState>) -> Result<Response, AppError> {
@@ -168,8 +172,40 @@ pub async fn put_page_path(
 
 #[derive(Debug, Deserialize)]
 pub struct PostPageForm {
+    pub page_name: String,
     pub page_category: Option<String>,
     pub page_markdown: String,
+}
+
+pub async fn post_top_level_page_path(
+    State(state): State<AppState>,
+    session_data: SessionData,
+    Form(post_page_form): Form<PostPageForm>,
+) -> Result<Response, AppError> {
+    if let AuthenticationState::Authenticated(user) = session_data.auth_state {
+        if user.role != Role::Admin {
+            return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
+        }
+    }
+
+    if PathAndQuery::try_from(post_page_form.page_name.clone()).is_err() {
+        return Ok((StatusCode::BAD_REQUEST, "Page Name must be URI safe").into_response());
+    }
+
+    ContentPageDao::create(
+        &state.pool,
+        None,
+        post_page_form.page_name,
+        post_page_form.page_category,
+        post_page_form.page_markdown,
+        None,
+    )
+    .await?;
+
+    let mut headers = HeaderMap::new();
+    headers.insert("HX-Refresh", "true".parse()?);
+
+    Ok(headers.into_response())
 }
 
 pub async fn post_page_path(
@@ -177,49 +213,37 @@ pub async fn post_page_path(
     session_data: SessionData,
     Path(page_path): Path<String>,
     Form(post_page_form): Form<PostPageForm>,
-) -> Result<impl IntoResponse, AppError> {
+) -> Result<Response, AppError> {
     if let AuthenticationState::Authenticated(user) = session_data.auth_state {
         if user.role != Role::Admin {
-            return Ok((StatusCode::FORBIDDEN, "Invalid Permission"));
+            return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
         }
     }
 
     let page_names: Vec<&str> = page_path.split("/").collect();
-    let (new_page_name, parent_pages_names) = page_names.split_last().unwrap();
 
-    if PathAndQuery::try_from(new_page_name.to_string()).is_err() {
-        return Ok((StatusCode::BAD_REQUEST, "Page Name must be URI safe"));
+    if PathAndQuery::try_from(post_page_form.page_name.clone()).is_err() {
+        return Ok((StatusCode::BAD_REQUEST, "Page Name must be URI safe").into_response());
     }
 
-    if parent_pages_names.is_empty() {
-        ContentPageDao::create(
-            &state.pool,
-            None,
-            new_page_name.to_string(),
-            post_page_form.page_category,
-            post_page_form.page_markdown,
-            None,
-        )
-        .await?;
+    let parent_pages = ContentPageDao::find_by_path(&state.pool, &page_names).await?;
+    match parent_pages.last() {
+        Some(lp) => {
+            ContentPageDao::create(
+                &state.pool,
+                Some(lp.page_id),
+                post_page_form.page_name,
+                post_page_form.page_category,
+                post_page_form.page_markdown,
+                None,
+            )
+            .await?;
 
-        Ok((StatusCode::CREATED, "New Page Created"))
-    } else {
-        let parent_pages = ContentPageDao::find_by_path(&state.pool, parent_pages_names).await?;
-        match parent_pages.last() {
-            Some(lp) => {
-                ContentPageDao::create(
-                    &state.pool,
-                    Some(lp.page_id),
-                    new_page_name.to_string(),
-                    post_page_form.page_category,
-                    post_page_form.page_markdown,
-                    None,
-                )
-                .await?;
+            let mut headers = HeaderMap::new();
+            headers.insert("HX-Refresh", "true".parse()?);
 
-                Ok((StatusCode::CREATED, "New Page Created"))
-            }
-            None => Ok((StatusCode::NOT_FOUND, "No such parent page")),
+            Ok(headers.into_response())
         }
+        None => Ok((StatusCode::NOT_FOUND, "No such parent page").into_response()),
     }
 }
