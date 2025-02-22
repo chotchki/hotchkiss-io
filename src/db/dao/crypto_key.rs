@@ -1,21 +1,18 @@
 use anyhow::Result;
-use serde_json::json;
-use sqlx::Error::ColumnDecode;
-use sqlx::{prelude::FromRow, query, query_as, sqlite::SqliteRow, Row, SqlitePool};
+use sqlx::{prelude::FromRow, query, query_as, SqlitePool};
 use tower_sessions::cookie::Key;
 use tracing::debug;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct CryptoKey {
     pub id: i64,
-    pub key_value: Key,
+    pub key_value: sqlx::types::Json<Key>,
 }
 
 impl CryptoKey {
     pub async fn create(&self, pool: &SqlitePool) -> Result<()> {
         debug!("Creating key");
 
-        let master_key = json!(self.key_value.master());
         query!(
             r#"
         INSERT INTO crypto_keys (
@@ -27,7 +24,7 @@ impl CryptoKey {
         )
         "#,
             self.id,
-            master_key
+            self.key_value
         )
         .execute(pool)
         .await?;
@@ -37,17 +34,18 @@ impl CryptoKey {
 
     pub async fn find_by_id(pool: &SqlitePool, id: i64) -> Result<Option<CryptoKey>> {
         debug!("Finding key id {id}");
-        let key: Option<CryptoKey> = query_as(
+        let key: Option<CryptoKey> = query_as!(
+            CryptoKey,
             r#"
             select 
                 id,
-                key_value
+                key_value as "key_value: sqlx::types::Json<Key>"
             from 
                 crypto_keys
             where id = ?1
         "#,
+            id
         )
-        .bind(id)
         .fetch_optional(pool)
         .await?;
 
@@ -67,34 +65,12 @@ impl CryptoKey {
 
                 let key = CryptoKey {
                     id,
-                    key_value: Key::generate(),
+                    key_value: sqlx::types::Json(Key::generate()),
                 };
                 key.create(pool).await?;
                 Ok(key)
             }
         }
-    }
-}
-
-impl FromRow<'_, SqliteRow> for CryptoKey {
-    fn from_row(row: &SqliteRow) -> sqlx::Result<Self> {
-        debug!("Decoding using FromRow");
-
-        let key_value: Vec<u8> =
-            serde_json::from_str(row.try_get("key_value")?).map_err(|e| ColumnDecode {
-                index: "key_value".to_string(),
-                source: Box::new(e),
-            })?;
-
-        debug!("Got through serde");
-
-        Ok(CryptoKey {
-            id: row.try_get("id")?,
-            key_value: Key::try_from(&key_value[..]).map_err(|e| ColumnDecode {
-                index: "key_value".to_string(),
-                source: Box::new(e),
-            })?,
-        })
     }
 }
 
@@ -106,7 +82,7 @@ mod tests {
     async fn roundtrip(pool: SqlitePool) -> Result<()> {
         let ck = CryptoKey {
             id: 2,
-            key_value: Key::generate(),
+            key_value: sqlx::types::Json(Key::generate()),
         };
 
         ck.create(&pool).await?;
@@ -116,6 +92,15 @@ mod tests {
             .expect("We just inserted this value");
 
         assert_eq!(ck, found_ck);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn combo(pool: SqlitePool) -> Result<()> {
+        let ck = CryptoKey::get_or_create(&pool, 1).await?;
+
+        assert!(!ck.key_value.signing().is_empty());
 
         Ok(())
     }

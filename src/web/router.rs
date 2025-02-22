@@ -27,7 +27,7 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
     let session_layer = SessionManagerLayer::new(app_state.session_store.clone())
         .with_secure(true)
         .with_expiry(Expiry::OnInactivity(Duration::days(1)))
-        .with_signed(key.key_value);
+        .with_signed(key.key_value.0);
 
     debug!("Making router");
     let router = Router::new()

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use sqlx::ConnectOptions;
 use sqlx::{
     sqlite::{
         SqliteConnectOptions, SqliteJournalMode::Wal, SqliteLockingMode::Normal, SqlitePoolOptions,
@@ -8,6 +9,7 @@ use sqlx::{
 };
 use std::str::FromStr;
 use tracing::debug;
+use tracing::log::LevelFilter;
 
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./src/db/migrations");
 
@@ -19,11 +21,11 @@ impl DatabaseHandle {
         let pool_opts = SqlitePoolOptions::new().min_connections(2);
 
         let con_opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path))?
+            .log_statements(LevelFilter::Debug)
             .create_if_missing(true)
             .foreign_keys(true)
             .journal_mode(Wal)
             .locking_mode(Normal)
-            .shared_cache(true)
             .synchronous(SqliteSynchronous::Normal);
 
         let pool = pool_opts.connect_with(con_opts).await?;

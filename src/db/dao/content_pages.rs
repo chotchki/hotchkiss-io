@@ -243,7 +243,7 @@ mod tests {
 
     #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
     async fn roundtrip(pool: SqlitePool) -> Result<()> {
-        let mut parent_pg =
+        let parent_pg =
             ContentPageDao::create(&pool, None, "test".to_string(), None, "".to_string(), None)
                 .await?;
 

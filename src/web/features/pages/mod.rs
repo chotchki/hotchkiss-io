@@ -33,8 +33,6 @@ pub fn pages_router() -> Router<AppState> {
             .put(put_page_path)
             .post(post_page_path),
     )
-
-    //content_router().merge(management_router())
 }
 
 pub async fn redirect_to_first_page(State(state): State<AppState>) -> Result<Response, AppError> {

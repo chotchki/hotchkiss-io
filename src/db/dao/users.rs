@@ -6,15 +6,15 @@ use std::{fmt::Display, str::FromStr};
 use uuid::Uuid;
 use webauthn_rs::prelude::Passkey;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct User {
+#[derive(Clone, Debug, Deserialize, FromRow, PartialEq, Serialize)]
+pub struct UserDao {
     pub display_name: String,
     pub id: Uuid,
-    pub keys: Vec<Passkey>,
+    pub keys: sqlx::types::Json<Vec<Passkey>>,
     pub role: Role,
 }
 
-impl User {
+impl UserDao {
     pub async fn create(&mut self, pool: &SqlitePool) -> Result<()> {
         let id = self.id.to_string();
         let keys = serde_json::to_string(&self.keys)?;
@@ -36,7 +36,7 @@ impl User {
             ELSE 'Registered'
             END
         )
-        RETURNING app_role
+        RETURNING app_role as "role: Role"
         "#,
             self.display_name,
             id,
@@ -45,43 +45,47 @@ impl User {
         .fetch_one(pool)
         .await?;
 
-        self.role = Role::from_str(&rec.app_role)?;
+        self.role = rec.role;
 
         Ok(())
     }
 
-    pub async fn find_by_passkey(pool: &SqlitePool, passkey: &Passkey) -> Result<Option<User>> {
-        Ok(query_as(
+    pub async fn find_by_passkey(pool: &SqlitePool, passkey: &Passkey) -> Result<Option<UserDao>> {
+        let passkey = sqlx::types::Json(passkey);
+        Ok(query_as!(
+            UserDao,
             r#"
         SELECT 
             display_name,
-            id,
-            keys,
-            app_role as role
+            id as "id: uuid::fmt::Hyphenated",
+            keys as "keys: sqlx::types::Json<Vec<Passkey>>",
+            app_role as "role: Role"
         FROM users
         WHERE
             EXISTS (SELECT 1 FROM json_each(keys) WHERE value = ?1)
     "#,
+            passkey
         )
-        .bind(serde_json::to_string(passkey)?)
         .fetch_optional(pool)
         .await?)
     }
 
-    pub async fn find_by_uuid(pool: &SqlitePool, uuid: &Uuid) -> Result<Option<User>> {
-        Ok(query_as(
+    pub async fn find_by_uuid(pool: &SqlitePool, uuid: &Uuid) -> Result<Option<UserDao>> {
+        let temp_uuid = uuid.to_string();
+        Ok(query_as!(
+            UserDao,
             r#"
         SELECT 
             display_name,
-            id,
-            keys,
-            app_role as role
+            id as "id: uuid::fmt::Hyphenated",
+            keys as "keys: sqlx::types::Json<Vec<Passkey>>",
+            app_role as "role: Role"
         FROM users
         WHERE
             id = ?1
     "#,
+            temp_uuid
         )
-        .bind(uuid.to_string())
         .fetch_optional(pool)
         .await?)
     }
@@ -113,7 +117,7 @@ impl User {
     }
 }
 
-impl Display for User {
+impl Display for UserDao {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -123,22 +127,96 @@ impl Display for User {
     }
 }
 
-impl FromRow<'_, SqliteRow> for User {
-    fn from_row(row: &SqliteRow) -> sqlx::Result<Self> {
-        Ok(Self {
-            display_name: row.try_get("display_name")?,
-            id: Uuid::parse_str(row.try_get("id")?).map_err(|e| ColumnDecode {
-                index: "id".to_string(),
-                source: Box::new(e),
-            })?,
-            keys: serde_json::from_str(row.try_get("keys")?).map_err(|e| ColumnDecode {
-                index: "keys".to_string(),
-                source: Box::new(e),
-            })?,
-            role: Role::from_str(row.try_get("role")?).map_err(|e| ColumnDecode {
-                index: "role".to_string(),
-                source: Box::new(e),
-            })?,
-        })
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    //Demo Passkey found here: https://github.com/kanidm/webauthn-rs/blob/master/webauthn-rp-proxy/tests/data/authenticate-start.json
+    const SAMPLE_PASSKEY: &str = r#"{
+      "cred": {
+        "cred_id": "Abr4cz81v7rNJR7OnKUJeB297HaWkpwUeEPAWAGTkAWA62e0fw20tf6LDL6CWmsZ3yVse9Yw1tpXpNLK5q7e2Po",
+        "cred": {
+          "type_": "ES256",
+          "key": {
+            "EC_EC2": {
+              "curve": "SECP256R1",
+              "x": "HvbGIj6R0H5dnvpqNZwKacuF3KN18CdZKEPBLSrndao",
+              "y": "bpEXmUfWwhW0XwIEREPdUr-RxBH-QIprEWFxSgki6Ms"
+            }
+          }
+        },
+        "counter": 0,
+        "transports": null,
+        "user_verified": true,
+        "backup_eligible": false,
+        "backup_state": false,
+        "registration_policy": "required",
+        "extensions": {
+          "cred_protect": "Ignored",
+          "hmac_create_secret": "NotRequested",
+          "appid": "NotRequested",
+          "cred_props": "Ignored"
+        },
+        "attestation": {
+          "data": "None",
+          "metadata": "None"
+        },
+        "attestation_format": "None"
+      }
+    }"#;
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn roundtrip(pool: SqlitePool) -> Result<()> {
+        let passkey: Passkey = serde_json::from_str(SAMPLE_PASSKEY)?;
+
+        let mut u = UserDao {
+            display_name: "somebody".to_string(),
+            id: Uuid::new_v4(),
+            keys: sqlx::types::Json(vec![passkey]),
+            role: Role::Registered,
+        };
+
+        u.create(&pool).await?;
+
+        assert_eq!(u.role, Role::Admin); //First user gets admin
+
+        let found_u = UserDao::find_by_uuid(&pool, &u.id)
+            .await?
+            .expect("We just inserted this value");
+
+        assert_eq!(u, found_u);
+
+        let mut u2 = UserDao {
+            display_name: "somebody2".to_string(),
+            id: Uuid::new_v4(),
+            keys: sqlx::types::Json(vec![]),
+            role: Role::Registered,
+        };
+
+        u2.create(&pool).await?;
+
+        assert_eq!(u2.role, Role::Registered); //Second user just gets registered
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn passkey_lookup(pool: SqlitePool) -> Result<()> {
+        let passkey: Passkey = serde_json::from_str(SAMPLE_PASSKEY)?;
+
+        let mut u = UserDao {
+            display_name: "somebody".to_string(),
+            id: Uuid::new_v4(),
+            keys: sqlx::types::Json(vec![passkey.clone()]),
+            role: Role::Registered,
+        };
+
+        u.create(&pool).await?;
+
+        let found_u = UserDao::find_by_passkey(&pool, &passkey).await?;
+
+        assert_eq!(u, found_u.unwrap());
+
+        Ok(())
     }
 }

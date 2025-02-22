@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::db::dao::users::User;
+use crate::db::dao::users::UserDao;
 use anyhow::Result;
 use axum::{
     extract::FromRequestParts,
@@ -15,8 +15,8 @@ use webauthn_rs::prelude::{DiscoverableAuthentication, PasskeyRegistration};
 pub enum AuthenticationState {
     Anonymous,
     AuthOptions(DiscoverableAuthentication),
-    RegistrationStarted((PasskeyRegistration, User)),
-    Authenticated(User),
+    RegistrationStarted((PasskeyRegistration, UserDao)),
+    Authenticated(UserDao),
 }
 
 impl Display for AuthenticationState {

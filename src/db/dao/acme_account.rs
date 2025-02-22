@@ -1,10 +1,10 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use sqlx::{prelude::FromRow, sqlite::SqliteRow};
-use sqlx::{query, query_as, Row, SqlitePool};
+use sqlx::prelude::FromRow;
+use sqlx::{query, query_as, SqlitePool};
 use tracing::debug;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, FromRow, Serialize, PartialEq)]
 pub struct AcmeAccountDao {
     pub domain: String,
     pub account_credentials: String, //Serialized credentials
@@ -72,11 +72,25 @@ impl AcmeAccountDao {
     }
 }
 
-impl FromRow<'_, SqliteRow> for AcmeAccountDao {
-    fn from_row(row: &SqliteRow) -> sqlx::Result<Self> {
-        Ok(AcmeAccountDao {
-            domain: row.try_get("domain")?,
-            account_credentials: row.try_get("account_credentials")?,
-        })
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn roundtrip(pool: SqlitePool) -> Result<()> {
+        let ad = AcmeAccountDao {
+            domain: "example.com".to_string(),
+            account_credentials: "stuff!".to_string(),
+        };
+
+        ad.create(&pool).await?;
+
+        let found_ad = AcmeAccountDao::find_by_domain(&pool, "example.com")
+            .await?
+            .expect("We just inserted this value");
+
+        assert_eq!(ad, found_ad);
+
+        Ok(())
     }
 }

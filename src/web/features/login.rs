@@ -1,6 +1,6 @@
 use crate::web::app_error::AppError;
 use crate::{
-    db::dao::{roles::Role, users::User},
+    db::dao::{roles::Role, users::UserDao},
     web::{
         app_state::AppState,
         html_template::HtmlTemplate,
@@ -77,7 +77,7 @@ async fn finish_authentication(
 ) -> Result<Redirect, AppError> {
     let (client_uuid, _) = state.webauthn.identify_discoverable_authentication(&pkc)?;
 
-    let mut user = User::find_by_uuid(&state.pool, &client_uuid)
+    let mut user = UserDao::find_by_uuid(&state.pool, &client_uuid)
         .await?
         .ok_or(anyhow!("User not found"))?;
 
@@ -126,10 +126,10 @@ async fn start_registration(
         )
         .context("Failed to start registration.")?;
 
-    let user = User {
+    let user = UserDao {
         display_name,
         id: user_unique_id,
-        keys: vec![],
+        keys: sqlx::types::Json(vec![]),
         role: Role::Anonymous,
     };
 
@@ -147,14 +147,14 @@ async fn finish_registration(
     if let AuthenticationState::RegistrationStarted((rs, mut user)) = session_data.auth_state {
         let passkey = state.webauthn.finish_passkey_registration(&rpc, &rs)?;
 
-        if User::find_by_passkey(&state.pool, &passkey)
+        if UserDao::find_by_passkey(&state.pool, &passkey)
             .await?
             .is_some()
         {
             return Err(anyhow!("Passkey already registered").into());
         };
 
-        user.keys = vec![passkey];
+        user.keys = sqlx::types::Json(vec![passkey]);
         user.role = Role::Registered;
 
         user.create(&state.pool).await?;
