@@ -125,18 +125,19 @@ impl ContentPageDao {
         executor: impl SqliteExecutor<'_>,
         parent_page_id: Option<i64>,
     ) -> Result<Vec<ContentPageDao>> {
-        let content_pages: Vec<ContentPageDao> = query_as(
+        let content_pages: Vec<ContentPageDao> = query_as!(
+            ContentPageDao,
             r#"
                 select 
-                    page_id,
+                    page_id as "page_id!",
                     parent_page_id,
                     page_name,
                     page_category,
                     page_markdown,
-                    page_cover_attachment_id,
+                    page_cover_attachment_id as "page_cover_attachment_id?",
                     page_order,
-                    page_creation_date,
-                    page_modified_date,
+                    page_creation_date as "page_creation_date: DateTime<Utc>",
+                    page_modified_date as "page_modified_date: DateTime<Utc>",
                     special_page
                 from
                     content_pages
@@ -144,20 +145,20 @@ impl ContentPageDao {
                     parent_page_id IS ?1
                 order by page_order
         "#,
+            parent_page_id
         )
-        .bind(parent_page_id)
         .fetch_all(executor)
         .await?;
 
         Ok(content_pages)
     }
 
-    pub async fn find_by_name(
+    pub async fn find_by_id(
         executor: impl sqlx::SqliteExecutor<'_>,
-        parent_page_id: Option<i64>,
-        page_name: &str,
+        page_id: i64,
     ) -> Result<Option<ContentPageDao>> {
-        let content_page: Option<ContentPageDao> = query_as(
+        let content_page: Option<ContentPageDao> = query_as!(
+            ContentPageDao,
             r#"
                 select 
                     page_id,
@@ -167,8 +168,41 @@ impl ContentPageDao {
                     page_markdown,
                     page_cover_attachment_id,
                     page_order,
-                    page_creation_date,
-                    page_modified_date,
+                    page_creation_date as "page_creation_date: DateTime<Utc>",
+                    page_modified_date as "page_modified_date: DateTime<Utc>",
+                    special_page
+                from
+                    content_pages
+                where
+                    page_id = ?1
+                order by page_order
+        "#,
+            page_id
+        )
+        .fetch_optional(executor)
+        .await?;
+
+        Ok(content_page)
+    }
+
+    pub async fn find_by_name(
+        executor: impl sqlx::SqliteExecutor<'_>,
+        parent_page_id: Option<i64>,
+        page_name: &str,
+    ) -> Result<Option<ContentPageDao>> {
+        let content_page: Option<ContentPageDao> = query_as!(
+            ContentPageDao,
+            r#"
+                select 
+                    page_id as "page_id!",
+                    parent_page_id,
+                    page_name,
+                    page_category,
+                    page_markdown,
+                    page_cover_attachment_id,
+                    page_order,
+                    page_creation_date as "page_creation_date: DateTime<Utc>",
+                    page_modified_date as "page_modified_date: DateTime<Utc>",
                     special_page
                 from
                     content_pages
@@ -177,9 +211,9 @@ impl ContentPageDao {
                     and page_name = ?2
                 order by page_order
         "#,
+            parent_page_id,
+            page_name
         )
-        .bind(parent_page_id)
-        .bind(page_name)
         .fetch_optional(executor)
         .await?;
 

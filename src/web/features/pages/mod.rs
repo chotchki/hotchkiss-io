@@ -21,6 +21,7 @@ use serde::Deserialize;
 
 use super::top_bar::TopBar;
 
+pub mod attachments;
 pub mod preview;
 
 pub fn pages_router() -> Router<AppState> {
@@ -58,6 +59,7 @@ pub async fn redirect_to_first_page(State(state): State<AppState>) -> Result<Res
 pub struct GetPageTemplate {
     pub top_bar: TopBar,
     pub auth_state: AuthenticationState,
+    pub page_id: i64,
     pub page_name: String,
     pub pages_path: Vec<ContentPageDao>,
     pub markdown: String,
@@ -85,6 +87,7 @@ pub async fn get_page_path(
             let gpt = GetPageTemplate {
                 top_bar,
                 auth_state: session_data.auth_state,
+                page_id: lp.page_id,
                 page_name: lp.page_name.clone(),
                 pages_path: pages_path.clone(),
                 markdown: lp.page_markdown.clone(),

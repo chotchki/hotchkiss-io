@@ -96,10 +96,11 @@ impl AttachmentDao {
         executor: impl SqliteExecutor<'_>,
         page_id: i64,
     ) -> Result<Vec<AttachmentDao>> {
-        let attachments = query_as(
+        let attachments = query_as!(
+            AttachmentDao,
             r#"
         select 
-            attachment_id,
+            attachment_id as "attachment_id!",
             page_id,
             attachment_name,
             mime_type,
@@ -109,33 +110,37 @@ impl AttachmentDao {
         where page_id = ?1
         order by attachment_name
         "#,
+            page_id
         )
-        .bind(page_id)
         .fetch_all(executor)
         .await?;
 
         Ok(attachments)
     }
 
-    pub async fn find_attachment_by_id(
+    pub async fn find_attachment_by_name(
         executor: impl SqliteExecutor<'_>,
-        attachment_id: i64,
+        page_id: i64,
+        attachment_name: &str,
     ) -> Result<Option<AttachmentDao>> {
-        let attachment = query_as(
+        let attachment = query_as!(
+            AttachmentDao,
             r#"
         select 
-            attachment_id,
+            attachment_id as "attachment_id!",
             page_id,
             attachment_name,
             mime_type,
             attachment_content
         from
             attachments
-        where attachment_id = ?1
+        where page_id = ?1
+        and attachment_name = ?2
         order by attachment_name
         "#,
+            page_id,
+            attachment_name
         )
-        .bind(attachment_id)
         .fetch_optional(executor)
         .await?;
 
@@ -169,7 +174,8 @@ mod tests {
         attach.update(&pool).await?;
 
         let found_attach =
-            AttachmentDao::find_attachment_by_id(&pool, attach.attachment_id).await?;
+            AttachmentDao::find_attachment_by_name(&pool, cp.page_id, &attach.attachment_name)
+                .await?;
         assert_eq!(attach, found_attach.unwrap());
 
         let found_attach_page =

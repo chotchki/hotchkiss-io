@@ -12,7 +12,7 @@ use askama::Template;
 use axum::{
     extract::{Multipart, Path, State},
     response::IntoResponse,
-    routing::{delete, get, put},
+    routing::{delete, get, post, put},
     Router,
 };
 use http::{header, HeaderMap};
@@ -20,26 +20,23 @@ use tracing::debug;
 
 pub fn attachments_router() -> Router<AppState> {
     Router::new()
-        .route("/{:page_name}", get(list_page_attachments))
-        .route("/{:page_name}", put(save_attachments))
-        .route("/{:page_name}/{:attachment_name}", get(load_attachment))
-        .route(
-            "/{:page_name}/{:attachment_name}",
-            delete(delete_attachment),
-        )
+        .route("/{:page_id}", get(list_page_attachments))
+        .route("/{:page_id}", post(save_attachments))
+        .route("/{:page_id}/{:attachment_name}", get(load_attachment))
+        .route("/{:page_id}/{:attachment_name}", delete(delete_attachment))
 }
 
 #[derive(Template)]
 #[template(path = "pages/list_attachments.html")]
 pub struct ListAttachmentsTemplate {
-    pub parent_page: String,
-    pub attachment_names: Vec<String>,
+    pub page_id: i64,
+    pub attachments: Vec<AttachmentDao>,
 }
 
 pub async fn list_page_attachments(
     State(state): State<AppState>,
     session_data: SessionData,
-    Path(page_name): Path<String>,
+    Path(page_id): Path<i64>,
 ) -> Result<HtmlTemplate<ListAttachmentsTemplate>, AppError> {
     if let AuthenticationState::Authenticated(ref user) = session_data.auth_state {
         if user.role != Role::Admin {
@@ -47,22 +44,22 @@ pub async fn list_page_attachments(
         }
     }
 
-    let titles = AttachmentDao::find_attachment_titles_by_parent(&state.pool, &page_name).await?;
+    let attachments = AttachmentDao::find_attachments_by_page_id(&state.pool, page_id).await?;
 
     Ok(HtmlTemplate(ListAttachmentsTemplate {
-        parent_page: page_name,
-        attachment_names: titles,
+        page_id,
+        attachments,
     }))
 }
 
 pub async fn load_attachment(
     State(state): State<AppState>,
-    Path((page_name, attachment_name)): Path<(String, String)>,
+    Path((page_id, attachment_name)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
     debug!("We got here");
 
     let attachment =
-        AttachmentDao::find_attachment(&state.pool, &page_name, &attachment_name).await?;
+        AttachmentDao::find_attachment_by_name(&state.pool, page_id, &attachment_name).await?;
 
     if let Some(a) = attachment {
         let headers = [
@@ -79,21 +76,16 @@ pub async fn load_attachment(
 
         Ok((headers, a.attachment_content))
     } else {
-        Err(anyhow!(
-            "Attachment does not exist {} {}",
-            page_name,
-            attachment_name
-        )
-        .into())
+        Err(anyhow!("Attachment does not exist {} {}", page_id, attachment_name).into())
     }
 }
 
 pub async fn save_attachments(
     State(state): State<AppState>,
-    Path(page_name): Path<String>,
+    Path(page_id): Path<i64>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
-    ContentPageDao::get_page_by_name(&state.pool, &page_name)
+    let cp = ContentPageDao::find_by_id(&state.pool, page_id)
         .await?
         .ok_or_else(|| anyhow!("Can't attach to a non existent page"))?;
 
@@ -104,17 +96,17 @@ pub async fn save_attachments(
             .to_string();
         let data = field.bytes().await?;
 
-        let attachment = AttachmentDao {
-            parent_page_name: page_name.clone(),
-            attachment_name: name.to_string(),
-            mime_type: mime_guess::from_path(&name)
+        AttachmentDao::create(
+            &state.pool,
+            cp.page_id,
+            name.to_string(),
+            mime_guess::from_path(&name)
                 .first()
                 .ok_or_else(|| anyhow!("Unable to figure out mime type {}", name))?
                 .to_string(),
-            attachment_content: data.to_vec(),
-        };
-
-        attachment.save(&state.pool).await?;
+            data.to_vec(),
+        )
+        .await?;
     }
 
     let mut headers = HeaderMap::new();
@@ -126,7 +118,7 @@ pub async fn save_attachments(
 pub async fn delete_attachment(
     State(state): State<AppState>,
     session_data: SessionData,
-    Path((page_name, attachment_name)): Path<(String, String)>,
+    Path((page_id, attachment_name)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
     if let AuthenticationState::Authenticated(user) = session_data.auth_state {
         if user.role != Role::Admin {
@@ -135,7 +127,7 @@ pub async fn delete_attachment(
     }
 
     let attachment =
-        AttachmentDao::find_attachment(&state.pool, &page_name, &attachment_name).await?;
+        AttachmentDao::find_attachment_by_name(&state.pool, page_id, &attachment_name).await?;
 
     if let Some(a) = attachment {
         a.delete(&state.pool).await?;

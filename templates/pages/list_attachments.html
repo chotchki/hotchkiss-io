@@ -1,20 +1,20 @@
 <div class="p-2">
     <h3 class="text-m">Page Attachements:</h3>
-    {% if attachment_names.len() == 0 %}
+    {% if attachments.is_empty() %}
     <p>No attachements</p>
     {% else %}
     <div class="p-2 flex">
-        {% for name in attachment_names %}
+        {% for attachment in attachments %}
         <div class="p-2">
-            <a href="/attachments/{{parent_page}}/{{name}}" class="p-1">{{name}}</a>
-            <button hx-delete="/attachments/{{parent_page}}/{{name}}" class="p-1 bg-red-500 text-white rounded-sm hover:bg-white hover:text-red-500"><i class="fa-solid fa-trash-can"
-                    title="Delete Attachment"></i></button>
+            <a href="/attachments/{{attachment.page_id}}/{{attachment.attachment_name}}" class="p-1">{{attachment.attachment_name}}</a>
+            <button hx-delete="/attachments/{{attachment.page_id}}/{{attachment.attachment_name}}" class="p-1 bg-red-500 text-white rounded-sm hover:bg-white hover:text-red-500"><i
+                    class="fa-solid fa-trash-can" title="Delete Attachment"></i></button>
         </div>
         {% endfor %}
     </div>
     {% endif %}
     <div class="p-2">
-        <form hx-put="/attachments/{{parent_page}}" enctype="multipart/form-data" hx-trigger="change">
+        <form hx-put="/attachments/{{page_id}}" enctype="multipart/form-data" hx-trigger="change">
             <input class="text-sm text-navy
                 file:mr-5 file:py-1 file:px-3 file:border-[1px]
                 file:text-sm file:font-medium
