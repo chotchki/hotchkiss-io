@@ -1,10 +1,11 @@
+use crate::web::htmx_responses::htmx_redirect;
 use crate::web::util::deserialize::empty_string_as_none;
 use crate::{
     db::dao::{content_pages::ContentPageDao, roles::Role},
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
-        html_template::HtmlTemplate, htmx_refresh::htmx_refresh, markdown::transformer::transform,
-        session::SessionData,
+        html_template::HtmlTemplate, htmx_responses::htmx_refresh,
+        markdown::transformer::transform, session::SessionData,
     },
 };
 use askama::Template;
@@ -126,12 +127,12 @@ pub async fn delete_page_path(
             //Since the page is gone we can only send you to the parent page
             let (_, parent_paths) = page_names.split_last().unwrap();
             if !parent_paths.is_empty() {
-                Ok(
-                    Redirect::temporary(&format!("/pages/{}", parent_paths.join("/")))
-                        .into_response(),
-                )
+                Ok(htmx_redirect(&format!(
+                    "/pages/{}",
+                    parent_paths.join("/")
+                ))?)
             } else {
-                Ok(Redirect::temporary("/pages").into_response())
+                Ok(htmx_redirect("/pages")?)
             }
         }
         None => Ok((StatusCode::NOT_FOUND, "No such page").into_response()),

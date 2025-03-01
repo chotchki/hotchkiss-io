@@ -44,6 +44,12 @@
   </div>
 </form>
 
+<div class="p-2">
+  <form hx-delete="/pages/{{page_path}}" hx-confirm="Are you sure you wish to delete this page?">
+    <button class="px-2 bg-red-500 border-red-500 rounded-sm text-div-grey" type="submit">Delete Page</button>
+  </form>
+</div>
+
 <hr class="pt-2" />
 <h1 class="text-xl text-navy">Page Attachments</h1>
 <div hx-get="/attachments/{{page.page_id}}" hx-trigger="load">

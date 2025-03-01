@@ -2,7 +2,7 @@ use crate::{
     db::dao::{attachments::AttachmentDao, content_pages::ContentPageDao},
     web::{
         app_error::AppError, app_state::AppState, html_template::HtmlTemplate,
-        htmx_refresh::htmx_refresh, session::SessionData,
+        htmx_responses::htmx_refresh, session::SessionData,
     },
 };
 use anyhow::anyhow;
