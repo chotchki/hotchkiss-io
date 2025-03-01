@@ -1,21 +1,19 @@
 use crate::{
-    db::dao::{attachments::AttachmentDao, content_pages::ContentPageDao, roles::Role},
+    db::dao::{attachments::AttachmentDao, content_pages::ContentPageDao},
     web::{
-        app_error::AppError,
-        app_state::AppState,
-        html_template::HtmlTemplate,
-        session::{AuthenticationState, SessionData},
+        app_error::AppError, app_state::AppState, html_template::HtmlTemplate,
+        htmx_refresh::htmx_refresh, session::SessionData,
     },
 };
 use anyhow::anyhow;
 use askama::Template;
 use axum::{
     extract::{Multipart, Path, State},
-    response::IntoResponse,
-    routing::{delete, get, post, put},
+    response::{IntoResponse, Response},
+    routing::{delete, get, post},
     Router,
 };
-use http::{header, HeaderMap};
+use http::{header, StatusCode};
 use tracing::debug;
 
 pub fn attachments_router() -> Router<AppState> {
@@ -37,11 +35,9 @@ pub async fn list_page_attachments(
     State(state): State<AppState>,
     session_data: SessionData,
     Path(page_id): Path<i64>,
-) -> Result<HtmlTemplate<ListAttachmentsTemplate>, AppError> {
-    if let AuthenticationState::Authenticated(ref user) = session_data.auth_state {
-        if user.role != Role::Admin {
-            return Err(anyhow!("Invalid Permission").into());
-        }
+) -> Result<Response, AppError> {
+    if !session_data.auth_state.is_admin() {
+        return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
     }
 
     let attachments = AttachmentDao::find_attachments_by_page_id(&state.pool, page_id).await?;
@@ -49,13 +45,14 @@ pub async fn list_page_attachments(
     Ok(HtmlTemplate(ListAttachmentsTemplate {
         page_id,
         attachments,
-    }))
+    })
+    .into_response())
 }
 
 pub async fn load_attachment(
     State(state): State<AppState>,
     Path((page_id, attachment_name)): Path<(i64, String)>,
-) -> Result<impl IntoResponse, AppError> {
+) -> Result<Response, AppError> {
     debug!("We got here");
 
     let attachment =
@@ -74,17 +71,22 @@ pub async fn load_attachment(
             ),
         ];
 
-        Ok((headers, a.attachment_content))
+        Ok((headers, a.attachment_content).into_response())
     } else {
-        Err(anyhow!("Attachment does not exist {} {}", page_id, attachment_name).into())
+        Ok((StatusCode::NOT_FOUND, "Attachment does not exist").into_response())
     }
 }
 
 pub async fn save_attachments(
     State(state): State<AppState>,
+    session_data: SessionData,
     Path(page_id): Path<i64>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
+    if !session_data.auth_state.is_admin() {
+        return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
+    }
+
     let cp = ContentPageDao::find_by_id(&state.pool, page_id)
         .await?
         .ok_or_else(|| anyhow!("Can't attach to a non existent page"))?;
@@ -109,21 +111,16 @@ pub async fn save_attachments(
         .await?;
     }
 
-    let mut headers = HeaderMap::new();
-    headers.insert("HX-Refresh", "true".parse()?);
-
-    Ok(headers)
+    Ok(htmx_refresh())
 }
 
 pub async fn delete_attachment(
     State(state): State<AppState>,
     session_data: SessionData,
     Path((page_id, attachment_name)): Path<(i64, String)>,
-) -> Result<impl IntoResponse, AppError> {
-    if let AuthenticationState::Authenticated(user) = session_data.auth_state {
-        if user.role != Role::Admin {
-            return Err(anyhow!("Invalid Permission").into());
-        }
+) -> Result<Response, AppError> {
+    if !session_data.auth_state.is_admin() {
+        return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
     }
 
     let attachment =
@@ -132,10 +129,7 @@ pub async fn delete_attachment(
     if let Some(a) = attachment {
         a.delete(&state.pool).await?;
 
-        let mut headers = HeaderMap::new();
-        headers.insert("HX-Refresh", "true".parse()?);
-
-        Ok(headers)
+        Ok(htmx_refresh())
     } else {
         Err(anyhow!("Attachment does not exist").into())
     }

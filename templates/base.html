@@ -46,18 +46,15 @@
                     {% endif %}
                     {% endfor %}
 
-                    {% if let AuthenticationState::Authenticated(user) = auth_state %}
-                    {% if user.role == Role::Admin %}
+                    {% if auth_state.is_admin() %}
                     <li class="bg-navy py-2 px-6 rounded-t font-display text-center">
                         <form hx-post="/pages">
                             <div class="text-div-grey uppercase">
                                 <input type="text" name="page_name" class="bg-div-grey text-black" required />
-                                <input type="hidden" name="page_markdown" value="" />
                                 <button type="submit" class="text-sm text-div-grey px-2"><i class="fa-solid fa-plus"></i></button>
                             </div>
                         </form>
                     </li>
-                    {% endif %}
                     {% endif %}
                 </ul>
             </div>

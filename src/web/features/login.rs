@@ -1,11 +1,8 @@
 use crate::web::app_error::AppError;
+use crate::web::authentication_state::AuthenticationState;
 use crate::{
     db::dao::{roles::Role, users::UserDao},
-    web::{
-        app_state::AppState,
-        html_template::HtmlTemplate,
-        session::{AuthenticationState, SessionData},
-    },
+    web::{app_state::AppState, html_template::HtmlTemplate, session::SessionData},
 };
 use anyhow::{anyhow, Context};
 use askama::Template;

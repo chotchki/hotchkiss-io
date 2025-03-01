@@ -1,11 +1,10 @@
+use crate::web::util::deserialize::empty_string_as_none;
 use crate::{
     db::dao::{content_pages::ContentPageDao, roles::Role},
     web::{
-        app_error::AppError,
-        app_state::AppState,
-        html_template::HtmlTemplate,
-        markdown::transformer::transform,
-        session::{AuthenticationState, SessionData},
+        app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
+        html_template::HtmlTemplate, htmx_refresh::htmx_refresh, markdown::transformer::transform,
+        session::SessionData,
     },
 };
 use askama::Template;
@@ -15,7 +14,7 @@ use axum::{
     routing::get,
     Form, Router,
 };
-use http::{uri::PathAndQuery, HeaderMap, StatusCode};
+use http::{uri::PathAndQuery, StatusCode};
 use preview::preview_router;
 use serde::Deserialize;
 
@@ -59,10 +58,10 @@ pub async fn redirect_to_first_page(State(state): State<AppState>) -> Result<Res
 pub struct GetPageTemplate {
     pub top_bar: TopBar,
     pub auth_state: AuthenticationState,
-    pub page_id: i64,
-    pub page_name: String,
+    pub page_path: String,
+    pub page: ContentPageDao,
     pub pages_path: Vec<ContentPageDao>,
-    pub markdown: String,
+    pub children_pages: Vec<ContentPageDao>,
     pub rendered_markdown: String,
 }
 
@@ -87,10 +86,11 @@ pub async fn get_page_path(
             let gpt = GetPageTemplate {
                 top_bar,
                 auth_state: session_data.auth_state,
-                page_id: lp.page_id,
-                page_name: lp.page_name.clone(),
+                page_path: page_path.clone(),
+                page: lp.clone(),
                 pages_path: pages_path.clone(),
-                markdown: lp.page_markdown.clone(),
+                children_pages: ContentPageDao::find_by_parent(&state.pool, Some(lp.page_id))
+                    .await?,
                 rendered_markdown: transform(&lp.page_markdown)?,
             };
 
@@ -140,7 +140,12 @@ pub async fn delete_page_path(
 
 #[derive(Debug, Deserialize)]
 pub struct PutPageForm {
-    pub markdown: String,
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub page_category: Option<String>,
+    pub page_markdown: String,
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub page_cover_attachment_id: Option<i64>,
+    pub page_order: i64,
 }
 
 pub async fn put_page_path(
@@ -161,13 +166,13 @@ pub async fn put_page_path(
     match pages_path.to_owned().last() {
         Some(lp) => {
             let mut lp = lp.to_owned();
-            lp.page_markdown = put_page_form.markdown;
+            lp.page_category = put_page_form.page_category;
+            lp.page_markdown = put_page_form.page_markdown;
+            lp.page_cover_attachment_id = put_page_form.page_cover_attachment_id;
+            lp.page_order = put_page_form.page_order;
             lp.update(&state.pool).await?;
 
-            let mut headers = HeaderMap::new();
-            headers.insert("HX-Refresh", "true".parse()?);
-
-            Ok(headers.into_response())
+            Ok(htmx_refresh())
         }
         None => Ok((StatusCode::NOT_FOUND, "No such page").into_response()),
     }
@@ -176,8 +181,6 @@ pub async fn put_page_path(
 #[derive(Debug, Deserialize)]
 pub struct PostPageForm {
     pub page_name: String,
-    pub page_category: Option<String>,
-    pub page_markdown: String,
 }
 
 pub async fn post_top_level_page_path(
@@ -199,16 +202,13 @@ pub async fn post_top_level_page_path(
         &state.pool,
         None,
         post_page_form.page_name,
-        post_page_form.page_category,
-        post_page_form.page_markdown,
+        None,
+        "".to_string(),
         None,
     )
     .await?;
 
-    let mut headers = HeaderMap::new();
-    headers.insert("HX-Refresh", "true".parse()?);
-
-    Ok(headers.into_response())
+    Ok(htmx_refresh())
 }
 
 pub async fn post_page_path(
@@ -236,16 +236,13 @@ pub async fn post_page_path(
                 &state.pool,
                 Some(lp.page_id),
                 post_page_form.page_name,
-                post_page_form.page_category,
-                post_page_form.page_markdown,
+                None,
+                "".to_string(),
                 None,
             )
             .await?;
 
-            let mut headers = HeaderMap::new();
-            headers.insert("HX-Refresh", "true".parse()?);
-
-            Ok(headers.into_response())
+            Ok(htmx_refresh())
         }
         None => Ok((StatusCode::NOT_FOUND, "No such parent page").into_response()),
     }

@@ -1,6 +1,3 @@
-use std::fmt::Display;
-
-use crate::db::dao::users::UserDao;
 use anyhow::Result;
 use axum::{
     extract::FromRequestParts,
@@ -9,32 +6,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tower_sessions::Session;
 use tracing::debug;
-use webauthn_rs::prelude::{DiscoverableAuthentication, PasskeyRegistration};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum AuthenticationState {
-    Anonymous,
-    AuthOptions(DiscoverableAuthentication),
-    RegistrationStarted((PasskeyRegistration, UserDao)),
-    Authenticated(UserDao),
-}
+use super::authentication_state::AuthenticationState;
 
-impl Display for AuthenticationState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AuthenticationState::Anonymous => write!(f, "AuthState: Anonymous"),
-            AuthenticationState::AuthOptions(_) => write!(f, "AuthState: AuthOptions"),
-            AuthenticationState::RegistrationStarted((_, u)) => {
-                write!(f, "AuthState: RegistrationStarted for {}", u)
-            }
-            AuthenticationState::Authenticated(u) => {
-                write!(f, "AuthState: Authenticated for {}", u)
-            }
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct SessionData {
     pub auth_state: AuthenticationState,
 }
@@ -46,14 +21,6 @@ impl SessionData {
         Ok(session
             .insert(Self::SESSION_DATA_KEY, session_data.clone())
             .await?)
-    }
-}
-
-impl Default for SessionData {
-    fn default() -> Self {
-        Self {
-            auth_state: AuthenticationState::Anonymous,
-        }
     }
 }
 

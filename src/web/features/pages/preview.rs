@@ -1,14 +1,13 @@
-use crate::{
-    db::dao::roles::Role,
-    web::{
-        app_error::AppError,
-        app_state::AppState,
-        markdown::transformer::transform,
-        session::{AuthenticationState, SessionData},
-    },
+use crate::web::{
+    app_error::AppError, app_state::AppState, markdown::transformer::transform,
+    session::SessionData,
 };
-use anyhow::anyhow;
-use axum::{routing::patch, Form, Router};
+use axum::{
+    response::{IntoResponse, Response},
+    routing::patch,
+    Form, Router,
+};
+use http::StatusCode;
 use serde::Deserialize;
 
 pub fn preview_router() -> Router<AppState> {
@@ -23,12 +22,10 @@ pub struct PreviewForm {
 pub async fn preview_page(
     session_data: SessionData,
     Form(page_markdown): Form<PreviewForm>,
-) -> Result<String, AppError> {
-    if let AuthenticationState::Authenticated(user) = &session_data.auth_state {
-        if user.role != Role::Admin {
-            return Err(anyhow!("Invalid Permission").into());
-        }
+) -> Result<Response, AppError> {
+    if !session_data.auth_state.is_admin() {
+        return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
     }
 
-    Ok(transform(&page_markdown.markdown)?)
+    Ok(transform(&page_markdown.markdown)?.into_response())
 }
