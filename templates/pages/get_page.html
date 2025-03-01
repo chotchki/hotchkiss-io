@@ -59,13 +59,13 @@
   <ul class="m-2 list-disc">
     {% for child_page in children_pages %}
     <li>
-      <a href="{{page_path}}/{{child_page.page_name}}">{{child_page.page_name}}</a>
+      <a href="/pages/{{page_path}}/{{child_page.page_name}}">{{child_page.page_name}}</a>
     </li>
     {% endfor %}
   </ul>
   {% endif %}
   <div class="p-2">
-    <form hx-post="{{page_path}}">
+    <form hx-post="/pages/{{page_path}}">
       <input class="border border-navy" name="page_name" id="page_name" type="text" placeholder="Page Name" required />
       <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Create New Page</button>
     </form>
@@ -74,6 +74,18 @@
 
 <hr class="pt-2" />
 <h1 class="text-xl text-navy">Page Preview</h1>
+{% endif %}
+{% if pages_path.len() > 1 %}
+<ul class="flex">
+  {% for path_node in pages_path.iter().skip(1) %}
+  <li class="p-2">
+    {{path_node.page_name}}
+  </li>
+  {% if ! loop.last %}
+  <li class="p-2">&gt;</li>
+  {% endif %}
+  {% endfor %}
+</ul>
 {% endif %}
 <div class="prose max-w-none" id="rendered">
   {{rendered_markdown|safe}}
