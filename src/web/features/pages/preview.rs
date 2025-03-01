@@ -16,7 +16,7 @@ pub fn preview_router() -> Router<AppState> {
 
 #[derive(Debug, Deserialize)]
 pub struct PreviewForm {
-    markdown: String,
+    page_markdown: String,
 }
 
 pub async fn preview_page(
@@ -27,5 +27,5 @@ pub async fn preview_page(
         return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
     }
 
-    Ok(transform(&page_markdown.markdown)?.into_response())
+    Ok(transform(&page_markdown.page_markdown)?.into_response())
 }

@@ -8,7 +8,7 @@ use crate::{
 use anyhow::anyhow;
 use askama::Template;
 use axum::{
-    extract::{Multipart, Path, State},
+    extract::{DefaultBodyLimit, Multipart, Path, State},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
     Router,
@@ -20,6 +20,7 @@ pub fn attachments_router() -> Router<AppState> {
     Router::new()
         .route("/{:page_id}", get(list_page_attachments))
         .route("/{:page_id}", post(save_attachments))
+        .layer(DefaultBodyLimit::disable())
         .route("/{:page_id}/{:attachment_name}", get(load_attachment))
         .route("/{:page_id}/{:attachment_name}", delete(delete_attachment))
 }

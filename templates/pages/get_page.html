@@ -11,14 +11,30 @@
   }
 </script>
 <script src="/scripts/htmx-stl-view.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" type="module"></script>
+{% if auth_state.is_admin() %}
+<script src="/scripts/editor-support.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+{% endif %}
 {% endblock %}
 
 {% block content %}
 {% if auth_state.is_admin() %}
-<h1 class="text-xl text-navy">Page Editor</h1>
-<form hx-put="./{{page.page_name}}">
+<div class="mb-4 flex flex-row">
+  <h1 class="text-xl text-navy px-2">Page Editor</h1>
+  <button hx-delete="/pages/{{page_path}}" hx-confirm="Are you sure you wish to delete this page?" class="px-2 bg-red-500 border-red-500 rounded-sm text-div-grey" type="submit">
+    Delete Page <i class="fa-solid fa-trash-can"></i></button>
+  <div class="grow"></div>
+  <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit" form="update-page">
+    Save Edits <i class="fa-solid fa-floppy-disk"></i></button>
+</div>
+
+<form id="update-page" hx-put="./{{page.page_name}}">
   <div class="m-2 flex flex-col">
-    <textarea hx-patch="/pages/preview" hx-swap="innerHTML" hx-target="#rendered" hx-trigger="keyup changed delay:500ms" hx-sync="closest form:abort" id="page_markdown" name="page_markdown"
+    <div>
+      Markdown:
+      <button onclick="addLink()"><i class="fa-solid fa-link"></i></button>
+      <button onclick="addImage()"><i class="fa-solid fa-image"></i></button>
+    </div>
+    <textarea hx-patch="/pages/preview" hx-swap="innerHTML" hx-target="#rendered" hx-trigger="keyup,change changed delay:500ms" hx-sync="closest form:abort" id="page_markdown" name="page_markdown"
       class="outline w-full min-h-40 p-2">{{page.page_markdown}}</textarea>
     <label class="m-2">Page Category
       {% if let Some(category) = page.page_category %}
@@ -40,14 +56,12 @@
   </div>
 
   <div class="m-2 flex flex-row-reverse">
-    <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Save Edits</button>
+
   </div>
 </form>
 
 <div class="p-2">
-  <form hx-delete="/pages/{{page_path}}" hx-confirm="Are you sure you wish to delete this page?">
-    <button class="px-2 bg-red-500 border-red-500 rounded-sm text-div-grey" type="submit">Delete Page</button>
-  </form>
+
 </div>
 
 <hr class="pt-2" />
