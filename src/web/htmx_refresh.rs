@@ -9,3 +9,15 @@ pub fn htmx_refresh() -> Response {
     );
     headers.into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn construct() {
+        let r = htmx_refresh();
+
+        assert!(r.headers().contains_key("hx-refresh"));
+    }
+}
