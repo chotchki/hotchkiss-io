@@ -6,6 +6,7 @@
         {% for attachment in attachments %}
         <div class="p-2">
             <a onclick="addAttachment(event)" href="/attachments/{{attachment.page_id}}/{{attachment.attachment_name}}" class="p-1">{{attachment.attachment_name}}</a>
+            <button onclick="setAsCoverId({{attachment.attachment_id}})" class="p-1 bg-navy border-navy rounded-sm text-div-grey">Set as Cover</button>
             <button hx-delete="/attachments/{{attachment.page_id}}/{{attachment.attachment_name}}" class="p-1 bg-red-500 text-white rounded-sm hover:bg-white hover:text-red-500"><i
                     class="fa-solid fa-trash-can" title="Delete Attachment"></i></button>
         </div>

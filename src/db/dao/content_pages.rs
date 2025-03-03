@@ -233,14 +233,9 @@ impl ContentPageDao {
 
             match found_node {
                 Some(node) => {
-                    let special_page = node.special_page;
                     current_parent_id = Some(node.page_id);
 
                     nodes.push(node);
-
-                    if special_page {
-                        break;
-                    }
                 }
                 None => return Ok(vec![]),
             }

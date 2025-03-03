@@ -1,12 +1,8 @@
 use crate::{
-    db::dao::{content_pages::ContentPageDao, projects::ProjectDao, roles::Role},
+    db::dao::content_pages::ContentPageDao,
     web::{
-        app_error::AppError,
-        app_state::AppState,
-        features::top_bar::TopBar,
-        html_template::HtmlTemplate,
-        markdown::transformer::transform,
-        session::{AuthenticationState, SessionData},
+        app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
+        features::top_bar::TopBar, html_template::HtmlTemplate, session::SessionData,
     },
 };
 use anyhow::anyhow;
@@ -22,10 +18,6 @@ use serde::Deserialize;
 
 pub fn projects_router() -> Router<AppState> {
     Router::new().route("/", get(show_all_projects))
-    //.route("/{:page_name}", get(page_by_title))
-    //.route("/{:page_name}", put(edit_page))
-    //.route("/{:page_name}", delete(delete_page))
-    //.route("/{:page_name}/preview", patch(preview_page))
 }
 
 #[derive(Template)]
@@ -33,22 +25,28 @@ pub fn projects_router() -> Router<AppState> {
 pub struct ListProjectsTemplate {
     pub top_bar: TopBar,
     pub auth_state: AuthenticationState,
-    pub projects: Vec<ProjectDao>,
+    pub page_path: String,
+    pub projects: Vec<ContentPageDao>,
 }
 
 pub async fn show_all_projects(
     State(state): State<AppState>,
     session_data: SessionData,
-) -> Result<HtmlTemplate<ListProjectsTemplate>, AppError> {
-    let projects = ProjectDao::get_projects_in_order(&state.pool).await?;
+) -> Result<Response, AppError> {
+    let project_page = ContentPageDao::find_by_name(&state.pool, None, "projects").await?;
+    let Some(project_page) = project_page else {
+        return Err(
+            anyhow!("Server misconfiguration, could not find the /projects special page").into(),
+        );
+    };
 
-    let top_bar =
-        TopBar::new(ContentPageDao::find_page_titles(&state.pool).await?).make_active("projects");
+    let projects = ContentPageDao::find_by_parent(&state.pool, Some(project_page.page_id)).await?;
 
     let lpt = ListProjectsTemplate {
-        top_bar,
+        top_bar: TopBar::create(&state.pool, "projects").await?,
         auth_state: session_data.auth_state,
+        page_path: "/projects".to_string(),
         projects,
     };
-    Ok(HtmlTemplate(lpt))
+    Ok(HtmlTemplate(lpt).into_response())
 }

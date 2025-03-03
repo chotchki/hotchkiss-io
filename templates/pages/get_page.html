@@ -45,9 +45,9 @@
     </label>
     <label class="m-2">Cover Attachment Id
       {% if let Some(cover_attachment_id) = page.page_cover_attachment_id %}
-      <input class="outline px-2" name="page_cover_attachment_id" value="{{cover_attachment_id}}" />
+      <input class="outline px-2" id="page_cover_attachment_id" name="page_cover_attachment_id" value="{{cover_attachment_id}}" type="number" />
       {% else %}
-      <input class="outline px-2" name="page_cover_attachment_id" />
+      <input class="outline px-2" id="page_cover_attachment_id" name="page_cover_attachment_id" type="number" />
       {% endif %}
     </label>
     <label class="m-2">Page Order

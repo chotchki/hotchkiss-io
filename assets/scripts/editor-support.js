@@ -25,3 +25,7 @@ function addAttachment(event) {
     el.setRangeText("![" + currentText + "](" + targetUrl + ")", start, end, 'select');
     el.dispatchEvent(new Event('change', { bubbles: true }));
 }
+
+function setAsCoverId(attachment_id) {
+    document.getElementById("page_cover_attachment_id").value = attachment_id;
+}

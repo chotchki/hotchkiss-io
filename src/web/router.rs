@@ -1,7 +1,10 @@
 use super::{app_state::AppState, features::login::login_router, static_content::static_content};
 use crate::{
     db::dao::crypto_key::CryptoKey,
-    web::features::pages::{attachments::attachments_router, pages_router, redirect_to_first_page},
+    web::features::pages::{
+        attachments::attachments_router, pages_router, projects::projects_router,
+        redirect_to_first_page,
+    },
 };
 use axum::{http::Uri, routing::get, Router};
 use build_time::build_time_utc;
@@ -35,6 +38,7 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
         .nest("/login", login_router())
         .nest("/attachments", attachments_router())
         .nest("/pages", pages_router())
+        .nest("/projects", projects_router())
         .with_state(app_state)
         .merge(static_content())
         .fallback(fallback);

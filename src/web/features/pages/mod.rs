@@ -18,11 +18,13 @@ use axum::{
 use http::{uri::PathAndQuery, StatusCode};
 use preview::preview_router;
 use serde::Deserialize;
+use tracing::{debug, warn};
 
 use super::top_bar::TopBar;
 
 pub mod attachments;
 pub mod preview;
+pub mod projects;
 
 pub fn pages_router() -> Router<AppState> {
     Router::new()
@@ -72,8 +74,10 @@ pub async fn get_page_path(
     Path(page_path): Path<String>,
 ) -> Result<Response, AppError> {
     let page_names: Vec<&str> = page_path.split("/").collect();
+    warn!("Found the following pages names {:?}", page_names);
 
     let pages_path = ContentPageDao::find_by_path(&state.pool, &page_names).await?;
+    warn!("Found the following pages path {:?}", pages_path);
 
     match pages_path.last() {
         None => Ok((StatusCode::NOT_FOUND, "No such page").into_response()),
@@ -82,10 +86,8 @@ pub async fn get_page_path(
                 return Ok(Redirect::temporary(&lp.page_markdown).into_response());
             }
 
-            let top_bar = TopBar::create(&state.pool, page_names.first().unwrap()).await?;
-
             let gpt = GetPageTemplate {
-                top_bar,
+                top_bar: TopBar::create(&state.pool, page_names.first().unwrap()).await?,
                 auth_state: session_data.auth_state,
                 page_path: page_path.clone(),
                 page: lp.clone(),
@@ -145,7 +147,7 @@ pub struct PutPageForm {
     pub page_category: Option<String>,
     pub page_markdown: String,
     #[serde(deserialize_with = "empty_string_as_none")]
-    pub page_cover_attachment_id: Option<i64>,
+    pub page_cover_attachment_id: Option<String>,
     pub page_order: i64,
 }
 
@@ -161,6 +163,11 @@ pub async fn put_page_path(
         }
     }
 
+    let page_cover_attachment_id: Option<i64> = match put_page_form.page_cover_attachment_id {
+        Some(e) => Some(e.parse::<i64>()?),
+        None => None,
+    };
+
     let page_names: Vec<&str> = page_path.split("/").collect();
     let pages_path = ContentPageDao::find_by_path(&state.pool, &page_names).await?;
 
@@ -169,7 +176,7 @@ pub async fn put_page_path(
             let mut lp = lp.to_owned();
             lp.page_category = put_page_form.page_category;
             lp.page_markdown = put_page_form.page_markdown;
-            lp.page_cover_attachment_id = put_page_form.page_cover_attachment_id;
+            lp.page_cover_attachment_id = page_cover_attachment_id;
             lp.page_order = put_page_form.page_order;
             lp.update(&state.pool).await?;
 
