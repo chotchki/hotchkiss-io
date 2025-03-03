@@ -41,14 +41,18 @@
         if (!auth_opt_response.ok) {
             console.error("Response from auth options: ${response.status}");
             return false;
+        } else {
+            console.log("Got past the opt call");
         }
 
         let auth_opt_json = await auth_opt_response.json();
 
         //Due to a Safari bug, having to use a ponyfill
+        console.log("prompting for autofill");
         const auth_response = await (await polyfill_webauthn.get(auth_opt_json));
         const auth_response_str = JSON.stringify(auth_response);
 
+        console.log("returned from conditional prompt, sending to server");
         // Send the response to your server for verification and
         // authenticate the user if the response is valid.
         const finish_auth_response = await fetch(auth_finish_url, {
@@ -64,6 +68,7 @@
             return false;
         }
 
+        console.log("server response was good");
         return true;
     }
 
