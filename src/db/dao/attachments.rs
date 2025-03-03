@@ -118,6 +118,31 @@ impl AttachmentDao {
         Ok(attachments)
     }
 
+    pub async fn find_attachment_by_id(
+        executor: impl SqliteExecutor<'_>,
+        attachment_id: i64,
+    ) -> Result<Option<AttachmentDao>> {
+        let attachment = query_as!(
+            AttachmentDao,
+            r#"
+        select 
+            attachment_id as "attachment_id!",
+            page_id,
+            attachment_name,
+            mime_type,
+            attachment_content
+        from
+            attachments
+        where attachment_id = ?1
+        "#,
+            attachment_id
+        )
+        .fetch_optional(executor)
+        .await?;
+
+        Ok(attachment)
+    }
+
     pub async fn find_attachment_by_name(
         executor: impl SqliteExecutor<'_>,
         page_id: i64,

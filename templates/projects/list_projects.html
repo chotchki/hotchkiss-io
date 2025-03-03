@@ -7,22 +7,35 @@
 
 {% block content %}
 
-<ul>
+<ul class="grid auto-cols-max grid-flow-col gap-2">
     {% if projects.len() == 0 %}
     <li>No Projects</li>
     {% else %}
     {% for project in projects %}
     <li>
-        <a href="/pages/projects/{{project.page_name}}">{{project.page_name}}</a>
+        <a href="/pages/projects/{{project.page_name}}">
+            <div class="flex flex-col items-center size-40 rounded-md border-8 border-navy">
+                {% if let Some(cover_id) = project.page_cover_attachment_id %}
+                <div class="m-2 grow size-24">
+                    <img src="/attachments/id/{{cover_id}}" alt="Project Image" />
+                </div>
+                {% else %}
+                <div class="m-2 grow text-7xl"><i class="display-block fa-solid fa-cubes-stacked"></i></div>
+                {% endif %}
+                <p class="m-2 underline">{{project.page_name}}</p>
+            </div>
+        </a>
     </li>
     {% endfor %}
     {% endif %}
 </ul>
 
-<div class="p-2">
+{% if auth_state.is_admin() %}
+<div class="my-4">
     <form hx-post="/pages/projects">
         <input class="border border-navy" name="page_name" id="page_name" type="text" placeholder="Project Name" required />
         <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Create New Project</button>
     </form>
 </div>
+{% endif %}
 {% endblock %}

@@ -21,6 +21,7 @@ pub fn attachments_router() -> Router<AppState> {
         .route("/{:page_id}", get(list_page_attachments))
         .route("/{:page_id}", post(save_attachments))
         .layer(DefaultBodyLimit::disable())
+        .route("/id/{:attachment_id}", get(load_attachment_by_id))
         .route("/{:page_id}/{:attachment_name}", get(load_attachment))
         .route("/{:page_id}/{:attachment_name}", delete(delete_attachment))
 }
@@ -65,6 +66,33 @@ pub async fn load_attachment(
             (
                 header::CONTENT_DISPOSITION,
                 format!("attachment; filename=\"{}\"", attachment_name),
+            ),
+            (
+                header::CONTENT_LENGTH,
+                a.attachment_content.len().to_string(),
+            ),
+        ];
+
+        Ok((headers, a.attachment_content).into_response())
+    } else {
+        Ok((StatusCode::NOT_FOUND, "Attachment does not exist").into_response())
+    }
+}
+
+pub async fn load_attachment_by_id(
+    State(state): State<AppState>,
+    Path(attachment_id): Path<i64>,
+) -> Result<Response, AppError> {
+    debug!("We got here");
+
+    let attachment = AttachmentDao::find_attachment_by_id(&state.pool, attachment_id).await?;
+
+    if let Some(a) = attachment {
+        let headers = [
+            (header::CONTENT_TYPE, a.mime_type),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}\"", a.attachment_name),
             ),
             (
                 header::CONTENT_LENGTH,
