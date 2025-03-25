@@ -18,7 +18,7 @@ use axum::{
 use http::{uri::PathAndQuery, StatusCode};
 use preview::preview_router;
 use serde::Deserialize;
-use tracing::{debug, warn};
+use tracing::warn;
 
 use super::top_bar::TopBar;
 

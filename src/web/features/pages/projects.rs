@@ -8,13 +8,11 @@ use crate::{
 use anyhow::anyhow;
 use askama::Template;
 use axum::{
-    extract::{Path, State},
-    response::{IntoResponse, Redirect, Response},
-    routing::{delete, get, patch, put},
-    Form, Router,
+    extract::State,
+    response::{IntoResponse, Response},
+    routing::get,
+    Router,
 };
-use http::HeaderMap;
-use serde::Deserialize;
 
 pub fn projects_router() -> Router<AppState> {
     Router::new().route("/", get(show_all_projects))
