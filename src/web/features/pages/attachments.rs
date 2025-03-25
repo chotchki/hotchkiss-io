@@ -1,3 +1,5 @@
+use std::io::Cursor;
+
 use crate::{
     db::dao::{attachments::AttachmentDao, content_pages::ContentPageDao},
     web::{
@@ -8,13 +10,17 @@ use crate::{
 use anyhow::anyhow;
 use askama::Template;
 use axum::{
-    extract::{DefaultBodyLimit, Multipart, Path, State},
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
     Router,
 };
 use http::{header, StatusCode};
+use image::{ImageFormat, ImageReader};
+use serde::Deserialize;
 use tracing::debug;
+
+const MAX_WIDTH: u32 = 8000; //No reason to resize above this width
 
 pub fn attachments_router() -> Router<AppState> {
     Router::new()
@@ -24,6 +30,11 @@ pub fn attachments_router() -> Router<AppState> {
         .route("/id/{:attachment_id}", get(load_attachment_by_id))
         .route("/{:page_id}/{:attachment_name}", get(load_attachment))
         .route("/{:page_id}/{:attachment_name}", delete(delete_attachment))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AttachmentSizeParams {
+    pub width: Option<u32>,
 }
 
 #[derive(Template)]
@@ -51,59 +62,81 @@ pub async fn list_page_attachments(
     .into_response())
 }
 
+fn render_attachment(name: String, mime: String, buffer: Vec<u8>) -> Result<Response, AppError> {
+    let headers = [
+        (header::CONTENT_TYPE, mime.to_string()),
+        (
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}\"", name),
+        ),
+        (header::CONTENT_LENGTH, buffer.len().to_string()),
+    ];
+
+    Ok((headers, buffer).into_response())
+}
+
+fn maybe_resize_attachment(
+    attachment: Option<AttachmentDao>,
+    size_params: AttachmentSizeParams,
+) -> Result<Response, AppError> {
+    let Some(a) = attachment else {
+        return Ok((StatusCode::NOT_FOUND, "Attachment does not exist").into_response());
+    };
+
+    if a.attachment_name.ends_with(".stl") {
+        render_attachment(a.attachment_name, a.mime_type, a.attachment_content)
+    } else if let Some(width) = size_params.width {
+        if width > MAX_WIDTH {
+            return Ok((StatusCode::BAD_REQUEST, "Size too large").into_response());
+        }
+
+        let image = ImageReader::new(Cursor::new(a.attachment_content))
+            .with_guessed_format()?
+            .decode()?;
+
+        let nheight = image.height() / image.width() * width;
+
+        let new_image = image.resize(width, nheight, image::imageops::FilterType::Gaussian);
+
+        let mut new_image_buf: Vec<u8> = Vec::new();
+        new_image.write_to(
+            &mut Cursor::new(&mut new_image_buf),
+            image::ImageFormat::Avif,
+        )?;
+
+        render_attachment(
+            a.attachment_name,
+            ImageFormat::Avif.to_mime_type().to_string(),
+            new_image_buf,
+        )
+    } else {
+        render_attachment(a.attachment_name, a.mime_type, a.attachment_content)
+    }
+}
+
 pub async fn load_attachment(
     State(state): State<AppState>,
     Path((page_id, attachment_name)): Path<(i64, String)>,
+    Query(size_params): Query<AttachmentSizeParams>,
 ) -> Result<Response, AppError> {
     debug!("We got here");
 
     let attachment =
         AttachmentDao::find_attachment_by_name(&state.pool, page_id, &attachment_name).await?;
 
-    if let Some(a) = attachment {
-        let headers = [
-            (header::CONTENT_TYPE, a.mime_type),
-            (
-                header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{}\"", attachment_name),
-            ),
-            (
-                header::CONTENT_LENGTH,
-                a.attachment_content.len().to_string(),
-            ),
-        ];
-
-        Ok((headers, a.attachment_content).into_response())
-    } else {
-        Ok((StatusCode::NOT_FOUND, "Attachment does not exist").into_response())
-    }
+    maybe_resize_attachment(attachment, size_params)
 }
 
 pub async fn load_attachment_by_id(
     State(state): State<AppState>,
     Path(attachment_id): Path<i64>,
+    Query(size_params): Query<AttachmentSizeParams>,
 ) -> Result<Response, AppError> {
     debug!("We got here");
 
     let attachment = AttachmentDao::find_attachment_by_id(&state.pool, attachment_id).await?;
 
-    if let Some(a) = attachment {
-        let headers = [
-            (header::CONTENT_TYPE, a.mime_type),
-            (
-                header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{}\"", a.attachment_name),
-            ),
-            (
-                header::CONTENT_LENGTH,
-                a.attachment_content.len().to_string(),
-            ),
-        ];
-
-        Ok((headers, a.attachment_content).into_response())
-    } else {
-        Ok((StatusCode::NOT_FOUND, "Attachment does not exist").into_response())
-    }
+    maybe_resize_attachment(attachment, size_params)
 }
 
 pub async fn save_attachments(
