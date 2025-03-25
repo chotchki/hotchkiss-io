@@ -36,11 +36,11 @@
                 <ul class="list-none flex flex-row">
                     {% for item in top_bar.0 %}
                     {% if item.1 == true %}
-                    <li class="bg-navy py-2 px-8 min-w-40 rounded-t font-display text-center border-b-2 border-b-yellow">
+                    <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-yellow">
                         <a class="text-sm text-yellow uppercase" href="/pages/{{item.0}}">{{item.0}}</a>
                     </li>
                     {% else %}
-                    <li class="bg-navy py-2 px-8 min-w-40 rounded-t font-display text-center">
+                    <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center">
                         <a class="text-sm text-div-grey uppercase" href="/pages/{{item.0}}">{{item.0}}</a>
                     </li>
                     {% endif %}
