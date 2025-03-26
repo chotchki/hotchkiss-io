@@ -8,6 +8,7 @@ Christopher Hotchkiss's personal site / CRM system
 
 ## Todo List:
 - Need to figure out attachment resizing plus caching so I can really start uploading images / stl files.
+- Probably will need to move behind Cloudflare's AI bot protection but that will change my server start up process
 - Need to figure out codesigning the server executable
     - Dylan has a great example here: https://github.com/dylanwh/lilguy/blob/main/macos/build.sh
 - Fix the sticky footer issue
