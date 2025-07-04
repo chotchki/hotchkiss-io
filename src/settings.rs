@@ -6,4 +6,5 @@ pub struct Settings {
     pub database_path: String,
     pub domain: String,
     pub log_path: String,
+    pub cache_path: String,
 }

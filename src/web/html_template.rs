@@ -18,7 +18,7 @@ where
             // If we're not, return an error or some bit of fallback HTML
             Err(err) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to render template. Error: {}", err),
+                format!("Failed to render template. Error: {err}"),
             )
                 .into_response(),
         }

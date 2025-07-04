@@ -67,7 +67,7 @@ fn render_attachment(name: String, mime: String, buffer: Vec<u8>) -> Result<Resp
         (header::CONTENT_TYPE, mime.to_string()),
         (
             header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{}\"", name),
+            format!("attachment; filename=\"{name}\""),
         ),
         (header::CONTENT_LENGTH, buffer.len().to_string()),
     ];

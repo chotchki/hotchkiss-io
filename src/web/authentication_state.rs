@@ -27,10 +27,10 @@ impl Display for AuthenticationState {
             AuthenticationState::Anonymous => write!(f, "AuthState: Anonymous"),
             AuthenticationState::AuthOptions(_) => write!(f, "AuthState: AuthOptions"),
             AuthenticationState::RegistrationStarted((_, u)) => {
-                write!(f, "AuthState: RegistrationStarted for {}", u)
+                write!(f, "AuthState: RegistrationStarted for {u}")
             }
             AuthenticationState::Authenticated(u) => {
-                write!(f, "AuthState: Authenticated for {}", u)
+                write!(f, "AuthState: Authenticated for {u}")
             }
         }
     }

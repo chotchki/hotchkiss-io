@@ -20,7 +20,7 @@ impl DatabaseHandle {
         debug!("Creating database on disk");
         let pool_opts = SqlitePoolOptions::new().min_connections(2);
 
-        let mut con_opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path))?
+        let mut con_opts = SqliteConnectOptions::from_str(&format!("sqlite://{path}"))?
             .log_statements(LevelFilter::Debug)
             .create_if_missing(true)
             .foreign_keys(true)

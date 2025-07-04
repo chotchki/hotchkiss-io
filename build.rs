@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
     println!("cargo::rustc-env={schema_key}={schema_url}");
     File::create(format!("{}/.env", env::var("CARGO_MANIFEST_DIR")?))
         .await?
-        .write_all(format!("{}={}", schema_key, schema_url).as_bytes())
+        .write_all(format!("{schema_key}={schema_url}").as_bytes())
         .await?;
 
     //Run a migration for sqlx so it can compile queries

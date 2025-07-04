@@ -14,7 +14,7 @@ impl IntoResponse for AppError {
         error!("Error trace id: {} for {:#}", id.to_string(), self.0);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Something went wrong, trace id: {}", id),
+            format!("Something went wrong, trace id: {id}"),
         )
             .into_response()
     }
