@@ -28,16 +28,18 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Build binaries in "${{ matrix.BUILD_TARGET }}" mode
-        run: cargo build --profile ${{ matrix.BUILD_TARGET }}
+      - name: Install cargo-bundle from crates.io
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: cargo-bundle
       - name: Run tests in "${{ matrix.BUILD_TARGET }}" mode
         run: cargo test --profile ${{ matrix.BUILD_TARGET }}
+      - name: Build Installer
+        run: cargo bundle --release
       # Signing hints from the excellent tutorial: https://dennisbabkin.com/blog/?t=how-to-get-certificate-code-sign-notarize-macos-binaries-outside-apple-app-store
       - name: Unlock the keychain
         run: security unlock-keychain -p "${{secrets.KEYCHAIN}}" login.keychain
       - name: Sign the binary
-        run: xcrun codesign -s "G53N9PU948" -f --timestamp -o runtime -i "io.hotchkiss.web" "target/release/hotchkiss-io"
-      - name: Notarize the binary
-        run: xcrun notarytool submit "target/release/hotchkiss-io" --keychain-profile "AppPwdNotarizID" --wait
+        run: xcrun codesign -s "G53N9PU948" -f --timestamp -o runtime -i "io.hotchkiss.web" target/release/bundle/osx/$NAME.app
       - name: Lock the keychain
         run: security lock-keychain login.keychain
