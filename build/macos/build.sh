@@ -22,7 +22,7 @@ xcrun codesign \
     --timestamp \
     --options runtime \
     --entitlements build/macos/entitlements.plist \
-    $OUTPUT/Contents/MacOS/$EXE
+    $OUTPUT/Hotchkiss-IO.app/Contents/MacOS/$EXE
 
 pkgbuild --root $OUTPUT \
     --identifier "$DOMAIN" \
