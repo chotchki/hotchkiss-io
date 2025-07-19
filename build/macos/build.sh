@@ -4,7 +4,7 @@
 set -euo pipefail
 DOMAIN="io.hotchkiss.web"
 EXE="hotchkiss-io"
-OUTPUT="target/apple/release"
+OUTPUT="target/aarch64-apple-darwin/release"
 VERSION="0.0.1"
 
 rustup target add aarch64-apple-darwin
@@ -18,7 +18,7 @@ xcrun codesign \
     --sign "G53N9PU948" \
     --timestamp \
     --options runtime \
-    --entitlements macos/entitlements.plist \
+    --entitlements build/macos/entitlements.plist \
     $OUTPUT/$EXE
 
 pkgbuild --root $OUTPUT \
@@ -29,8 +29,8 @@ pkgbuild --root $OUTPUT \
     target/$EXE.pkg
 
 productbuild \
-    --distribution macos/Distribution.xml \
-    --resources macos/Resources/ --package-path target/ unsigned-$EXE.pkg
+    --distribution build/macos/Distribution.xml \
+    --resources build/macos/Resources/ --package-path target/ unsigned-$EXE.pkg
 
 productsign --sign "G53N9PU948" unsigned-$EXE.pkg $EXE.pkg
 
