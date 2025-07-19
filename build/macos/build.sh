@@ -26,6 +26,7 @@ xcrun codesign \
 
 pkgbuild --root $OUTPUT \
     --identifier "$DOMAIN" \
+    --component-plist build/macos/pkgbuild.plist
     --version "$VERSION" \
     --install-location /Applications \
     --sign "G53N9PU948" \
