@@ -115,7 +115,3 @@ cookie = { git = "https://github.com/chotchki/cookie-rs.git", branch = "serde_su
 
 [dev-dependencies]
 tracing-test = { version = "0.2.5", features = ["no-env-filter"] }
-
-#Installer Support
-[package.metadata.bundle]
-identifier = "io.hotchkiss.web"
