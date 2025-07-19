@@ -8,7 +8,7 @@ env:
 
 jobs:
   cargo_version:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       needs_release: ${{ steps.check_tag.outputs.needs_release }}
       version: ${{ steps.package_version.outputs.version }}
