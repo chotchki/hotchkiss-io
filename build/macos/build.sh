@@ -25,7 +25,7 @@ pkgbuild --root $OUTPUT \
     --identifier "$DOMAIN" \
     --version "$VERSION" \
     --install-location /Applications \
-    --sign "DG53N9PU948" \
+    --sign "G53N9PU948" \
     target/$EXE.pkg
 
 productbuild \
