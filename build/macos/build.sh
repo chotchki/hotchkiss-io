@@ -4,18 +4,18 @@
 set -euo pipefail
 DOMAIN="io.hotchkiss.web"
 EXE="hotchkiss-io"
-OUTPUT="target/apple-darwin/release/Hotchkiss-IO.app"
+OUTPUT="target/apple-darwin/release"
 VERSION="0.0.1"
 
 rustup target add aarch64-apple-darwin
 
 cargo build --locked --target aarch64-apple-darwin --release
 
-mkdir -p $OUTPUT
-mkdir -p $OUTPUT/Contents/MacOS
+mkdir -p $OUTPUT/Hotchkiss-IO.app
+mkdir -p $OUTPUT/Hotchkiss-IO.app/Contents/MacOS
 
-cp target/aarch64-apple-darwin/release/$EXE $OUTPUT/Contents/MacOS/$EXE
-cp build/macos/Info.plist $OUTPUT/Contents/Info.plist
+cp target/aarch64-apple-darwin/release/$EXE $OUTPUT/Hotchkiss-IO.app/Contents/MacOS/$EXE
+cp build/macos/Info.plist $OUTPUT/Hotchkiss-IO.app/Contents/Info.plist
 
 xcrun codesign \
     --sign "G53N9PU948" \
