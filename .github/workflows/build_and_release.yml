@@ -41,5 +41,7 @@ jobs:
         run: security unlock-keychain -p "${{secrets.KEYCHAIN}}" login.keychain
       - name: Sign the binary
         run: xcrun codesign -s "G53N9PU948" -f --timestamp -o runtime -i "io.hotchkiss.web" target/release/bundle/osx/hotchkiss-io.app
+      - name: Build the installer
+        run: productbuild --sign G53N9PU948 --component target/release/bundle/osx/hotchkiss-io.app /Applications hotchkiss-io.pkg
       - name: Lock the keychain
         run: security lock-keychain login.keychain
