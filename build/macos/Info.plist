@@ -12,5 +12,7 @@
 	<string>APPL</string>
 	<key>CFBundleExecutable</key>
 	<string>hotchkiss-io</string>
+	<key>CFBundleIconFile</key>
+	<string>HotchkissLogox1024</string>
 </dict>
 </plist>
