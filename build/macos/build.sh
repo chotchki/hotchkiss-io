@@ -12,14 +12,17 @@ rustup target add aarch64-apple-darwin
 cargo build --locked --target aarch64-apple-darwin --release
 
 mkdir -p $OUTPUT
-cp target/aarch64-apple-darwin/release/$EXE $OUTPUT/$EXE
+mkdir -p $OUTPUT/Contents/MacOS
+
+cp target/aarch64-apple-darwin/release/$EXE $OUTPUT/Contents/MacOS/$EXE
+cp build/macos/Info.plist $OUTPUT/Contents/Info.plist
 
 xcrun codesign \
     --sign "G53N9PU948" \
     --timestamp \
     --options runtime \
     --entitlements build/macos/entitlements.plist \
-    $OUTPUT/$EXE
+    $OUTPUT/Contents/MacOS/$EXE
 
 pkgbuild --root $OUTPUT \
     --identifier "$DOMAIN" \
