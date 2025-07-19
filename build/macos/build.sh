@@ -4,7 +4,7 @@
 set -euo pipefail
 DOMAIN="io.hotchkiss.web"
 EXE="hotchkiss-io"
-OUTPUT="target/aarch64-apple-darwin/release"
+OUTPUT="target/apple-darwin/release"
 VERSION="0.0.1"
 
 rustup target add aarch64-apple-darwin
@@ -12,7 +12,7 @@ rustup target add aarch64-apple-darwin
 cargo build --locked --target aarch64-apple-darwin --release
 
 mkdir -p $OUTPUT
-cp target/release/$EXE $OUTPUT/$EXE
+cp target/aarch64-apple-darwin/release/$EXE $OUTPUT/$EXE
 
 xcrun codesign \
     --sign "G53N9PU948" \
