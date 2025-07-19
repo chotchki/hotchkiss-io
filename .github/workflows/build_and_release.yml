@@ -2,19 +2,40 @@ name: Build and Release
 on:
   push:
     branches: ["main"]
-  pull_request:
-    branches: ["main"]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build
+  cargo_version:
+    runs-on: ubuntu-latest
+    outputs:
+      needs_release: ${{ steps.check_tag.outputs.needs_release }}
+      version: ${{ steps.package_version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - run: cargo install cargo-get
+
+      - id: package_version
+        run: echo "version=$(cargo get package.version)" >> $GITHUB_OUTPUT
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          VERSION="${{ steps.package_version.outputs.version }}"
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "needs_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "needs_release=true" >> $GITHUB_OUTPUT
+          fi
+
+  macos:
     runs-on: self-hosted
-    strategy:
-      matrix:
-        BUILD_TARGET: [release] # refers to a cargo profile
+    needs: cargo_version
+    if: ${{ needs.cargo_version.outputs.needs_release == 'true' }}
     outputs:
       release_built: ${{ steps.set-output.outputs.release_built }}
     steps:
@@ -28,11 +49,44 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      # Signing hints from the excellent tutorial: https://dennisbabkin.com/blog/?t=how-to-get-certificate-code-sign-notarize-macos-binaries-outside-apple-app-store
       - name: Unlock the keychain
         run: security unlock-keychain -p "${{secrets.KEYCHAIN}}" login.keychain
       - name: Run the build script
+        env:
+          VERSION: ${{ needs.cargo_version.outputs.version }}
         run: |
           ./build/macos/build.sh
       - name: Lock the keychain
         run: security lock-keychain login.keychain
+      - name: upload the artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: hotchkiss-io*.pkg
+  publish:
+    runs-on: self-hosted
+    needs: [cargo_version, macos]
+    if: ${{ needs.cargo_version.outputs.needs_release == 'true' }}
+    env:
+      VERSION: ${{ needs.cargo_version.outputs.version }}
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: download all artifacts
+        uses: actions/download-artifact@v4
+      - name: create github release (draft)
+        run: |
+          mv */*.pkg .
+          gh release create v$VERSION \
+            -t "Release $VERSION" \
+            -n "Release $VERSION" \
+            --generate-notes \
+            --draft
+          gh release upload v$VERSION hotchkiss-io*.pkg
+      - name: tag release
+        run: |
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+        continue-on-error: true
