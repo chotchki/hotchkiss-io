@@ -29,7 +29,7 @@ pkgbuild --root $OUTPUT \
     target/$EXE.pkg
 
 productbuild \
-    --distribution build/macos/Distribution.xml \
+    --distribution build/macos/Resources/Distribution.xml \
     --resources build/macos/Resources/ --package-path target/ unsigned-$EXE.pkg
 
 productsign --sign "G53N9PU948" unsigned-$EXE.pkg $EXE.pkg
