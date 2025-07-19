@@ -5,7 +5,6 @@ set -euo pipefail
 DOMAIN="io.hotchkiss.web"
 EXE="hotchkiss-io"
 OUTPUT="target/apple-darwin/release"
-#VERSION="0.0.3"
 
 rustup target add aarch64-apple-darwin
 

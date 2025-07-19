@@ -91,3 +91,16 @@ jobs:
           git tag "v$VERSION"
           git push origin "v$VERSION"
         continue-on-error: true
+  install:
+    runs-on: self-hosted
+    needs: [macos]
+    steps:
+      - name: download all artifacts
+        id: download-artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: hotchkiss-io*.pkg
+          merge-multiple: true
+      - name: Install latest
+        run: |
+          echo ${{secrets.KEYCHAIN}} | sudo -S installer -pkg `ls {{ steps.download-artifacts.outputs.download-path }}/*.pkg` -target /
