@@ -1,7 +1,7 @@
 [package]
 name = "hotchkiss-io"
 description = "Christopher Hotchkiss's Web Home"
-version = "0.1.0"
+version = "0.0.3"
 edition = "2021"
 
 [build-dependencies]
@@ -94,6 +94,8 @@ webauthn-rs = { version = "0.5.1", features = [
     "conditional-ui",
     "danger-allow-state-serialisation",
 ] }
+#Forcing a vendored openssl to avoid packaging issues
+openssl = { version = "0.10", features = ["vendored"] }
 #Fixing "cookie" to support serialize/deserialize
 cookie = { git = "https://github.com/chotchki/cookie-rs.git", branch = "serde_support", features = [
     "percent-encode",
