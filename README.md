@@ -1,6 +1,8 @@
 # Hotchkiss-io
 Christopher Hotchkiss's personal site / CRM system
 
+[![Test and Coverage](https://github.com/chotchki/hotchkiss-io/actions/workflows/test_and_coverage.yml/badge.svg?branch=main)](https://github.com/chotchki/hotchkiss-io/actions/workflows/test_and_coverage.yml) [![codecov](https://codecov.io/github/chotchki/hotchkiss-io/branch/main/graph/badge.svg?token=APIMLQTEDX)](https://codecov.io/github/chotchki/hotchkiss-io)
+
 ## User Roles
 - Anonymous -> Read Only
 - Registered -> Read Only but logged in
