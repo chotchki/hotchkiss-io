@@ -1,7 +1,5 @@
 name: Test and Coverage
-on:
-  push:
-    branches: ["main"]
+on: push
 
 env:
   CARGO_TERM_COLOR: always
