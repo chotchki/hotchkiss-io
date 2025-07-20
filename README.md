@@ -21,3 +21,8 @@ Christopher Hotchkiss's personal site / CRM system
 - [ ] Need to figure out attachment resizing plus caching so I can really start uploading images / stl files.
 - [ ] Probably will need to move behind Cloudflare's AI bot protection but that will change my server start up process
 - [ ] Fix the sticky footer issue
+
+## Startup Approach
+To support running nicer on macos, we're going to take a slightly different approach to startup.
+* If a config path is passed in as an argument, use it.
+* Otherwise, go look in "~/Library/Application Support/io.hotchkiss.web/config.json"
