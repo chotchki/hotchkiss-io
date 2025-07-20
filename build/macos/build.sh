@@ -12,9 +12,11 @@ cargo build --locked --target aarch64-apple-darwin --release
 
 mkdir -p $OUTPUT/Hotchkiss-IO.app
 mkdir -p $OUTPUT/Hotchkiss-IO.app/Contents/MacOS
+mkdir -p $OUTPUT/Hotchkiss-IO.app/Contents/Resources
 
 cp target/aarch64-apple-darwin/release/$EXE $OUTPUT/Hotchkiss-IO.app/Contents/MacOS/$EXE
 cp build/macos/Info.plist $OUTPUT/Hotchkiss-IO.app/Contents/Info.plist
+cp build/macos/HotchkissLogox1024.icns $OUTPUT/Hotchkiss-IO.app/Contents/Resources
 
 xcrun codesign \
     --sign "G53N9PU948" \
