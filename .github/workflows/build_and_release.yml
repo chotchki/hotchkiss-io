@@ -103,4 +103,4 @@ jobs:
           merge-multiple: true
       - name: Install latest
         run: |
-          echo ${{secrets.KEYCHAIN}} | sudo -S installer -pkg `ls ${{ steps.download-artifacts.outputs.download-path }}/*.pkg` -target /
+          echo ${{secrets.KEYCHAIN}} | sudo -S installer -pkg `ls ${{ steps.download-artifacts.outputs.download-path }}/hotchkiss-io*.pkg` -target /
