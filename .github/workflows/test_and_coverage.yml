@@ -35,6 +35,7 @@ jobs:
         run: cargo test
       - name: Generate Coverage Report
         run: |
+          mkdir -p ./target/debug/coverage/ && \
           grcov . -s . --binary-path ./target/debug/ -t lcov --branch --ignore-not-existing -o ./target/debug/coverage/
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
