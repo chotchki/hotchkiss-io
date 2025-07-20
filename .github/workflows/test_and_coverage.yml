@@ -19,6 +19,14 @@ jobs:
           rustup component add llvm-tools
       - name: Check out code
         uses: actions/checkout@v4
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Build the code
         run: cargo build
       - name: Test The code
