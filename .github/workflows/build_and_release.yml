@@ -71,6 +71,9 @@ jobs:
     env:
       VERSION: ${{ needs.cargo_version.outputs.version }}
     steps:
+      - name: Clean up old drafts
+        run: |
+          ./build/clean_up_drafts.sh
       - name: checkout repository
         uses: actions/checkout@v4
         with:
@@ -86,9 +89,6 @@ jobs:
             --generate-notes \
             --draft
           gh release upload v$VERSION hotchkiss-io*.pkg
-      - name: Clean up old drafts
-        run: |
-          ./build/clean_up_drafts.sh
       - name: tag release
         run: |
           git tag "v$VERSION"
