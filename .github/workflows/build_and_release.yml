@@ -87,7 +87,8 @@ jobs:
             --draft
           gh release upload v$VERSION hotchkiss-io*.pkg
       - name: Clean up old drafts
-        run: gh release list | grep Draft |  awk '{print $1 " \t"}' |  while read -r line; do gh release delete -y "$line"; done
+        run: |
+          ./build/clean_up_drafts.sh
       - name: tag release
         run: |
           git tag "v$VERSION"
