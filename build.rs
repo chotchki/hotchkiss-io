@@ -25,7 +25,10 @@ async fn main() -> Result<()> {
     let schema_key = "DATABASE_URL";
     let schema_url = "sqlite://".to_string() + &out_dir + "/schema.db";
 
-    env::set_var(schema_key, schema_url.clone());
+    // SAFETY: build.rs is a single threaded program and should not suffer from the set_var issues
+    unsafe {
+        env::set_var(schema_key, schema_url.clone());
+    }
     println!("cargo::rustc-env={schema_key}={schema_url}");
     File::create(format!("{}/.env", env::var("CARGO_MANIFEST_DIR")?))
         .await?
