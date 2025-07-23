@@ -3,9 +3,9 @@ use anyhow::Context;
 use coordinator::service_coordinator::ServiceCoordinator;
 use rustls::crypto::ring;
 use std::{env, fs, io, sync::Arc};
-use tracing::{info, Level};
+use tracing::{Level, info};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use tracing_subscriber::{filter, fmt, layer::SubscriberExt, util::SubscriberInitExt, Layer};
+use tracing_subscriber::{Layer, filter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 mod coordinator;
 pub mod db;
@@ -21,10 +21,29 @@ async fn main() -> anyhow::Result<()> {
 
     let args: Vec<String> = env::args().skip(1).take(1).collect();
 
-    let config = fs::read_to_string(
-        args.first()
-            .with_context(|| format!("First argument must be the config file, got {args:?}"))?,
-    )?;
+    let config = if args.is_empty()
+        && let Some(home) = env::home_dir()
+    {
+        let mut app_dir_default = home;
+        app_dir_default.push("Library");
+        app_dir_default.push("Application Support");
+        app_dir_default.push("io.hotchkiss.web");
+        fs::DirBuilder::new()
+            .recursive(true)
+            .create(&app_dir_default)?;
+
+        let mut config_path = app_dir_default;
+        config_path.push("config.json");
+
+        fs::read_to_string(&config_path)
+            .with_context(|| format!("No config path passed, could not open {config_path:?}"))?
+    } else {
+        fs::read_to_string(
+            args.first()
+                .with_context(|| format!("First argument must be the config file, got {args:?}"))?,
+        )?
+    };
+
     let settings: Arc<Settings> = Arc::new(serde_json::from_str(&config).with_context(|| {
         format!("Failed to parse settings file to settings struct content:{config}")
     })?);
