@@ -2,7 +2,7 @@
 name = "hotchkiss-io"
 description = "Christopher Hotchkiss's Web Home"
 version = "0.0.15"
-edition = "2021"
+edition = "2024"
 
 [build-dependencies]
 anyhow = "1.0"
