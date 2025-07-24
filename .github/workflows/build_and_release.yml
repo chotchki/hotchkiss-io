@@ -99,12 +99,6 @@ jobs:
     runs-on: self-hosted
     needs: [macos]
     steps:
-      - name: download all artifacts
-        id: download-artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: macos
-          merge-multiple: true
       - name: Install latest
         run: |
-          echo ${{secrets.KEYCHAIN}} | sudo -S installer -pkg `ls ${{ steps.download-artifacts.outputs.download-path }}/hotchkiss-io*.pkg` -target /
+          echo ${{secrets.KEYCHAIN}} | sudo -S installer -pkg `ls hotchkiss-io*.pkg` -target /
