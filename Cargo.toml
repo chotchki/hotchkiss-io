@@ -1,7 +1,7 @@
 [package]
 name = "hotchkiss-io"
 description = "Christopher Hotchkiss's Web Home"
-version = "0.0.15"
+version = "0.0.16"
 edition = "2024"
 
 [build-dependencies]
