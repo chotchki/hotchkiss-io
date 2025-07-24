@@ -12,6 +12,7 @@ jobs:
     steps:
       - name: Install Tools
         run: |
+          rustup update && \
           rustup target add aarch64-apple-darwin && \
           cargo install grcov && \
           rustup component add llvm-tools

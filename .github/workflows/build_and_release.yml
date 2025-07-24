@@ -18,6 +18,7 @@ jobs:
         with:
           fetch-depth: 0
 
+      - run: rustup update
       - run: cargo install cargo-get
 
       - id: package_version
