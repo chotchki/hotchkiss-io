@@ -1,0 +1,12 @@
+name: Check Ip
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  check-ip:
+    runs-on: self-hosted
+    steps:
+      - name: Check
+        run: |
+          curl https://ifconfig.me/ip
