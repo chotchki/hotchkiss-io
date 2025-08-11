@@ -1,7 +1,6 @@
 name: Check Ip
 on:
-  push:
-    branches: ["main"]
+  workflow_dispatch:
 
 jobs:
   check-ip:
