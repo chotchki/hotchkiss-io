@@ -1,6 +1,5 @@
-use crate::settings::Settings;
-
 use super::dns::cloudflare_client::CloudflareClient;
+use crate::settings::Settings;
 use anyhow::Result;
 use hickory_resolver::TokioAsyncResolver;
 use std::{collections::HashSet, net::IpAddr, sync::Arc};

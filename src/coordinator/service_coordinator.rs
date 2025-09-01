@@ -5,17 +5,17 @@ use super::dns::cloudflare_client::CloudflareClient;
 use super::dns::dns_validator::DnsValidator;
 use super::dns_provider_service::DnsProviderService;
 use super::endpoints_provider_service::EndpointsProviderService;
+use crate::settings::Settings;
 use crate::{
     coordinator::ip_provider_service::IpProviderService, db::database_handle::DatabaseHandle,
-    Settings,
 };
-/// The goal of the coordinator is to start up the various dependancies of the server AND
-/// be able to reconfigure it automatically at runtime.
 use anyhow::{Context, Result};
 use hickory_resolver::TokioAsyncResolver;
 use tokio::sync::broadcast;
 use tracing::error;
 
+/// The goal of the coordinator is to start up the various dependancies of the server AND
+/// be able to reconfigure it automatically at runtime.
 pub struct ServiceCoordinator {
     ip_provider_service: IpProviderService,
     dns_provider_service: DnsProviderService,
@@ -24,7 +24,8 @@ pub struct ServiceCoordinator {
 }
 
 impl ServiceCoordinator {
-    pub async fn create(settings: Arc<Settings>) -> Result<Self> {
+    pub async fn create(settings: Settings) -> Result<Self> {
+        let settings = Arc::new(settings);
         let pool = DatabaseHandle::create(&settings.database_path).await?;
         let resolver = TokioAsyncResolver::tokio_from_system_conf()?;
         let dns_validator = DnsValidator::new(resolver.clone());

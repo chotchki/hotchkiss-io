@@ -1,8 +1,8 @@
 use super::dns::cloudflare_client::CloudflareClient;
+use crate::settings::Settings;
 use crate::{
     coordinator::acme::{certificate_loader::CertificateLoader, instant_acme::InstantAcmeDomain},
     db::dao::certificate::CertificateDao,
-    settings::Settings,
 };
 use anyhow::Result;
 use axum_server::tls_rustls::RustlsConfig;

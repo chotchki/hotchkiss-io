@@ -24,5 +24,8 @@ Christopher Hotchkiss's personal site / CRM system
 
 ## Startup Approach
 To support running nicer on macos, we're going to take a slightly different approach to startup.
+
+1. Create the tray icon.
+
 * If a config path is passed in as an argument, use it.
 * Otherwise, go look in "~/Library/Application Support/io.hotchkiss.web/config.json"

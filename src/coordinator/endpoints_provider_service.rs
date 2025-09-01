@@ -1,13 +1,11 @@
-use crate::{
-    settings::Settings,
-    web::{app_state::AppState, router::create_router},
-};
-use anyhow::{anyhow, bail, Context, Result};
+use crate::settings::Settings;
+use crate::web::{app_state::AppState, router::create_router};
+use anyhow::{Context, Result, anyhow, bail};
 use axum::{
-    handler::HandlerWithoutStateExt,
-    http::{uri::Authority, Uri},
-    response::Redirect,
     BoxError,
+    handler::HandlerWithoutStateExt,
+    http::{Uri, uri::Authority},
+    response::Redirect,
 };
 use axum_extra::extract::Host;
 use axum_server::tls_rustls::RustlsConfig;

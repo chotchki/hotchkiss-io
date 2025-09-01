@@ -32,6 +32,7 @@ url = "2.5.4"
 
 #Async
 tokio = { version = "1.41.1", features = ["full"] }
+tokio-util = "0.7"
 
 #Certificate Setup
 instant-acme = "0.7.2"
@@ -107,6 +108,9 @@ cookie = { git = "https://github.com/chotchki/cookie-rs.git", branch = "serde_su
 markdown = "1.0.0-alpha.22"
 mdast_util_to_markdown = "0.0.1"
 
+#Add macos tray icon to anchor running
+tray-wrapper = "0.2.0"
+clap = { version = "4.5.41", features = ["derive"] }
 
 [patch.crates-io]
 cookie = { git = "https://github.com/chotchki/cookie-rs.git", branch = "serde_support", features = [
@@ -116,4 +120,5 @@ cookie = { git = "https://github.com/chotchki/cookie-rs.git", branch = "serde_su
 ] }
 
 [dev-dependencies]
+tempfile = "3"
 tracing-test = { version = "0.2.5", features = ["no-env-filter"] }
