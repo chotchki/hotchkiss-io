@@ -25,7 +25,7 @@ impl Settings {
             let config_path = Self::make_config_path(&home)?;
 
             fs::read_to_string(&config_path)
-                .with_context(|| format!("No config path passed, could not open {config_path:?}"))?
+                .with_context(|| format!("could not open {config_path:?}"))?
         } else {
             fs::read_to_string(args.first().with_context(|| {
                 format!("First argument must be the config file, got {args:?}")

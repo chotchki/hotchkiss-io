@@ -23,7 +23,8 @@ fn create_server() -> ServerGeneratorResult {
         Ok(s) => s,
         Err(e) => {
             return Box::pin(async move {
-                ContinueRunning::ExitWithError(format!("Unable to parse settings {}", e))
+                println!("No settings {}", e);
+                ContinueRunning::ExitWithError(format!("No settings {}", e))
             });
         }
     };
