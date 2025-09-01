@@ -19,10 +19,13 @@ pub fn global_init() {
 }
 
 fn create_server() -> ServerGeneratorResult {
-    let Ok(settings) = Settings::load(env::args()) else {
-        return Box::pin(async {
-            ContinueRunning::ExitWithError("Unable to parse settings".to_string())
-        });
+    let settings = match Settings::load(env::args()) {
+        Ok(s) => s,
+        Err(e) => {
+            return Box::pin(async move {
+                ContinueRunning::ExitWithError(format!("Unable to parse settings {}", e))
+            });
+        }
     };
 
     let app_filter = filter::Targets::new()
