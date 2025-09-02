@@ -112,6 +112,13 @@ mdast_util_to_markdown = "0.0.1"
 tray-wrapper = "0.2.0"
 clap = { version = "4.5.41", features = ["derive"] }
 
+#Need to find the homedir
+[target."cfg(target_os = \"macos\")".dependencies]
+objc2-foundation = { version = "0.3.1", features = [
+    "NSPathUtilities",
+    "NSString",
+] }
+
 [patch.crates-io]
 cookie = { git = "https://github.com/chotchki/cookie-rs.git", branch = "serde_support", features = [
     "percent-encode",

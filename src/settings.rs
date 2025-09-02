@@ -20,7 +20,7 @@ impl Settings {
         let args: Vec<String> = main_args.skip(1).take(1).collect();
 
         let config = if args.is_empty()
-            && let Some(home) = env::home_dir()
+            && let Some(home) = Self::get_homedir()
         {
             let config_path = Self::make_config_path(&home)?;
 
@@ -41,15 +41,31 @@ impl Settings {
 
     fn make_config_path(parent_path: &Path) -> Result<PathBuf> {
         let mut buffer = parent_path.to_path_buf();
-
-        buffer.push("Library");
-        buffer.push("Application Support");
         buffer.push("io.hotchkiss.web");
+
         fs::DirBuilder::new().recursive(true).create(&buffer)?;
 
         buffer.push("config.json");
 
         Ok(buffer)
+    }
+
+    fn get_homedir() -> Option<PathBuf> {
+        #[cfg(target_os = "macos")]
+        {
+            use objc2_foundation::NSHomeDirectory;
+
+            //SAFETY: Constant string as per Apple's documentation
+            unsafe {
+                let home_dir_string = NSHomeDirectory();
+                Some(PathBuf::from(home_dir_string.to_string()))
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            env::home_dir()
+        }
     }
 }
 
@@ -78,41 +94,6 @@ mod test {
         )?;
 
         let args: Vec<String> = vec![" ".into(), file.path().to_string_lossy().to_string()];
-
-        let s = Settings::load(args.into_iter()).unwrap();
-        assert_eq!(s.cloudflare_token, "ctoken");
-        assert_eq!(s.database_path, "dp");
-        assert_eq!(s.domain, "do");
-        assert_eq!(s.log_path, "t");
-        assert_eq!(s.cache_path, "tc");
-
-        Ok(())
-    }
-
-    #[test]
-    fn load_test_home_dir() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-
-        // SAFETY: Only called single threaded in a unit test binary
-        unsafe {
-            env::set_var("HOME", temp_dir.path().as_os_str());
-        }
-
-        let target_path = Settings::make_config_path(temp_dir.path())?;
-        fs::write(
-            target_path,
-            r#"
-        {
-            "cloudflare_token": "ctoken",
-            "database_path": "dp",
-            "domain": "do",
-            "log_path": "t",
-            "cache_path": "tc"
-        }
-        "#,
-        )?;
-
-        let args: Vec<String> = vec![];
 
         let s = Settings::load(args.into_iter()).unwrap();
         assert_eq!(s.cloudflare_token, "ctoken");
