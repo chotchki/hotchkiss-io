@@ -12,6 +12,8 @@ mod db;
 mod settings;
 mod web;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub fn global_init() {
     ring::default_provider()
         .install_default()
@@ -89,6 +91,7 @@ pub fn real_main() -> anyhow::Result<()> {
 
     create_tray_wrapper(
         include_bytes!("../assets/images/HotchkissLogox1024.png"),
+        Some(VERSION.to_string()),
         Arc::new(&create_server),
     )?;
 

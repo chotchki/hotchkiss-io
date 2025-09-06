@@ -2208,7 +2208,7 @@ dependencies = [
 
 [[package]]
 name = "hotchkiss-io"
-version = "0.0.23"
+version = "0.0.24"
 dependencies = [
  "anyhow",
  "askama",
@@ -5860,9 +5860,9 @@ dependencies = [
 
 [[package]]
 name = "tray-wrapper"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ecae201c5c2fab1ee56c50f12a6c6ade34088fe572bd60b629db897c0c11faf"
+checksum = "ff9431400b797e6c7f7c4ea6b6255b0d4fb9123eb95f9fb8e8509cfe8148fbb9"
 dependencies = [
  "glib 0.21.1",
  "gtk",
