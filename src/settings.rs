@@ -74,7 +74,7 @@ mod test {
     use std::io::Write;
 
     use super::*;
-    use tempfile::{NamedTempFile, TempDir};
+    use tempfile::NamedTempFile;
 
     #[test]
     fn load_test_args() -> Result<()> {

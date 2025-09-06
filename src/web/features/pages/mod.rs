@@ -10,12 +10,12 @@ use crate::{
 };
 use askama::Template;
 use axum::{
+    Form, Router,
     extract::{Path, State},
     response::{IntoResponse, Redirect, Response},
     routing::get,
-    Form, Router,
 };
-use http::{uri::PathAndQuery, StatusCode};
+use http::{StatusCode, uri::PathAndQuery};
 use preview::preview_router;
 use serde::Deserialize;
 use tracing::warn;
@@ -107,10 +107,10 @@ pub async fn delete_page_path(
     session_data: SessionData,
     Path(page_path): Path<String>,
 ) -> Result<Response, AppError> {
-    if let AuthenticationState::Authenticated(user) = session_data.auth_state {
-        if user.role != Role::Admin {
-            return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
-        }
+    if let AuthenticationState::Authenticated(user) = session_data.auth_state
+        && user.role != Role::Admin
+    {
+        return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
     }
 
     let page_names: Vec<&str> = page_path.split("/").collect();
@@ -157,10 +157,10 @@ pub async fn put_page_path(
     Path(page_path): Path<String>,
     Form(put_page_form): Form<PutPageForm>,
 ) -> Result<Response, AppError> {
-    if let AuthenticationState::Authenticated(user) = session_data.auth_state {
-        if user.role != Role::Admin {
-            return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
-        }
+    if let AuthenticationState::Authenticated(user) = session_data.auth_state
+        && user.role != Role::Admin
+    {
+        return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
     }
 
     let page_cover_attachment_id: Option<i64> = match put_page_form.page_cover_attachment_id {
@@ -196,10 +196,10 @@ pub async fn post_top_level_page_path(
     session_data: SessionData,
     Form(post_page_form): Form<PostPageForm>,
 ) -> Result<Response, AppError> {
-    if let AuthenticationState::Authenticated(user) = session_data.auth_state {
-        if user.role != Role::Admin {
-            return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
-        }
+    if let AuthenticationState::Authenticated(user) = session_data.auth_state
+        && user.role != Role::Admin
+    {
+        return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
     }
 
     if PathAndQuery::try_from(post_page_form.page_name.clone()).is_err() {
@@ -225,10 +225,10 @@ pub async fn post_page_path(
     Path(page_path): Path<String>,
     Form(post_page_form): Form<PostPageForm>,
 ) -> Result<Response, AppError> {
-    if let AuthenticationState::Authenticated(user) = session_data.auth_state {
-        if user.role != Role::Admin {
-            return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
-        }
+    if let AuthenticationState::Authenticated(user) = session_data.auth_state
+        && user.role != Role::Admin
+    {
+        return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
     }
 
     let page_names: Vec<&str> = page_path.split("/").collect();

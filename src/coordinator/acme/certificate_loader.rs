@@ -1,6 +1,6 @@
 use crate::db::dao::certificate::CertificateDao;
 use anyhow::Result;
-use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use sqlx::SqlitePool;
 use std::time::Duration;
 use x509_parser::parse_x509_certificate;
@@ -30,10 +30,10 @@ impl CertificateLoader {
 
                 for cert in cl.certificate_chain.iter() {
                     let (_, x509) = parse_x509_certificate(cert)?;
-                    if let Some(remaining_time) = x509.validity.time_to_expiration() {
-                        if remaining_time > Duration::from_secs(60 * 60 * 24 * 30) {
-                            continue;
-                        }
+                    if let Some(remaining_time) = x509.validity.time_to_expiration()
+                        && remaining_time > Duration::from_secs(60 * 60 * 24 * 30)
+                    {
+                        continue;
                     }
 
                     //Cert needs renewal
