@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
     //Get the tailwindcss cli
     let cli_path = Path::new(&out_dir).join("tailwindcli");
     if !cli_path.is_file() {
-        let response = reqwest::get("https://github.com/tailwindlabs/tailwindcss/releases/download/v4.0.0/tailwindcss-macos-arm64").await?;
+        let response = reqwest::get("https://github.com/tailwindlabs/tailwindcss/releases/download/latest/tailwindcss-macos-arm64").await?;
         let mut content = Cursor::new(response.bytes().await?);
         let mut cli_file = File::create(cli_path.clone()).await?;
         tokio::io::copy(&mut content, &mut cli_file).await?;
