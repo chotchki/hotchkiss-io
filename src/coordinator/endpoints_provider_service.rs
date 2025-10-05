@@ -76,7 +76,7 @@ impl EndpointsProviderService {
         let session_store = self.session_store.clone();
         set.spawn(async move {
             session_store
-                .continuously_delete_expired(tokio::time::Duration::from_hours(1))
+                .continuously_delete_expired(tokio::time::Duration::from_secs(60 * 60))
                 .await
                 .map_err(|e| anyhow!(e))
         });
