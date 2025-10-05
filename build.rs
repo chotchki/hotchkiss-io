@@ -5,7 +5,10 @@ use sqlx::sqlite::SqliteJournalMode;
 use sqlx::sqlite::SqliteLockingMode;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::sqlite::SqliteSynchronous;
+use std::collections::HashMap;
+use std::io;
 use std::io::Cursor;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::str::FromStr;
@@ -57,22 +60,43 @@ async fn main() -> Result<()> {
         .await
         .context("The build time migrations failed")?;
 
-    //Get the tailwindcss cli
-    let cli_path = Path::new(&out_dir).join("tailwindcli");
-    if !cli_path.is_file() {
-        let response = reqwest::get("https://github.com/tailwindlabs/tailwindcss/releases/download/latest/tailwindcss-macos-arm64").await?;
-        let mut content = Cursor::new(response.bytes().await?);
-        let mut cli_file = File::create(cli_path.clone()).await?;
-        tokio::io::copy(&mut content, &mut cli_file).await?;
-        let meta = cli_file.metadata().await?;
-        let mut perms = meta.permissions();
-        perms.set_mode(0o755);
-        cli_file.set_permissions(perms).await?;
+    //Download and cache the tailwind cli for build
+    let components = HashMap::from([
+        (
+            "tailwindcli",
+            "https://github.com/tailwindlabs/tailwindcss/releases/latest/download/tailwindcss-macos-arm64",
+        ),
+        (
+            "daisyui.js",
+            "https://github.com/saadeghi/daisyui/releases/latest/download/daisyui.js",
+        ),
+        (
+            "daisyui-theme.js",
+            "https://github.com/saadeghi/daisyui/releases/latest/download/daisyui-theme.js",
+        ),
+    ]);
+
+    for (file, comp) in components {
+        let cache_path = Path::new(&out_dir).join(file);
+        if !cache_path.is_file() {
+            let response = reqwest::get(comp).await?;
+            let mut content = Cursor::new(response.bytes().await?);
+            let mut cli_file = File::create(cache_path.clone()).await?;
+            tokio::io::copy(&mut content, &mut cli_file).await?;
+            let meta = cli_file.metadata().await?;
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            cli_file.set_permissions(perms).await?;
+        }
     }
 
-    let output = Command::new(cli_path)
+    //Get the tailwindcss cli
+    let output = Command::new(Path::new(&out_dir).join("tailwindcli"))
         .args(["-i", "styles/tailwind.css", "-o", "assets/styles/main.css"])
         .output()?;
+
+    io::stdout().write_all(&output.stdout)?;
+    io::stderr().write_all(&output.stderr)?;
 
     assert!(output.status.success());
 
