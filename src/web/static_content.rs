@@ -1,12 +1,13 @@
 use axum::{
+    Router,
     body::Body,
-    http::{header, StatusCode, Uri},
+    http::{StatusCode, Uri, header},
     response::{IntoResponse, Response},
     routing::get,
-    Router,
 };
 use build_time::build_time_utc;
 use rust_embed::RustEmbed;
+use tracing::Level;
 
 const BUILD_TIME: &str = build_time_utc!("%a, %d %b %Y %H:%M:%S GMT");
 
@@ -41,19 +42,25 @@ where
         let path = self.0.into();
 
         tracing::debug!("Got static content request for {}", path);
-        for file in Asset::iter() {
-            tracing::debug!("File known {}", file.as_ref());
+        if tracing::enabled!(Level::TRACE) {
+            for file in Asset::iter() {
+                tracing::trace!("File known {}", file.as_ref());
+            }
         }
 
         match Asset::get(path.as_str()) {
             Some(content) => {
                 let mime = mime_guess::from_path(path).first_or_octet_stream();
-                Response::builder()
-                    .header(header::CONTENT_TYPE, mime.as_ref())
-                    .header(header::LAST_MODIFIED, BUILD_TIME)
-                    .header(header::CACHE_CONTROL, "max-age=86400")
-                    .body(Body::from(content.data))
-                    .unwrap()
+                let mut rb = Response::builder().header(header::CONTENT_TYPE, mime.as_ref());
+
+                if cfg!(debug_assertions) {
+                    rb = rb.header(header::CACHE_CONTROL, "no-store");
+                } else {
+                    rb = rb
+                        .header(header::LAST_MODIFIED, BUILD_TIME)
+                        .header(header::CACHE_CONTROL, "max-age=86400");
+                }
+                rb.body(Body::from(content.data)).unwrap()
             }
             None => Response::builder()
                 .status(StatusCode::NOT_FOUND)

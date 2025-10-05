@@ -6,6 +6,7 @@ use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{Layer, filter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use tray_wrapper::{ContinueRunning, ServerGeneratorResult, create_tray_wrapper};
 
+use crate::web::router::BUILD_TIME_CACHE_BUST;
 use crate::{coordinator::service_coordinator::ServiceCoordinator, settings::Settings};
 mod coordinator;
 mod db;
@@ -33,7 +34,7 @@ fn create_server() -> ServerGeneratorResult {
 
     let app_filter = filter::Targets::new()
         .with_target("hotchkiss_io", Level::DEBUG)
-        .with_target("hotchkiss_io::web::static_content", Level::INFO)
+        .with_target("hotchkiss_io::web::static_content", Level::DEBUG)
         .with_target("axum::rejection", Level::TRACE)
         .with_default(Level::INFO);
     let access_filter = filter::Targets::new().with_target("tower_http", Level::DEBUG);
@@ -67,7 +68,7 @@ fn create_server() -> ServerGeneratorResult {
         )
         .init();
 
-    info!("Hotchkiss IO Starting Up");
+    info!("Hotchkiss IO Starting Up: versin {VERSION} frontend timestamp {BUILD_TIME_CACHE_BUST}");
 
     let task = async move {
         //Build the coordinator
