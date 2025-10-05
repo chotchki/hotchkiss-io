@@ -71,7 +71,7 @@ tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 #Web Frameworks
-askama = "0.12.1"
+askama = "0.14.0"
 axum = { version = "0.8.1", features = ["macros", "multipart"] }
 axum-extra = { version = "0.10.0", features = ["form"] }
 axum-server = { version = "0.7.1", features = ["tls-rustls"] }
