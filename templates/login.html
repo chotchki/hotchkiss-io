@@ -1,32 +1,46 @@
-{% extends "base.html" %}
-
-{% block title %}Login{% endblock %}
-
-{% block head %}
-<script src="/vendor/webauthn-json/webauthn-json.browser-global.2.1.1.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+{% extends "base.html" %} {% block title %}Login{% endblock %} {% block head %}
 <script src="/scripts/htmx-webauthn.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
-{% endblock %}
-
-{% block content %}
+{% endblock %} {% block content %}
 <h1 class="text-xl">Login / Register</h1>
-{% match auth_state %}
-{% when AuthenticationState::Authenticated with (user) %}
+{% match auth_state %} {% when AuthenticationState::Authenticated with (user) %}
 <form class="rounded-md border-2 border-navy" action="/login/logout">
     <div class="p-2">
         <div>Role: {{user.role}}</div>
-        <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Logout {{user.display_name}}</button>
+        <button
+            class="px-2 bg-navy border-navy rounded-sm text-div-grey"
+            type="submit"
+        >
+            Logout {{user.display_name}}
+        </button>
     </div>
 </form>
 {% else %}
-<form class="rounded-md border-2 border-navy" hx-ext="webauthn-autofill,webauthn-register" webauthn-autofill="true" hx-webauthn-register hx-post="/login/not-needed">
+<form
+    class="rounded-md border-2 border-navy"
+    hx-ext="webauthn-autofill,webauthn-register"
+    webauthn-autofill="true"
+    hx-webauthn-register
+    hx-post="/login/not-needed"
+>
     <div id="error_message"></div>
     <div class="p-2">
         <label for="username">Username:</label>
-        <input class="border border-navy" name="username" id="username" autocomplete="webauthn" type="text" required />
+        <input
+            class="border border-navy"
+            name="username"
+            id="username"
+            autocomplete="webauthn"
+            type="text"
+            required
+        />
     </div>
     <div class="p-2">
-        <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Register</button>
+        <button
+            class="px-2 bg-navy border-navy rounded-sm text-div-grey"
+            type="submit"
+        >
+            Register
+        </button>
     </div>
 </form>
-{% endmatch %}
-{% endblock %}
+{% endmatch %} {% endblock %}
