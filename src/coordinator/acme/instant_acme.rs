@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use instant_acme::{
     Account, AuthorizationStatus, ChallengeType, Identifier, LetsEncrypt, NewAccount, NewOrder,
     OrderStatus,
@@ -30,6 +30,7 @@ impl InstantAcmeDomain {
                 debug!("Found account");
                 let account_credentials = serde_json::from_str(&aa.account_credentials)?;
                 let account = Account::from_credentials(account_credentials).await?;
+                debug!("Deserialized credentials");
                 Ok(Self {
                     domain,
                     account,
