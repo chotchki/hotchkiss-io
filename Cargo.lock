@@ -2206,7 +2206,7 @@ dependencies = [
 
 [[package]]
 name = "hotchkiss-io"
-version = "0.0.33"
+version = "0.0.34"
 dependencies = [
  "anyhow",
  "askama",

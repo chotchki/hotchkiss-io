@@ -9,9 +9,10 @@ use crate::settings::Settings;
 use crate::{
     coordinator::ip_provider_service::IpProviderService, db::database_handle::DatabaseHandle,
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use hickory_resolver::TokioAsyncResolver;
 use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
 use tracing::error;
 
 /// The goal of the coordinator is to start up the various dependancies of the server AND
@@ -59,16 +60,30 @@ impl ServiceCoordinator {
         let aps = self.acme_provider_service;
         let eps = self.endpoints_provider_service;
 
-        let _ = tokio::try_join!(
-            tokio::spawn(async move { ips.start(ip_provider_sender).await }),
-            tokio::spawn(async move { dps.start(ip_provider_reciever).await }),
-            tokio::spawn(async move { aps.start(tls_config_sender).await }),
-            tokio::spawn(async move { eps.start(tls_config_reciever).await })
-        )
-        .context("A subservice failed")?;
+        let ips_handle = tokio::spawn(async move { ips.start(ip_provider_sender).await });
+        let dps_handle = tokio::spawn(async move { dps.start(ip_provider_reciever).await });
+        let aps_handle = tokio::spawn(async move { aps.start(tls_config_sender).await });
+        let eps_handle = tokio::spawn(async move { eps.start(tls_config_reciever).await });
 
-        error!("This should only appear in the case of failure");
+        async fn flatten<T>(handle: JoinHandle<Result<T>>) -> Result<T> {
+            match handle.await {
+                Ok(Ok(result)) => Ok(result),
+                Ok(Err(err)) => Err(err),
+                Err(err) => bail!("handling failed {}", err),
+            }
+        }
 
-        Ok(())
+        match tokio::try_join!(
+            flatten(ips_handle),
+            flatten(dps_handle),
+            flatten(aps_handle),
+            flatten(eps_handle)
+        ) {
+            Ok(_) => unreachable!("This should only appear in the case of failure"),
+            Err(e) => {
+                error!("A service failed {}", e);
+                bail!("A service failed {}", e);
+            }
+        }
     }
 }
