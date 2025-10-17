@@ -68,7 +68,7 @@ fn create_server() -> ServerGeneratorResult {
         )
         .init();
 
-    info!("Hotchkiss IO Starting Up: versin {VERSION} frontend timestamp {BUILD_TIME_CACHE_BUST}");
+    info!("Hotchkiss IO Starting Up: version {VERSION} frontend timestamp {BUILD_TIME_CACHE_BUST}");
 
     let task = async move {
         //Build the coordinator
