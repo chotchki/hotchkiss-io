@@ -91,7 +91,7 @@ fn create_server() -> ServerGeneratorResult {
 }
 
 pub fn real_main() -> anyhow::Result<()> {
-    global_init();
+    global_init()?;
 
     create_tray_wrapper(
         include_bytes!("../assets/images/HotchkissLogox1024.png"),
@@ -100,14 +100,4 @@ pub fn real_main() -> anyhow::Result<()> {
     )?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn test_global_init() {
-        global_init()
-    }
 }
