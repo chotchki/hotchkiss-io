@@ -41,12 +41,12 @@ where
     fn into_response(self) -> Response {
         let path = self.0.into();
 
-        //tracing::debug!("Got static content request for {}", path);
-        //if tracing::enabled!(Level::TRACE) {
-        //    for file in Asset::iter() {
-        //        tracing::trace!("File known {}", file.as_ref());
-        //    }
-        //}
+        tracing::debug!("Got static content request for {}", path);
+        if tracing::enabled!(Level::TRACE) {
+            for file in Asset::iter() {
+                tracing::trace!("File known {}", file.as_ref());
+            }
+        }
 
         match Asset::get(path.as_str()) {
             Some(content) => {
