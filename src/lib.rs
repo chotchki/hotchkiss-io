@@ -15,22 +15,12 @@ mod web;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub fn global_init() {
+pub fn global_init() -> anyhow::Result<()> {
     ring::default_provider()
         .install_default()
         .expect("Crypto provider ring unable to be installed");
-}
 
-fn create_server() -> ServerGeneratorResult {
-    let settings = match Settings::load(env::args()) {
-        Ok(s) => s,
-        Err(e) => {
-            return Box::pin(async move {
-                println!("No settings {}", e);
-                ContinueRunning::ExitWithError(format!("No settings {}", e))
-            });
-        }
-    };
+    let settings = Settings::load(env::args())?;
 
     let app_filter = filter::Targets::new()
         .with_target("hotchkiss_io", Level::DEBUG)
@@ -67,6 +57,19 @@ fn create_server() -> ServerGeneratorResult {
                 .with_filter(access_filter),
         )
         .init();
+    Ok(())
+}
+
+fn create_server() -> ServerGeneratorResult {
+    let settings = match Settings::load(env::args()) {
+        Ok(s) => s,
+        Err(e) => {
+            return Box::pin(async move {
+                println!("No settings {}", e);
+                ContinueRunning::ExitWithError(format!("No inner settings {}", e))
+            });
+        }
+    };
 
     info!("Hotchkiss IO Starting Up: version {VERSION} frontend timestamp {BUILD_TIME_CACHE_BUST}");
 
