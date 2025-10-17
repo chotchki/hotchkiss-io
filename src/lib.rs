@@ -1,7 +1,7 @@
 use std::{env, io, sync::Arc};
 
 use rustls::crypto::ring;
-use tracing::{Level, info};
+use tracing::{Level, error, info};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{Layer, filter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use tray_wrapper::{ContinueRunning, ServerGeneratorResult, create_tray_wrapper};
@@ -82,10 +82,13 @@ fn create_server() -> ServerGeneratorResult {
         };
 
         info!("Starting up the coordinator");
-        let Ok(_) = coordinator.start().await else {
-            return ContinueRunning::Continue;
-        };
-        ContinueRunning::Continue
+        match coordinator.start().await {
+            Ok(_) => ContinueRunning::Continue,
+            Err(e) => {
+                error!("Service Coordinator Failed {}", e);
+                ContinueRunning::ExitWithError("Service Coordinator Failed".to_string())
+            }
+        }
     };
     Box::pin(task)
 }
