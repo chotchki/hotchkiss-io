@@ -5,6 +5,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+use tracing::info;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Settings {
@@ -24,9 +25,11 @@ impl Settings {
         {
             let config_path = Self::make_config_path(&home)?;
 
+            info!("Reading config path {:?}", config_path);
             fs::read_to_string(&config_path)
                 .with_context(|| format!("could not open {config_path:?}"))?
         } else {
+            info!("Reading env path {:?}", args.first());
             fs::read_to_string(args.first().with_context(|| {
                 format!("First argument must be the config file, got {args:?}")
             })?)?
