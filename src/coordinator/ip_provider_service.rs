@@ -7,7 +7,7 @@ use std::{
 };
 use tokio::{
     sync::broadcast::Sender,
-    time::{interval, MissedTickBehavior},
+    time::{MissedTickBehavior, interval},
 };
 use tracing::debug;
 
@@ -30,6 +30,7 @@ impl IpProviderService {
         let mut duration = interval(Duration::from_millis(60 * 60 * 1000));
         duration.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+        debug!("Getting initial ip");
         let mut current_ips = self.server_ips().await?;
 
         //Always send the starting IPs
