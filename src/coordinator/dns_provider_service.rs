@@ -37,7 +37,7 @@ impl DnsProviderService {
         loop {
             if current_ips != dns_ips {
                 //Need to update the dns
-                info!("Updating DNS");
+                info!("Updating DNS old {:?} new {:?}", current_ips, dns_ips);
                 self.client.update_dns(current_ips).await?;
             }
 

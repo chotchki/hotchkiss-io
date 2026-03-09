@@ -100,11 +100,16 @@ impl CloudflareClient {
 
         //Now we create and delete records
         for rec in missing_recs {
+            debug!(
+                "Creating record {} for prefix {} in zone {}",
+                rec, prefix, zone_id.0
+            );
             self.api
                 .create_record(&zone_id, prefix.clone(), rec)
                 .await?;
         }
         for id in dns_ip_to_id.values() {
+            debug!("Deleting record {} in zone {}", id.0, zone_id.0);
             self.api.delete_record(&zone_id, id).await?;
         }
 
