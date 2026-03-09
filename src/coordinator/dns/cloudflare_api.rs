@@ -143,7 +143,7 @@ impl CloudflareApi {
         domain: &str,
     ) -> Result<Vec<DnsRec>> {
         let mut url = BASE_URL.join(&format!("./zones/{}/dns_records", zone_id.0))?;
-        url.set_query(Some(&(format!("name={domain}"))));
+        url.set_query(Some(&(format!("type=A&name={domain}"))));
 
         let response = Self::transform_error(
             self.client
