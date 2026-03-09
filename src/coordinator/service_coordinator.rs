@@ -13,7 +13,7 @@ use anyhow::{Context, Result, bail};
 use hickory_resolver::TokioAsyncResolver;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
-use tracing::error;
+use tracing::{error, info};
 
 /// The goal of the coordinator is to start up the various dependancies of the server AND
 /// be able to reconfigure it automatically at runtime.
@@ -61,14 +61,22 @@ impl ServiceCoordinator {
         let eps = self.endpoints_provider_service;
 
         let ips_handle = tokio::spawn(async move { ips.start(ip_provider_sender).await });
+        info!("IPs Handler Task ID: {}", ips_handle.id());
         let dps_handle = tokio::spawn(async move { dps.start(ip_provider_reciever).await });
+        info!("DNS Handler Task ID: {}", dps_handle.id());
         let aps_handle = tokio::spawn(async move { aps.start(tls_config_sender).await });
+        info!("ACME Handler Task ID: {}", aps_handle.id());
         let eps_handle = tokio::spawn(async move { eps.start(tls_config_reciever).await });
+        info!("Endpoints Handler Task ID: {}", eps_handle.id());
 
         async fn flatten<T>(handle: JoinHandle<Result<T>>) -> Result<T> {
+            let id = handle.id();
             match handle.await {
                 Ok(Ok(result)) => Ok(result),
-                Ok(Err(err)) => Err(err),
+                Ok(Err(err)) => {
+                    error!("Service id {} failed with error {}", id, err);
+                    Err(err)
+                }
                 Err(err) => bail!("handling failed {}", err),
             }
         }
