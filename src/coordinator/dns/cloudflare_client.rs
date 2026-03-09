@@ -81,6 +81,7 @@ impl CloudflareClient {
 
         let mut dns_ip_to_id: HashMap<IpAddr, DnsRecId> = HashMap::new();
         for rec in dns_recs {
+            debug!("DNS Rec found {}", rec.content);
             dns_ip_to_id.insert(
                 IpAddr::V4(Ipv4Addr::from_str(&rec.content)?),
                 rec.id.clone(),
