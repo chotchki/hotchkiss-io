@@ -97,7 +97,12 @@ impl CloudflareClient {
         //Now get record name needed
         let mut prefixes: Vec<&str> = self.settings.domain.split('.').rev().skip(2).collect();
         prefixes.reverse();
-        let prefix = prefixes[..].join(".");
+        let mut prefix = prefixes[..].join(".");
+
+        //If we're using a TLD
+        if prefix.is_empty() {
+            prefix = self.settings.domain.clone()
+        }
 
         //Now we create and delete records
         for rec in missing_recs {
