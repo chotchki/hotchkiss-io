@@ -63,8 +63,8 @@ This step isolates the launchd/codesign/migration parts from the git-hook automa
   - Atomic-ish swap: `mv /Applications/Hotchkiss-IO.app /Applications/Hotchkiss-IO.app.prev` → `mv $TARGET/Hotchkiss-IO.app /Applications/Hotchkiss-IO.app` → `launchctl kickstart -k gui/$(id -u)/io.hotchkiss.web` → `rm -rf /Applications/Hotchkiss-IO.app.prev`.
   - Stream build output to stderr so the pushing terminal sees progress.
 - [ ] 0.5.2 Add `build/macos/SETUP.md` documenting the one-time mini setup (the migration + LaunchAgent steps from 0.4, plus the bare-repo init below). This is the reproducible recovery path if the mini is rebuilt.
-- [ ] 0.5.3 On the mini (one-time): `git init --bare /Users/chotchki/repos/hotchkiss-io.git`; symlink `build/macos/post-receive` from a working clone into `/Users/chotchki/repos/hotchkiss-io.git/hooks/post-receive` so future repo edits propagate without re-copying.
-- [ ] 0.5.4 On the dev machine: `git remote add mini chotchki@<mini-host>:/Users/chotchki/repos/hotchkiss-io.git`.
+- [ ] 0.5.3 On the mini (one-time): bare repo init. *Discovered during 0.4 commit step that an existing bare repo lives at `~/hotchkiss-io/repo` (already configured as the dev machine's `origin` remote `ssh://hotchkiss.io/Users/chotchki/hotchkiss-io/repo`). Decision needed: reuse that path (just add the post-receive hook to it), or move/recreate at the planned `~/repos/hotchkiss-io.git`. Reusing is lower-friction; the dev `origin` remote already points there.*
+- [ ] 0.5.4 On the dev machine: `mini` remote is already configured as `origin` if 0.5.3 reuses the existing path. If 0.5.3 moves the path, update the remote URL via `git remote set-url origin <new-path>` (or add a new remote `mini`).
 
 ### 0.6 End-to-end push-to-deploy validation
 
