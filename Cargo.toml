@@ -109,7 +109,7 @@ markdown = "1.0.0-alpha.22"
 mdast_util_to_markdown = "0.0.1"
 
 #Add macos tray icon to anchor running
-tray-wrapper = "0.3.1"
+tray-wrapper = "0.4.1"
 clap = { version = "4.5.41", features = ["derive"] }
 
 #Need to find the homedir

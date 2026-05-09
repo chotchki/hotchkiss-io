@@ -55,23 +55,20 @@ This step isolates the launchd/codesign/migration parts from the git-hook automa
 
 ### 0.5 Bare repo + post-receive hook
 
-- [ ] 0.5.1 Add `build/macos/post-receive` (chmod +x in repo via `chmod +x` after creation; also `git update-index --chmod=+x`). Behavior:
-  - Read `<old-sha> <new-sha> <ref>` from stdin; only proceed if `ref == refs/heads/main`.
-  - `git archive --format=tar <new-sha>` into a fixed work dir (`/Users/chotchki/.cache/hotchkiss-io-build/src`, wiped each run) — keeps source isolated from the bare repo.
-  - Set `CARGO_TARGET_DIR=/Users/chotchki/.cache/hotchkiss-io-build/target` so incremental builds reuse artifacts across pushes (otherwise every push is a 5+ min cold build).
-  - Run the trimmed `build/macos/build.sh`. On non-zero exit: bail without touching `/Applications` (running app keeps running).
-  - Atomic-ish swap: `mv /Applications/Hotchkiss-IO.app /Applications/Hotchkiss-IO.app.prev` → `mv $TARGET/Hotchkiss-IO.app /Applications/Hotchkiss-IO.app` → `launchctl kickstart -k gui/$(id -u)/io.hotchkiss.web` → `rm -rf /Applications/Hotchkiss-IO.app.prev`.
-  - Stream build output to stderr so the pushing terminal sees progress.
-- [ ] 0.5.2 Add `build/macos/SETUP.md` documenting the one-time mini setup (the migration + LaunchAgent steps from 0.4, plus the bare-repo init below). This is the reproducible recovery path if the mini is rebuilt.
-- [ ] 0.5.3 On the mini (one-time): bare repo init. *Discovered during 0.4 commit step that an existing bare repo lives at `~/hotchkiss-io/repo` (already configured as the dev machine's `origin` remote `ssh://hotchkiss.io/Users/chotchki/hotchkiss-io/repo`). Decision needed: reuse that path (just add the post-receive hook to it), or move/recreate at the planned `~/repos/hotchkiss-io.git`. Reusing is lower-friction; the dev `origin` remote already points there.*
-- [ ] 0.5.4 On the dev machine: `mini` remote is already configured as `origin` if 0.5.3 reuses the existing path. If 0.5.3 moves the path, update the remote URL via `git remote set-url origin <new-path>` (or add a new remote `mini`).
+- [x] 0.5.1 Added `build/macos/post-receive` (mode 100755 in index). Behavior matches plan: filter on `refs/heads/main`, `git archive` into `~/.cache/hotchkiss-io-build/src` (wiped each run), `CARGO_TARGET_DIR=~/.cache/hotchkiss-io-build/target`, hand off to `build/macos/build.sh`. On build failure exits before touching `/Applications`. Atomic-ish swap: rename current → `.prev`, rename new in, `launchctl kickstart -k gui/$(id -u)/io.hotchkiss.web`, drop `.prev`. PATH explicitly set at top so sshd's stripped env still finds cargo/rustup/launchctl. Build output tee'd to stderr.
+- [x] 0.5.2 Added `build/macos/SETUP.md` covering toolchain, directory layout, config, LaunchAgent install, bare-repo init, dev-side `git remote set-url`, first-deploy bootstrap, and verification curl/launchctl commands.
+- [x] 0.5.3 *Decision (2026-05-09): fresh bare repo at `~/repos/hotchkiss-io.git` — the existing `~/hotchkiss-io/repo` turned out to be a stale 2025-era working tree on `master` with `denyCurrentBranch=updateInstead`, not lower-friction once cleanup is factored in.* Initialized bare repo at `~/repos/hotchkiss-io.git` (HEAD on `refs/heads/main`, matching the deploy ref filter), copied `post-receive` to `hooks/post-receive` mode 0755.
+- [x] 0.5.4 On dev: `git remote set-url origin ssh://hotchkiss.io/Users/chotchki/repos/hotchkiss-io.git`. Old `~/hotchkiss-io/repo` worktree gets deleted as part of 0.4.12 cleanup.
 
 ### 0.6 End-to-end push-to-deploy validation
 
-- [ ] 0.6.1 First automated push: `git push mini main`. Observe build streaming to terminal. On success, confirm new app version is live (check version in tray menu, timestamp of `/Applications/Hotchkiss-IO.app`, http response).
+*Ordering: do Phase 4 (tray-wrapper bump) before 0.6.1 — user confirmed 2026-05-09 that the upstream fix landed, so the first automated push doubles as the tray-wrapper smoke test.*
+
+- [ ] 0.6.1 First automated push: `git push origin main`. Observe build streaming to terminal. On success, confirm new app version is live (check version in tray menu, timestamp of `/Applications/Hotchkiss-IO.app`, http response).
 - [ ] 0.6.2 Second push (small change): confirm incremental build is fast (<60s wall clock — `CARGO_TARGET_DIR` reuse is working).
 - [ ] 0.6.3 Failed-build push: introduce a syntax error, push, confirm hook exits non-zero, running app continues serving (no half-deployed state).
 - [ ] 0.6.4 Push to a non-main branch: confirm hook no-ops (ref filter works).
+- [ ] 0.6.5 After 0.6.1 lands, also push to `github` so the GitHub mirror tracks the same SHA as production.
 
 ### 0.7 Tear down GitHub-Actions release path
 
@@ -138,16 +135,29 @@ Current code: `src/coordinator/ip/ifconfig.rs` defines `IfconfigMe::public_ip() 
 - [ ] 3.7 `cargo build` + `cargo clippy` clean; `cargo test` passes including the new unit + integration tests.
 - [ ] 3.8 Manual e2e: run a non-debug build briefly, confirm the broadcasted IP matches what `curl https://1.1.1.1/cdn-cgi/trace | grep ^ip=` returns. (Debug builds short-circuit to `127.0.0.1` per existing logic — that path is untouched.)
 
-## Phase 4 — Bump `tray-wrapper` once user's fixes publish (parked, gated on upstream)
+## Phase 4 — Bump `tray-wrapper` once user's fixes publish (UNBLOCKED 2026-05-09)
 
-**Ordering:** parked until the user's in-progress fixes to `tray-wrapper` ship as a new crates.io release. *Could be advanced into Phase 0's flow* — if the new version publishes before 0.4 (manual e2e on the mini), pulling it in then means the e2e validates the updated tray icon directly. Otherwise runs as a stand-alone phase after Phase 0 lands.
+**Ordering:** the upstream fix landed 2026-05-09. Per user direction, this runs between Phase 0.5 and Phase 0.6 so the first automated push (0.6.1) also validates the new tray icon end-to-end.
 
 Current pin: `tray-wrapper = "0.3.1"` in `Cargo.toml:112` (caret semver).
 
-- [ ] 4.1 Determine new version. If 0.3.x: skip 4.2 (caret already accepts it). If 0.4.x or higher: edit `Cargo.toml:112` to the new version string.
-- [ ] 4.2 *(Conditional, see 4.1.)* Cargo.toml manifest edit.
-- [ ] 4.3 `cargo update -p tray-wrapper` — refresh `Cargo.lock`. Confirm the resolved version in `Cargo.lock` matches what was intended.
-- [ ] 4.4 `cargo build` + `cargo clippy` clean — surfaces any breaking API changes that need call-site updates.
-- [ ] 4.5 `cargo test` passes.
-- [ ] 4.6 Manual verification: run a debug build (`cargo run -- data/config.json` or via `bacon`), confirm the tray icon appears and behaves as expected against the user's fixes. Spot-check whatever specific issue the fixes addressed.
-- [ ] 4.7 Deploy via `git push mini main` (or whatever Phase 0 settles on); confirm the production tray icon picks up the new behavior.
+- [x] 4.1 Latest stable on crates.io is 0.4.1 (published 2026-05-09). Caret `^0.3.1` won't accept 0.4.x — manifest edit required.
+- [x] 4.2 `Cargo.toml:112` bumped `0.3.1 → 0.4.1`.
+- [x] 4.3 `cargo update -p tray-wrapper` — `Cargo.lock` updated to 0.4.1 (the patched `cookie` crate also re-resolved to a newer commit on `serde_support`, which the `[patch.crates-io]` block tracks; not a behavior change).
+- [x] 4.4 `cargo build` + `cargo clippy --all-targets` clean — only pre-existing warnings (dead `update` methods on DAOs, `page_path` field, collapsible-match in markdown transformer). No call-site updates required, the 0.4 API is source-compatible for our uses.
+- [x] 4.5 `cargo test`: 19/19 passing.
+- [ ] 4.6 Manual verification deferred to 0.6.1 — the first automated push to the mini will exercise the new tray-wrapper end-to-end on the production machine, which is the only place the tray icon actually shows up (debug builds short-circuit the IP service but the tray code is platform-gated, not debug-gated).
+- [ ] 4.7 Subsumed by 0.6.1 — `git push origin main` is the deploy.
+
+## Phase 5 — Drop the patched `cookie` fork (parked, post-Phase-0)
+
+**Motivation:** Cookie 0.18.x still doesn't ship serde impls upstream (confirmed 2026-05-09). We currently maintain a fork (`chotchki/cookie-rs` `serde_support` branch) wired in via `[patch.crates-io]` in `Cargo.toml`. CLAUDE.md explicitly calls out the patch as a watch-out. Maintaining a fork to add a couple of trait impls is much heavier than serde's remote-derive pattern (https://serde.rs/remote-derive.html), which lets us provide `Serialize`/`Deserialize` for `cookie::Cookie` from our own crate without forking.
+
+**Discovery:** the working tree only references `tower_sessions::cookie::Key` (the session-signing-key newtype) and never directly serializes `cookie::Cookie`. The patch may be dead — needed by a transitive dep that has since dropped the requirement. Check before assuming we need the workaround.
+
+- [ ] 5.1 Try the no-op path first: comment out the `[patch.crates-io]` block in `Cargo.toml`, `cargo update -p cookie`, `cargo build`. If it builds, the patch was dead code — proceed to 5.5.
+- [ ] 5.2 If 5.1 fails, locate the transitive consumer that wants `Cookie: Serialize/Deserialize` (`cargo tree -i cookie -e features` and read the build error). That tells us which crate's API forces the requirement.
+- [ ] 5.3 Add `src/cookie_remote.rs` (or similar) with a `CookieDef` newtype, `#[serde(remote = "cookie::Cookie")]`, mirroring the public-field shape of `cookie::Cookie`. Annotate the consumer's call sites with `#[serde(with = "cookie_remote::CookieDef")]`.
+- [ ] 5.4 If the transitive consumer is itself defining serde structs around `Cookie` (i.e. we can't reach the call site), the remote-derive escape hatch doesn't apply — at that point either the upstream crate needs a feature flag or we keep the fork. Document the finding and revert.
+- [ ] 5.5 With the patch removed, drop `[patch.crates-io]` entirely from `Cargo.toml`, the corresponding lockfile entries, and the CLAUDE.md "Patched `cookie` crate" caveat.
+- [ ] 5.6 `cargo build` + `cargo clippy --all-targets` clean; `cargo test` 19/19 passing.

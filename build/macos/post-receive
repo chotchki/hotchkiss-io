@@ -1,0 +1,57 @@
+#!/bin/bash
+# Bare-repo post-receive hook: builds and atomically swaps Hotchkiss-IO.app
+# on a `git push` to refs/heads/main. Drops everything else.
+#
+# Caller (git) sets GIT_DIR to the bare repo. We extract the pushed tree
+# into a fixed work dir (wiped each run), set CARGO_TARGET_DIR so cargo
+# reuses incremental artifacts across pushes, then hand off to build.sh.
+#
+# On any failure before the swap, the running app keeps serving.
+set -euo pipefail
+
+# Hooks inherit a stripped PATH from sshd. Add the locations cargo / rustup /
+# launchctl / homebrew tools live so build.sh can find them.
+export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+DEPLOY_REF="refs/heads/main"
+WORK_ROOT="$HOME/.cache/hotchkiss-io-build"
+SRC_DIR="$WORK_ROOT/src"
+export CARGO_TARGET_DIR="$WORK_ROOT/target"
+APP_DST="/Applications/Hotchkiss-IO.app"
+APP_PREV="/Applications/Hotchkiss-IO.app.prev"
+LAUNCH_LABEL="io.hotchkiss.web"
+
+while read -r oldsha newsha ref; do
+    if [[ "$ref" != "$DEPLOY_REF" ]]; then
+        echo "post-receive: ignoring push to $ref (only $DEPLOY_REF deploys)" >&2
+        continue
+    fi
+
+    echo "post-receive: deploying $newsha" >&2
+
+    rm -rf "$SRC_DIR"
+    mkdir -p "$SRC_DIR"
+    git archive --format=tar "$newsha" | tar -x -C "$SRC_DIR"
+
+    cd "$SRC_DIR"
+
+    # build.sh prints BUILT_APP=<absolute-path> on success.
+    BUILT=$(./build/macos/build.sh | tee /dev/stderr | awk -F= '/^BUILT_APP=/ {print $2}')
+    if [[ -z "$BUILT" || ! -d "$BUILT" ]]; then
+        echo "post-receive: build.sh did not produce a usable app bundle" >&2
+        exit 1
+    fi
+
+    # Atomic-ish swap: rename current out, rename new in, kickstart, drop old.
+    # The mmap'd binary keeps the old process alive across the rename until
+    # kickstart -k swaps it for the new one.
+    rm -rf "$APP_PREV"
+    if [[ -d "$APP_DST" ]]; then
+        mv "$APP_DST" "$APP_PREV"
+    fi
+    mv "$BUILT" "$APP_DST"
+    launchctl kickstart -k "gui/$(id -u)/$LAUNCH_LABEL"
+    rm -rf "$APP_PREV"
+
+    echo "post-receive: deployed $newsha" >&2
+done

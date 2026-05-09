@@ -975,18 +975,17 @@ checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 [[package]]
 name = "cookie"
 version = "0.18.1"
-source = "git+https://github.com/chotchki/cookie-rs.git?branch=serde_support#0daba184c6af6338c9b5170fa8f33555f08a4444"
+source = "git+https://github.com/chotchki/cookie-rs.git?branch=serde_support#d90aef84a549e83cec610f02fde9403de6b621d9"
 dependencies = [
  "base64 0.22.1",
  "hmac",
  "percent-encoding",
- "rand 0.8.5",
+ "rand 0.9.2",
  "serde",
  "serde_bytes",
  "sha2",
  "subtle",
  "time",
- "version_check",
 ]
 
 [[package]]
@@ -5849,9 +5848,9 @@ dependencies = [
 
 [[package]]
 name = "tray-wrapper"
-version = "0.3.1"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a11172a6216361e661beadf1a8d4aa9829dd3ff76781f3000e01c8351ff6b2be"
+checksum = "5c80af79f454a583a468e13dfc69a6e2391a40ec9a11c149455e065b1392c627"
 dependencies = [
  "glib 0.21.1",
  "gtk",
