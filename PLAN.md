@@ -64,7 +64,7 @@ This step isolates the launchd/codesign/migration parts from the git-hook automa
 
 *Ordering: do Phase 4 (tray-wrapper bump) before 0.6.1 — user confirmed 2026-05-09 that the upstream fix landed, so the first automated push doubles as the tray-wrapper smoke test.*
 
-- [ ] 0.6.1 First automated push: `git push origin main`. Observe build streaming to terminal. On success, confirm new app version is live (check version in tray menu, timestamp of `/Applications/Hotchkiss-IO.app`, http response).
+- [ ] 0.6.1 First automated push: `git push origin main`. Observe build streaming to terminal. On success, confirm new app version is live (check version in tray menu, timestamp of `/Applications/Hotchkiss-IO.app`, http response). *First attempt 2026-05-09: build streamed cleanly in 1m53s (release, cold `CARGO_TARGET_DIR`); swap aborted at the first `rm -rf "$APP_PREV"` because the root-owned PKG-installed `Hotchkiss-IO.app.prev` from 0.4.12 wasn't user-deletable. `set -e` + the order of operations meant production was never touched — exactly the safe-failure path we designed for. User cleaned the root-owned bundle via `sudo rm -rf` (one-shot, irreversible without a reinstall, but acceptable since 0.4 already proved the new layout). Retrying via empty-ish commit.*
 - [ ] 0.6.2 Second push (small change): confirm incremental build is fast (<60s wall clock — `CARGO_TARGET_DIR` reuse is working).
 - [ ] 0.6.3 Failed-build push: introduce a syntax error, push, confirm hook exits non-zero, running app continues serving (no half-deployed state).
 - [ ] 0.6.4 Push to a non-main branch: confirm hook no-ops (ref filter works).
