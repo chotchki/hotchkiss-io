@@ -7,7 +7,7 @@ use sqlx::{
     },
     SqlitePool,
 };
-use std::str::FromStr;
+use std::path::Path;
 use tracing::debug;
 use tracing::log::LevelFilter;
 
@@ -16,11 +16,12 @@ pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./src/db/migratio
 pub struct DatabaseHandle;
 
 impl DatabaseHandle {
-    pub async fn create(path: &str) -> Result<SqlitePool> {
+    pub async fn create(path: &Path) -> Result<SqlitePool> {
         debug!("Creating database on disk");
         let pool_opts = SqlitePoolOptions::new().min_connections(2);
 
-        let mut con_opts = SqliteConnectOptions::from_str(&format!("sqlite://{path}"))?
+        let mut con_opts = SqliteConnectOptions::new()
+            .filename(path)
             .log_statements(LevelFilter::Debug)
             .create_if_missing(true)
             .foreign_keys(true)

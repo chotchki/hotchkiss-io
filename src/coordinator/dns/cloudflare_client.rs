@@ -37,7 +37,10 @@ impl CloudflareClient {
         let zone_id = self.api.get_zone_id(&self.settings.domain).await?;
 
         debug!("Deleting any old cloudflare records for {proof_domain}");
-        let old_recs = self.api.get_recs_by_name(&zone_id, proof_domain).await?;
+        let old_recs = self
+            .api
+            .get_recs_by_name(&zone_id, proof_domain, "TXT")
+            .await?;
         for r in old_recs {
             self.api.delete_record(&zone_id, &r.id).await?;
         }
@@ -76,7 +79,7 @@ impl CloudflareClient {
 
         let dns_recs: Vec<DnsRec> = self
             .api
-            .get_recs_by_name(&zone_id, &self.settings.domain)
+            .get_recs_by_name(&zone_id, &self.settings.domain, "A")
             .await?;
 
         let mut dns_ip_to_id: HashMap<IpAddr, DnsRecId> = HashMap::new();

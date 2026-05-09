@@ -1,0 +1,109 @@
+name: Release
+
+# Triggered by `git tag v*.*.* && git push --tags`. Builds the macOS
+# release artifact on a GitHub-hosted macos-14 runner (Apple Silicon),
+# signs the embedded binary + .pkg with an imported Developer ID cert,
+# notarizes via xcrun notarytool, staples the ticket, and uploads the
+# .pkg to a draft GitHub Release.
+#
+# The companion `install.yml` workflow takes over once you un-draft
+# the release: it fires on `release: types: [published]`, runs on the
+# self-hosted server runner, and `installer`s the new .pkg.
+#
+# `test_and_coverage.yml` covers per-push lint/test; this workflow
+# assumes that's green for the tagged commit and does no extra
+# testing here.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-macos:
+    name: build + release (macos)
+    # macos-14 = Apple Silicon. build.rs downloads an arm64-only
+    # Tailwind CLI, so Intel runners would fail before signing.
+    runs-on: macos-14
+    # The `release` Environment scopes signing/notarization secrets to
+    # this job. Configure it in repo Settings → Environments → release
+    # with deployment-branch restriction to `v*.*.*` tags so a pushed
+    # tag is the only path that flows secrets into this workflow.
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "macos-release"
+
+      # Import the Developer ID Application cert into a throwaway
+      # keychain just for this job; the runner image is discarded at
+      # job end. `set-key-partition-list` grants codesign + Apple
+      # tools access without prompting — without it, codesign hangs
+      # on a non-interactive runner.
+      #
+      # The `github.repository ==` guard is belt-and-suspenders for
+      # forks: with no secrets set, cert import would fail anyway,
+      # but the guard makes the no-op explicit.
+      - name: Import Developer ID certificate
+        if: github.repository == 'chotchki/hotchkiss-io'
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          rm "$RUNNER_TEMP/cert.p12"
+
+      # build.sh resolves VERSION from $GITHUB_REF_NAME (the tag, e.g.
+      # `v0.0.43`), strips the leading `v`, and bakes that into the
+      # Info.plist + .pkg metadata + final filename.
+      - name: Build, sign, notarize, staple .pkg
+        if: github.repository == 'chotchki/hotchkiss-io'
+        env:
+          SIGN_IDENTITY: ${{ secrets.MACOS_CERT_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: ./build/macos/build.sh
+
+      - name: Upload .pkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-pkg
+          path: hotchkiss-io-*.pkg
+          retention-days: 30
+
+      # Draft release: stays draft until you un-draft via the GH UI
+      # or `gh release edit <tag> --draft=false`. The companion
+      # install.yml workflow fires on `release: types: [published]`,
+      # which is the un-drafting transition.
+      - name: Create draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: hotchkiss-io-*.pkg
+          generate_release_notes: true

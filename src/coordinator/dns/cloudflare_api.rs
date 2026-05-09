@@ -136,14 +136,15 @@ impl CloudflareApi {
         }
     }
 
-    /// For a given domain get the ip addresses AND cloudflare id
+    /// For a given domain and record type, fetch matching DNS records (content + cloudflare id).
     pub async fn get_recs_by_name(
         &self,
         zone_id: &ZoneInfoId,
         domain: &str,
+        rec_type: &str,
     ) -> Result<Vec<DnsRec>> {
         let mut url = BASE_URL.join(&format!("./zones/{}/dns_records", zone_id.0))?;
-        url.set_query(Some(&(format!("name={domain}&type=A"))));
+        url.set_query(Some(&format!("name={domain}&type={rec_type}")));
 
         let response = Self::transform_error(
             self.client
