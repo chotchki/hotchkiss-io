@@ -1,6 +1,6 @@
 # Plan
 
-Completed phases are in `PLAN_ARCHIVE.md` (most recent: Phase 0 — push-to-deploy on the Mac mini; Phase 4 — `tray-wrapper` 0.4.1 bump).
+Completed phases are in `PLAN_ARCHIVE.md` (most recent: Phase 3 — `ifconfig.me` → Cloudflare `cdn-cgi/trace`; Phase 0 — push-to-deploy on the Mac mini; Phase 4 — `tray-wrapper` 0.4.1 bump).
 
 ## Phase 1 — Fix `get_recs_by_name` hardcoded `type=A` filter
 
@@ -24,21 +24,6 @@ The DNS module has zero tests today. The bug in Phase 1 would have been caught b
 - [ ] 2.2 Add unit tests covering: query string includes name + type for each call site; type is not hardcoded.
 - [ ] 2.3 Decide on HTTP mocking strategy (`wiremock`, `mockito`, hand-rolled) for higher-level tests of `clean_proof` / `create_proof` / `update_dns`.
 - [ ] 2.4 Add tests for `DnsValidator::ensure_exists` and `ensure_not_existing` that don't hit a real resolver (would have surfaced the infinite-loop behavior earlier).
-
-## Phase 3 — Replace `ifconfig.me` with Cloudflare `cdn-cgi/trace` (unblocked — Phase 0 landed)
-
-**Motivation:** `ifconfig.me` is an external service that may go silently down; we already trust Cloudflare for DNS, so collapsing public-IP discovery into Cloudflare introduces no *new* dependency. `https://1.1.1.1/cdn-cgi/trace` returns `key=value\n` lines including `ip=<addr>`. Connecting to the IPv4 literal `1.1.1.1` forces an IPv4 path, which matches current behavior (`Ipv4Addr` only). Also kills the one transient test flake (`ifconfig::tests::basic_run` occasionally fails on a network blip).
-
-Current code: `src/coordinator/ip/ifconfig.rs` defines `IfconfigMe::public_ip() -> Result<Ipv4Addr>`; `src/coordinator/ip_provider_service.rs` is the only caller.
-
-- [x] 3.1 Added `src/coordinator/ip/cloudflare_trace.rs` — `CloudflareTrace::new()` (rustls reqwest client) + `public_ip() -> Result<Ipv4Addr>` (GET `https://1.1.1.1/cdn-cgi/trace`, `error_for_status`, then `parse_ip` splits on lines, `strip_prefix("ip=")`, parses `Ipv4Addr`). `parse_ip` is a private associated fn so it's unit-testable without a network round-trip; it `.context()`s a clear error if the `ip=` line is missing or the value won't parse.
-- [x] 3.2 Unit tests: `parses_ip_from_sample` (full captured key=value block → `203.0.113.42`), `missing_ip_line_errors`, `malformed_ip_value_errors`.
-- [x] 3.3 `#[tokio::test] async fn basic_run` hits the live `1.1.1.1/cdn-cgi/trace` and asserts `!addr.is_private()` — mirrors the old `ifconfig::tests::basic_run`.
-- [x] 3.4 `IpProviderService` now holds a `CloudflareTrace`; import changed to `super::ip::cloudflare_trace::CloudflareTrace`. `server_ips()` body unchanged (still `self.client.public_ip().await?`).
-- [x] 3.5 Deleted `src/coordinator/ip/ifconfig.rs`; `src/coordinator/ip/mod.rs` is now just `pub mod cloudflare_trace;`.
-- [x] 3.6 CLAUDE.md "Runtime architecture" bullet updated (`IpProviderService` polls `1.1.1.1/cdn-cgi/trace`, parses `ip=`, IPv4 literal forces v4). SPEC.md "Self contained" list: dropped the `ifconfig.me` line, folded IP discovery into the existing Cloudflare dependency.
-- [x] 3.7 `cargo build` + `cargo clippy --all-targets` clean (only the pre-existing warnings: dead `update` methods, `page_path`, collapsible match, `Context` import in `service_coordinator.rs`). `cargo test`: 22/22 (was 19; +3 net — three new unit tests, and `cloudflare_trace::tests::basic_run` replaces `ifconfig::tests::basic_run`). The live `basic_run` passed, which also retires the old transient `ifconfig.me` flake.
-- [ ] 3.8 Manual e2e: after `git push origin main`, confirm the new code reads the public IP without error — check the launchd stderr log on the mini for "Sending Initial IP addresses {...}" with the real address (and no "Had an error getting the ip address"), and that `dig hotchkiss.io` still matches `ssh hotchkiss.io 'curl -s https://1.1.1.1/cdn-cgi/trace | grep ^ip='`. (Debug builds short-circuit to `127.0.0.1` — untouched.)
 
 ## Phase 5 — Drop the patched `cookie` fork
 
