@@ -72,10 +72,11 @@ This step isolates the launchd/codesign/migration parts from the git-hook automa
 
 ### 0.7 Tear down GitHub-Actions release path
 
-- [ ] 0.7.1 Delete `.github/workflows/release.yml`.
-- [ ] 0.7.2 Delete `.github/workflows/install.yml`.
-- [ ] 0.7.3 Delete the GitHub repo secrets used by the deleted workflows: Developer ID cert blob, `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID`, `SIGN_IDENTITY`. (The repo no longer references them, but secrets sitting around are exposure surface.)
-- [ ] 0.7.4 Confirm `test_and_coverage.yml` and `check_ip.yml` still run cleanly on push — both are informational and not on the deploy path.
+- [x] 0.7.1 `git rm .github/workflows/release.yml` (4434 B).
+- [x] 0.7.2 `git rm .github/workflows/install.yml` (2365 B).
+- [ ] 0.7.3 Delete the GitHub repo secrets used by the deleted workflows: Developer ID cert blob, `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID`, `SIGN_IDENTITY`. *User action: `gh secret delete <NAME> --repo chotchki/hotchkiss-io` for each, or via the GitHub web UI under Settings → Secrets and variables → Actions. Run `gh secret list --repo chotchki/hotchkiss-io` to inventory first.*
+- [ ] 0.7.4 Confirm `test_and_coverage.yml` and `check_ip.yml` still run cleanly on push — both are informational and not on the deploy path. *Verification: after this commit lands on `github`, check Actions tab for the new push run; both should be green. No code changes here so no expected behavior shift.*
+- [ ] 0.7.5 Deactivate the self-hosted GitHub Actions runner on the mini — its only job was to receive `install.yml` triggers; with that workflow gone it's dead infrastructure. *User action: stop and uninstall via `~/hotchkiss-io-runner/svc.sh stop && ~/hotchkiss-io-runner/svc.sh uninstall && ~/hotchkiss-io-runner/config.sh remove --token $(gh api repos/chotchki/hotchkiss-io/actions/runners/registration-token -q .token)`, then `rm -rf ~/hotchkiss-io-runner` to reclaim the disk. Background processes were PIDs 509 (`runsvc.sh`) and 33319 (`Runner.Listener`) at session start.*
 
 ### 0.8 Docs
 
