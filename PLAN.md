@@ -64,10 +64,10 @@ This step isolates the launchd/codesign/migration parts from the git-hook automa
 
 *Ordering: do Phase 4 (tray-wrapper bump) before 0.6.1 — user confirmed 2026-05-09 that the upstream fix landed, so the first automated push doubles as the tray-wrapper smoke test.*
 
-- [ ] 0.6.1 First automated push: `git push origin main`. Observe build streaming to terminal. On success, confirm new app version is live (check version in tray menu, timestamp of `/Applications/Hotchkiss-IO.app`, http response). *First attempt 2026-05-09: build streamed cleanly in 1m53s (release, cold `CARGO_TARGET_DIR`); swap aborted at the first `rm -rf "$APP_PREV"` because the root-owned PKG-installed `Hotchkiss-IO.app.prev` from 0.4.12 wasn't user-deletable. `set -e` + the order of operations meant production was never touched — exactly the safe-failure path we designed for. User cleaned the root-owned bundle via `sudo rm -rf` (one-shot, irreversible without a reinstall, but acceptable since 0.4 already proved the new layout). Retrying via empty-ish commit.*
-- [ ] 0.6.2 Second push (small change): confirm incremental build is fast (<60s wall clock — `CARGO_TARGET_DIR` reuse is working).
-- [ ] 0.6.3 Failed-build push: introduce a syntax error, push, confirm hook exits non-zero, running app continues serving (no half-deployed state).
-- [ ] 0.6.4 Push to a non-main branch: confirm hook no-ops (ref filter works).
+- [x] 0.6.1 *First push 2026-05-09: cold build 1m53s; swap aborted on root-owned `.prev` from old PKG install. Failure mode held — production untouched. User cleared `.prev` via `sudo rm -rf`.* Retry on commit `cde6085`: build 19.04s, ad-hoc codesign succeeded, atomic-ish swap completed, kickstart cycled the LaunchAgent (PID 33857 → 76312), `/Applications/Hotchkiss-IO.app` timestamp refreshed (`May 9 16:55:04`, owner `chotchki:staff`), site returns 307 → `/pages/Resume`. tray-wrapper-0.4.1 paths embedded in the running binary (Phase 4 implicitly validated — process didn't crash, site still serves).
+- [x] 0.6.2 Subsumed by the 0.6.1 retry — `CARGO_TARGET_DIR` reuse already proven (cold 1m53s → warm 19.04s, well under the 60s target).
+- [x] 0.6.3 Pushed commit `9174472` with `let _: () = ;` in `src/main.rs`. Hook streamed compile output, terminated at `error: could not compile hotchkiss-io (bin "hotchkiss-io")` before reaching the swap block. Prod PID 76312 unchanged across the push, site still 307. *Note: `git push` exits 0 even when post-receive fails — that's standard git semantics (push status reflects ref update, not hook exit). The streamed compiler errors are loud enough not to miss; if we ever want hard-failure on origin, the hook would need to refuse the ref via `pre-receive` instead.* Reverted in `c9cee7e`.
+- [x] 0.6.4 Pushed `deploy-test/non-main` branch. Hook output: `post-receive: ignoring push to refs/heads/deploy-test/non-main (only refs/heads/main deploys)`. No build started, no swap. Branch deletion (`git push origin --delete`) also no-ops cleanly through the same filter.
 - [ ] 0.6.5 After 0.6.1 lands, also push to `github` so the GitHub mirror tracks the same SHA as production.
 
 ### 0.7 Tear down GitHub-Actions release path
@@ -146,8 +146,8 @@ Current pin: `tray-wrapper = "0.3.1"` in `Cargo.toml:112` (caret semver).
 - [x] 4.3 `cargo update -p tray-wrapper` — `Cargo.lock` updated to 0.4.1 (the patched `cookie` crate also re-resolved to a newer commit on `serde_support`, which the `[patch.crates-io]` block tracks; not a behavior change).
 - [x] 4.4 `cargo build` + `cargo clippy --all-targets` clean — only pre-existing warnings (dead `update` methods on DAOs, `page_path` field, collapsible-match in markdown transformer). No call-site updates required, the 0.4 API is source-compatible for our uses.
 - [x] 4.5 `cargo test`: 19/19 passing.
-- [ ] 4.6 Manual verification deferred to 0.6.1 — the first automated push to the mini will exercise the new tray-wrapper end-to-end on the production machine, which is the only place the tray icon actually shows up (debug builds short-circuit the IP service but the tray code is platform-gated, not debug-gated).
-- [ ] 4.7 Subsumed by 0.6.1 — `git push origin main` is the deploy.
+- [x] 4.6 Validated via 0.6.1 retry — production process started clean against `tray-wrapper-0.4.1` (PID 76312), site continues serving. Visual tray-icon spot-check still belongs to the user when they're at the mini console; the deploy proves the upgrade didn't break the process tree.
+- [x] 4.7 Done as part of 0.6.1 (`git push origin main`).
 
 ## Phase 5 — Drop the patched `cookie` fork (parked, post-Phase-0)
 
