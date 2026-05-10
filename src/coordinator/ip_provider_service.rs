@@ -1,4 +1,4 @@
-use super::ip::ifconfig::IfconfigMe;
+use super::ip::cloudflare_trace::CloudflareTrace;
 use anyhow::Result;
 use std::{
     collections::HashSet,
@@ -13,13 +13,13 @@ use tracing::debug;
 
 #[derive(Debug)]
 pub struct IpProviderService {
-    client: IfconfigMe,
+    client: CloudflareTrace,
 }
 
 impl IpProviderService {
     pub fn create() -> Result<IpProviderService> {
         Ok(IpProviderService {
-            client: IfconfigMe::new()?,
+            client: CloudflareTrace::new()?,
         })
     }
 

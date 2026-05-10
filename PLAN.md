@@ -31,14 +31,14 @@ The DNS module has zero tests today. The bug in Phase 1 would have been caught b
 
 Current code: `src/coordinator/ip/ifconfig.rs` defines `IfconfigMe::public_ip() -> Result<Ipv4Addr>`; `src/coordinator/ip_provider_service.rs` is the only caller.
 
-- [ ] 3.1 Add `src/coordinator/ip/cloudflare_trace.rs` with `CloudflareTrace::new()` + `public_ip() -> Result<Ipv4Addr>`. GET `https://1.1.1.1/cdn-cgi/trace`, split on `\n`, find the line starting with `ip=`, parse the suffix as `Ipv4Addr`. Bail clearly if `ip=` line is missing (Cloudflare changed format) so we notice instead of silently degrading.
-- [ ] 3.2 Unit test: parse a captured sample response (hardcoded string with the full key=value block) and assert the extracted `Ipv4Addr`. Also test "missing ip= line" → error and "malformed ip= value" → error.
-- [ ] 3.3 Integration test mirroring `ifconfig::tests::basic_run` (`#[tokio::test] async fn basic_run`) that hits the live endpoint and asserts `!addr.is_private()`.
-- [ ] 3.4 Swap `IpProviderService::client` from `IfconfigMe` to `CloudflareTrace` in `src/coordinator/ip_provider_service.rs`. Update the `super::ip::ifconfig::IfconfigMe` import.
-- [ ] 3.5 Delete `src/coordinator/ip/ifconfig.rs` and remove its `pub mod ifconfig;` line in `src/coordinator/ip/mod.rs`. Add `pub mod cloudflare_trace;`.
-- [ ] 3.6 Update CLAUDE.md "Runtime architecture" bullet — `IpProviderService` no longer polls `ifconfig.me`; it polls `1.1.1.1/cdn-cgi/trace`. Update SPEC.md "Self contained" external-deps list (drop ifconfig.me).
-- [ ] 3.7 `cargo build` + `cargo clippy` clean; `cargo test` passes including the new unit + integration tests.
-- [ ] 3.8 Manual e2e: deploy (`git push origin main`), then confirm the broadcasted IP matches what `curl https://1.1.1.1/cdn-cgi/trace | grep ^ip=` returns. (Debug builds short-circuit to `127.0.0.1` per existing logic — that path is untouched.)
+- [x] 3.1 Added `src/coordinator/ip/cloudflare_trace.rs` — `CloudflareTrace::new()` (rustls reqwest client) + `public_ip() -> Result<Ipv4Addr>` (GET `https://1.1.1.1/cdn-cgi/trace`, `error_for_status`, then `parse_ip` splits on lines, `strip_prefix("ip=")`, parses `Ipv4Addr`). `parse_ip` is a private associated fn so it's unit-testable without a network round-trip; it `.context()`s a clear error if the `ip=` line is missing or the value won't parse.
+- [x] 3.2 Unit tests: `parses_ip_from_sample` (full captured key=value block → `203.0.113.42`), `missing_ip_line_errors`, `malformed_ip_value_errors`.
+- [x] 3.3 `#[tokio::test] async fn basic_run` hits the live `1.1.1.1/cdn-cgi/trace` and asserts `!addr.is_private()` — mirrors the old `ifconfig::tests::basic_run`.
+- [x] 3.4 `IpProviderService` now holds a `CloudflareTrace`; import changed to `super::ip::cloudflare_trace::CloudflareTrace`. `server_ips()` body unchanged (still `self.client.public_ip().await?`).
+- [x] 3.5 Deleted `src/coordinator/ip/ifconfig.rs`; `src/coordinator/ip/mod.rs` is now just `pub mod cloudflare_trace;`.
+- [x] 3.6 CLAUDE.md "Runtime architecture" bullet updated (`IpProviderService` polls `1.1.1.1/cdn-cgi/trace`, parses `ip=`, IPv4 literal forces v4). SPEC.md "Self contained" list: dropped the `ifconfig.me` line, folded IP discovery into the existing Cloudflare dependency.
+- [x] 3.7 `cargo build` + `cargo clippy --all-targets` clean (only the pre-existing warnings: dead `update` methods, `page_path`, collapsible match, `Context` import in `service_coordinator.rs`). `cargo test`: 22/22 (was 19; +3 net — three new unit tests, and `cloudflare_trace::tests::basic_run` replaces `ifconfig::tests::basic_run`). The live `basic_run` passed, which also retires the old transient `ifconfig.me` flake.
+- [ ] 3.8 Manual e2e: after `git push origin main`, confirm the new code reads the public IP without error — check the launchd stderr log on the mini for "Sending Initial IP addresses {...}" with the real address (and no "Had an error getting the ip address"), and that `dig hotchkiss.io` still matches `ssh hotchkiss.io 'curl -s https://1.1.1.1/cdn-cgi/trace | grep ^ip='`. (Debug builds short-circuit to `127.0.0.1` — untouched.)
 
 ## Phase 5 — Drop the patched `cookie` fork
 

@@ -11,9 +11,8 @@ Meta Note: This project delivers the hotchkiss-io website so fundamentally this 
 
 - Self hosted, I've run my own website for years on my own hardware and I prefer it that way!
 - Self contained, I don't want to depend on external services more than I need to, right now this is:
-  - ifconfig.me for ipv4 (I'd REALLY like to remove this)
-  - Let's Encrypt for certs 
-  - Cloudflare for Dynamic DNS
+  - Let's Encrypt for certs
+  - Cloudflare for Dynamic DNS — also serves public-IPv4 discovery via `1.1.1.1/cdn-cgi/trace` (was `ifconfig.me`; folded into the Cloudflare dependency we already have, 2026-05)
 
 ### Content/Features (current and TBD)
 - Projects should support showing the PARTICULAR project type.

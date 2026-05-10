@@ -39,7 +39,7 @@ IpProviderService ──IPs──▶ DnsProviderService (Cloudflare API)
 AcmeProviderService ──RustlsConfig──▶ EndpointsProviderService (HTTP/HTTPS axum servers)
 ```
 
-- **IpProviderService** polls `ifconfig.me` hourly and broadcasts the public IP. In `debug_assertions` builds it forces `127.0.0.1` so dev never touches the public DNS.
+- **IpProviderService** polls `https://1.1.1.1/cdn-cgi/trace` hourly (parsing the `ip=` line) and broadcasts the public IP. Connecting to the IPv4 literal forces a v4 path. In `debug_assertions` builds it forces `127.0.0.1` so dev never touches the public DNS.
 - **DnsProviderService** updates Cloudflare A records when the IP differs from DNS.
 - **AcmeProviderService** loads or orders a Let's Encrypt cert (DNS-01 via Cloudflare), persists it in SQLite (`certificates` table), broadcasts a `RustlsConfig`, and refreshes every 6h.
 - **EndpointsProviderService** waits for a `RustlsConfig` then starts both an HTTP→HTTPS redirect server on `:80` and the real axum app on `:443`. It also owns the `tower-sessions-sqlx-store` session GC task.
