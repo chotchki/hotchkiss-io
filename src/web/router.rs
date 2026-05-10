@@ -33,8 +33,10 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
     let key = CryptoKey::get_or_create(&app_state.pool, 1).await?;
 
     debug!("Making session layer");
+    // `Secure` cookies aren't sent over plain HTTP, which the local test harness
+    // / dev server use — so only set it in release (= prod, which is HTTPS-only).
     let session_layer = SessionManagerLayer::new(app_state.session_store.clone())
-        .with_secure(true)
+        .with_secure(!cfg!(debug_assertions))
         .with_expiry(Expiry::OnInactivity(Duration::days(1)))
         .with_signed(key.key()?);
 

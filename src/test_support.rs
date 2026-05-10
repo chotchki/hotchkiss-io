@@ -1,0 +1,106 @@
+//! Boots just the web layer (no DNS/ACME/IP coordinator) against a throwaway
+//! SQLite, on plain HTTP on an ephemeral loopback port — for integration tests
+//! and local poking. Lives in the lib (not `tests/`) so it can reach the
+//! crate-internal `create_router` / `AppState` / `DatabaseHandle` without
+//! making half the crate `pub`.
+
+use std::net::SocketAddr;
+
+use anyhow::Result;
+use sqlx::SqlitePool;
+use tokio::{net::TcpListener, task::JoinHandle};
+use tower_sessions_sqlx_store::SqliteStore;
+use url::Url;
+use uuid::Uuid;
+use webauthn_rs::WebauthnBuilder;
+
+use crate::{
+    db::{dao::content_pages::ContentPageDao, database_handle::DatabaseHandle},
+    web::{app_state::AppState, router::create_router},
+};
+
+/// A running test instance. `Drop` aborts the server task and deletes the temp DB.
+pub struct TestServer {
+    /// e.g. `http://localhost:54321` (no trailing slash). Hit it via `localhost`,
+    /// not `127.0.0.1` — the WebAuthn rp_origin is `http://localhost:<port>`.
+    pub base_url: String,
+    pub pool: SqlitePool,
+    server: JoinHandle<()>,
+    _db: TempDb,
+}
+
+impl TestServer {
+    pub fn url(&self, path: &str) -> String {
+        format!("{}{}", self.base_url, path)
+    }
+
+    /// Seed a top-level content page. Returns the created page so the caller can
+    /// use its id. (A fresh migrated DB already has the seeded `login`/`projects`
+    /// special pages, so `/` redirects even before this is called.)
+    pub async fn seed_content_page(&self, name: &str, markdown: &str) -> Result<ContentPageDao> {
+        ContentPageDao::create(
+            &self.pool,
+            None,
+            name.to_string(),
+            None,
+            markdown.to_string(),
+            None,
+        )
+        .await
+    }
+}
+
+impl Drop for TestServer {
+    fn drop(&mut self) {
+        self.server.abort();
+        // `_db` drops after this and removes the file(s).
+    }
+}
+
+struct TempDb(std::path::PathBuf);
+
+impl Drop for TempDb {
+    fn drop(&mut self) {
+        let p = self.0.to_string_lossy().into_owned();
+        let _ = std::fs::remove_file(&p);
+        let _ = std::fs::remove_file(format!("{p}-wal"));
+        let _ = std::fs::remove_file(format!("{p}-shm"));
+    }
+}
+
+/// Boot the web layer on `127.0.0.1:0` against a fresh migrated SQLite.
+pub async fn spawn_test_server() -> Result<TestServer> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+
+    let origin = Url::parse(&format!("http://localhost:{port}/"))?;
+    let webauthn = WebauthnBuilder::new("localhost", &origin)?.build()?;
+
+    let db_path = std::env::temp_dir().join(format!("hotchkiss-test-{}.sqlite", Uuid::new_v4()));
+    let pool = DatabaseHandle::create(&db_path).await?;
+
+    let session_store = SqliteStore::new(pool.clone());
+    session_store.migrate().await?;
+
+    let app_state = AppState {
+        pool: pool.clone(),
+        session_store,
+        webauthn,
+    };
+    let router = create_router(app_state).await?;
+
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+
+    Ok(TestServer {
+        base_url: format!("http://localhost:{port}"),
+        pool,
+        server,
+        _db: TempDb(db_path),
+    })
+}

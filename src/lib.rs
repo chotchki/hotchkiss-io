@@ -11,6 +11,7 @@ use crate::{coordinator::service_coordinator::ServiceCoordinator, settings::Sett
 mod coordinator;
 mod db;
 mod settings;
+pub mod test_support;
 mod web;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
