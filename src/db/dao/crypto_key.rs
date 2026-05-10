@@ -1,15 +1,24 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use sqlx::{prelude::FromRow, query, query_as, SqlitePool};
 use tower_sessions::cookie::Key;
 use tracing::debug;
 
+/// A persisted signing key. `key_value` is the raw 64-byte `cookie::Key`
+/// master key (`Key::master()`) — stored as bytes rather than via serde so
+/// we don't need a forked `cookie` crate just to derive `Serialize`/`Deserialize`.
 #[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct CryptoKey {
     pub id: i64,
-    pub key_value: sqlx::types::Json<Key>,
+    pub key_value: Vec<u8>,
 }
 
 impl CryptoKey {
+    /// Reconstruct the `cookie::Key` from the stored master bytes.
+    pub fn key(&self) -> Result<Key> {
+        Key::try_from(self.key_value.as_slice())
+            .context("stored crypto key is not a valid cookie::Key (needs >= 64 bytes)")
+    }
+
     pub async fn create(&self, pool: &SqlitePool) -> Result<()> {
         debug!("Creating key");
 
@@ -37,10 +46,10 @@ impl CryptoKey {
         let key: Option<CryptoKey> = query_as!(
             CryptoKey,
             r#"
-            select 
+            select
                 id,
-                key_value as "key_value: sqlx::types::Json<Key>"
-            from 
+                key_value
+            from
                 crypto_keys
             where id = ?1
         "#,
@@ -65,7 +74,7 @@ impl CryptoKey {
 
                 let key = CryptoKey {
                     id,
-                    key_value: sqlx::types::Json(Key::generate()),
+                    key_value: Key::generate().master().to_vec(),
                 };
                 key.create(pool).await?;
                 Ok(key)
@@ -82,7 +91,7 @@ mod tests {
     async fn roundtrip(pool: SqlitePool) -> Result<()> {
         let ck = CryptoKey {
             id: 2,
-            key_value: sqlx::types::Json(Key::generate()),
+            key_value: Key::generate().master().to_vec(),
         };
 
         ck.create(&pool).await?;
@@ -100,7 +109,7 @@ mod tests {
     async fn combo(pool: SqlitePool) -> Result<()> {
         let ck = CryptoKey::get_or_create(&pool, 1).await?;
 
-        assert!(!ck.key_value.signing().is_empty());
+        assert!(!ck.key()?.signing().is_empty());
 
         Ok(())
     }

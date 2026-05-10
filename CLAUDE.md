@@ -78,7 +78,6 @@ The macOS app is **not sandboxed** (the `com.apple.security.app-sandbox` entitle
 
 ## Things to watch out for
 
-- **Patched `cookie` crate**: `Cargo.toml` patches `cookie` to a fork (`chotchki/cookie-rs` `serde_support` branch) to get serde on `cookie::Cookie`. Don't remove the `[patch.crates-io]` block when bumping deps.
 - **Vendored OpenSSL**: `openssl` is pinned with `features = ["vendored"]` to avoid system-OpenSSL packaging issues.
 - **Ports 80/443 are hardcoded** in `endpoints_provider_service.rs` — running locally as non-root will fail to bind. In practice you run via `bacon`/`cargo run` only after pointing a debug DNS at localhost, or you accept that the HTTP/HTTPS bind fails. (On the production Mac it works unprivileged because macOS Mojave+ allows non-root binds to ports <1024 when binding `INADDR_ANY`.)
 - **`assets/styles/main.css` is generated** — never edit it; edit `styles/tailwind.css` and let `build.rs` recompile.

@@ -1,6 +1,6 @@
 # Plan
 
-Completed phases are in `PLAN_ARCHIVE.md` (most recent: Phase 3 — `ifconfig.me` → Cloudflare `cdn-cgi/trace`; Phase 0 — push-to-deploy on the Mac mini; Phase 4 — `tray-wrapper` 0.4.1 bump).
+Completed phases are in `PLAN_ARCHIVE.md` (most recent: Phase 5 — dropped the `cookie-rs` fork; Phase 3 — `ifconfig.me` → Cloudflare `cdn-cgi/trace`; Phase 0 — push-to-deploy on the Mac mini; Phase 4 — `tray-wrapper` 0.4.1 bump).
 
 ## Phase 1 — Fix `get_recs_by_name` hardcoded `type=A` filter
 
@@ -25,15 +25,3 @@ The DNS module has zero tests today. The bug in Phase 1 would have been caught b
 - [ ] 2.3 Decide on HTTP mocking strategy (`wiremock`, `mockito`, hand-rolled) for higher-level tests of `clean_proof` / `create_proof` / `update_dns`.
 - [ ] 2.4 Add tests for `DnsValidator::ensure_exists` and `ensure_not_existing` that don't hit a real resolver (would have surfaced the infinite-loop behavior earlier).
 
-## Phase 5 — Drop the patched `cookie` fork
-
-**Motivation:** Cookie 0.18.x still doesn't ship serde impls upstream (confirmed 2026-05-09). We currently maintain a fork (`chotchki/cookie-rs` `serde_support` branch) wired in via `[patch.crates-io]` in `Cargo.toml`. CLAUDE.md explicitly calls out the patch as a watch-out. Maintaining a fork to add a couple of trait impls is much heavier than serde's remote-derive pattern (https://serde.rs/remote-derive.html), which lets us provide `Serialize`/`Deserialize` for `cookie::Cookie` from our own crate without forking.
-
-**Discovery:** the working tree only references `tower_sessions::cookie::Key` (the session-signing-key newtype) and never directly serializes `cookie::Cookie`. The patch may be dead — needed by a transitive dep that has since dropped the requirement. Check before assuming we need the workaround.
-
-- [ ] 5.1 Try the no-op path first: comment out the `[patch.crates-io]` block in `Cargo.toml`, `cargo update -p cookie`, `cargo build`. If it builds, the patch was dead code — proceed to 5.5.
-- [ ] 5.2 If 5.1 fails, locate the transitive consumer that wants `Cookie: Serialize/Deserialize` (`cargo tree -i cookie -e features` and read the build error). That tells us which crate's API forces the requirement.
-- [ ] 5.3 Add `src/cookie_remote.rs` (or similar) with a `CookieDef` newtype, `#[serde(remote = "cookie::Cookie")]`, mirroring the public-field shape of `cookie::Cookie`. Annotate the consumer's call sites with `#[serde(with = "cookie_remote::CookieDef")]`.
-- [ ] 5.4 If the transitive consumer is itself defining serde structs around `Cookie` (i.e. we can't reach the call site), the remote-derive escape hatch doesn't apply — at that point either the upstream crate needs a feature flag or we keep the fork. Document the finding and revert.
-- [ ] 5.5 With the patch removed, drop `[patch.crates-io]` entirely from `Cargo.toml`, the corresponding lockfile entries, and the CLAUDE.md "Patched `cookie` crate" caveat.
-- [ ] 5.6 `cargo build` + `cargo clippy --all-targets` clean; `cargo test` 19/19 passing.

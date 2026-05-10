@@ -97,12 +97,6 @@ webauthn-rs = { version = "0.5.1", features = [
 ] }
 #Forcing a vendored openssl to avoid packaging issues
 openssl = { version = "0.10", features = ["vendored"] }
-#Fixing "cookie" to support serialize/deserialize
-cookie = { git = "https://github.com/chotchki/cookie-rs.git", branch = "serde_support", features = [
-    "percent-encode",
-    "signed",
-    "serde",
-] }
 
 #Editor work
 markdown = "1.0.0-alpha.22"
@@ -117,13 +111,6 @@ clap = { version = "4.5.41", features = ["derive"] }
 objc2-foundation = { version = "0.3.1", features = [
     "NSPathUtilities",
     "NSString",
-] }
-
-[patch.crates-io]
-cookie = { git = "https://github.com/chotchki/cookie-rs.git", branch = "serde_support", features = [
-    "percent-encode",
-    "signed",
-    "serde",
 ] }
 
 [dev-dependencies]
