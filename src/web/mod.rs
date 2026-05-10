@@ -5,6 +5,7 @@ pub mod features;
 pub mod html_template;
 pub mod htmx_responses;
 pub mod markdown;
+pub mod middleware;
 pub mod router;
 mod session;
 mod static_content;

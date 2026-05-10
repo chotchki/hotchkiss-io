@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Analytics{% endblock %}
+
+{% block head %}{% endblock %}
+
+{% block content %}
+<h2 class="font-display text-lg text-navy uppercase mb-1">Analytics</h2>
+<p class="text-sm text-navy mb-4">Last {{ since_days }} days</p>
+
+<div class="flex flex-row gap-2 mb-6 text-sm">
+    <a class="px-2 py-1 bg-navy text-div-grey rounded-sm uppercase" href="/admin/analytics?since=1">1d</a>
+    <a class="px-2 py-1 bg-navy text-div-grey rounded-sm uppercase" href="/admin/analytics?since=7">7d</a>
+    <a class="px-2 py-1 bg-navy text-div-grey rounded-sm uppercase" href="/admin/analytics?since=30">30d</a>
+    <a class="px-2 py-1 bg-navy text-div-grey rounded-sm uppercase" href="/admin/analytics?since=90">90d</a>
+</div>
+
+<div class="flex flex-row gap-12 mb-8">
+    <div><span class="text-3xl text-navy">{{ total_requests }}</span><br/><span class="text-sm">requests</span></div>
+    <div><span class="text-3xl text-navy">{{ distinct_ips }}</span><br/><span class="text-sm">distinct IPs</span></div>
+</div>
+
+<h3 class="font-display text-navy uppercase mt-6 mb-1">Requests per day</h3>
+<table class="text-sm mb-2">
+    {% for row in by_day %}
+    <tr><td class="pr-6">{{ row.day }}</td><td>{{ row.count }}</td></tr>
+    {% endfor %}
+</table>
+
+<h3 class="font-display text-navy uppercase mt-6 mb-1">Top paths</h3>
+<table class="text-sm mb-2">
+    {% for row in by_path %}
+    <tr><td class="pr-4 text-right">{{ row.count }}</td><td>{{ row.path }}</td></tr>
+    {% endfor %}
+</table>
+
+<h3 class="font-display text-navy uppercase mt-6 mb-1">Top user agents</h3>
+<table class="text-sm mb-2">
+    {% for row in by_user_agent %}
+    <tr>
+        <td class="pr-4 text-right">{{ row.count }}</td>
+        <td>{% if let Some(ua) = row.user_agent.as_ref() %}{{ ua }}{% else %}(none){% endif %}</td>
+    </tr>
+    {% endfor %}
+</table>
+
+<h3 class="font-display text-navy uppercase mt-6 mb-1">Recent requests</h3>
+<table class="text-sm">
+    <tr class="text-left">
+        <th class="pr-6">When (UTC)</th><th class="pr-4">Method</th><th class="pr-4">Status</th><th class="pr-6">Path</th><th class="pr-6">IP</th><th>User agent</th>
+    </tr>
+    {% for r in recent %}
+    <tr>
+        <td class="pr-6">{{ r.ts }}</td>
+        <td class="pr-4">{{ r.method }}</td>
+        <td class="pr-4">{{ r.status }}</td>
+        <td class="pr-6">{{ r.path }}</td>
+        <td class="pr-6">{% if let Some(ip) = r.ip.as_ref() %}{{ ip }}{% else %}—{% endif %}</td>
+        <td>{% if let Some(ua) = r.user_agent.as_ref() %}{{ ua }}{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endblock %}

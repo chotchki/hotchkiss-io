@@ -1,3 +1,4 @@
+use crate::db::dao::request_log::RequestLogDao;
 use crate::settings::Settings;
 use crate::web::{app_state::AppState, router::create_router};
 use anyhow::{Context, Result, anyhow, bail};
@@ -81,6 +82,23 @@ impl EndpointsProviderService {
                 .map_err(|e| anyhow!(e))
         });
 
+        // Prune request_log rows older than the retention window, daily.
+        let prune_pool = self.pool.clone();
+        set.spawn(async move {
+            const RETAIN_DAYS: i64 = 90;
+            let mut tick = tokio::time::interval(tokio::time::Duration::from_secs(60 * 60 * 24));
+            loop {
+                tick.tick().await;
+                match RequestLogDao::prune_before(&prune_pool, RETAIN_DAYS).await {
+                    Ok(n) if n > 0 => {
+                        tracing::info!("Pruned {n} request_log rows older than {RETAIN_DAYS} days")
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("request_log prune failed: {e}"),
+                }
+            }
+        });
+
         let output = set.join_all().await;
         for o in output {
             match o {
@@ -125,7 +143,11 @@ impl EndpointsProviderService {
         tracing::info!("HTTPS Server listening on {}", addr);
 
         axum_server::bind_rustls(addr, config)
-            .serve(create_router(app_state).await?.into_make_service())
+            .serve(
+                create_router(app_state)
+                    .await?
+                    .into_make_service_with_connect_info::<SocketAddr>(),
+            )
             .await?;
 
         Ok(())

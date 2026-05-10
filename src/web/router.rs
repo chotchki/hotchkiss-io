@@ -1,9 +1,15 @@
 use super::{app_state::AppState, features::login::login_router, static_content::static_content};
 use crate::{
     db::dao::crypto_key::CryptoKey,
-    web::features::pages::{
-        attachments::attachments_router, pages_router, projects::projects_router,
-        redirect_to_first_page,
+    web::{
+        features::{
+            admin::admin_router,
+            pages::{
+                attachments::attachments_router, pages_router, projects::projects_router,
+                redirect_to_first_page,
+            },
+        },
+        middleware::request_log::log_requests,
     },
 };
 use axum::{http::Uri, routing::get, Router};
@@ -33,12 +39,14 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
         .with_signed(key.key()?);
 
     debug!("Making router");
+    let log_pool = app_state.pool.clone();
     let router = Router::new()
         .route("/", get(redirect_to_first_page))
         .nest("/login", login_router())
         .nest("/attachments", attachments_router())
         .nest("/pages", pages_router())
         .nest("/projects", projects_router())
+        .nest("/admin", admin_router())
         .with_state(app_state)
         .merge(static_content())
         .fallback(fallback);
@@ -51,6 +59,8 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
 
     let router = router.layer(
         ServiceBuilder::new()
+            // Outermost: see every request + the final response status.
+            .layer(axum::middleware::from_fn_with_state(log_pool, log_requests))
             .layer(
                 TraceLayer::new_for_http()
                     .make_span_with(DefaultMakeSpan::new().include_headers(true))

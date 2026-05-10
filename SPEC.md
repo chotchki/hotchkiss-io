@@ -23,7 +23,7 @@ Meta Note: This project delivers the hotchkiss-io website so fundamentally this 
     - Its okay to link out to GitHub but I want to have the front door since its MY stuff
 
 - Mini Blog (not super important, I don't want to post regular content but that may be because of how hard it is)
-- Analytics, who is scraping my site?
+- Analytics, who is scraping my site? — **v1 shipped 2026-05** (`/admin/analytics`, admin-only: request log + per-day / top-paths / top-user-agents / distinct-IP aggregates). See PLAN.md Phase 7.
 - Backups, the more content that's added the more intrinsic value it has
 - Would like to add features that are restricted to the family/approved people
   - I run various services that are non public

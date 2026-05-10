@@ -42,18 +42,18 @@ AcmeProviderService ──RustlsConfig──▶ EndpointsProviderService (HTTP/H
 - **IpProviderService** polls `https://1.1.1.1/cdn-cgi/trace` hourly (parsing the `ip=` line) and broadcasts the public IP. Connecting to the IPv4 literal forces a v4 path. In `debug_assertions` builds it forces `127.0.0.1` so dev never touches the public DNS.
 - **DnsProviderService** updates Cloudflare A records when the IP differs from DNS.
 - **AcmeProviderService** loads or orders a Let's Encrypt cert (DNS-01 via Cloudflare), persists it in SQLite (`certificates` table), broadcasts a `RustlsConfig`, and refreshes every 6h.
-- **EndpointsProviderService** waits for a `RustlsConfig` then starts both an HTTP→HTTPS redirect server on `:80` and the real axum app on `:443`. It also owns the `tower-sessions-sqlx-store` session GC task.
+- **EndpointsProviderService** waits for a `RustlsConfig` then starts both an HTTP→HTTPS redirect server on `:80` and the real axum app on `:443` (served with `into_make_service_with_connect_info::<SocketAddr>()` so handlers/middleware can see the client IP). It also owns the `tower-sessions-sqlx-store` session GC task and a daily `request_log` prune task (90-day retention).
 
 If any task returns, `tokio::try_join!` fails the whole coordinator — there is no auto-restart.
 
 ## Web layer (`src/web/`)
 
-- **Routing** is composed in `web/router.rs`: `/` redirects to the first content page, `/login`, `/attachments`, `/pages`, `/projects` are nested routers, and `static_content()` is merged in. `LiveReloadLayer` is added **only** in debug builds.
+- **Routing** is composed in `web/router.rs`: `/` redirects to the first content page, `/login`, `/attachments`, `/pages`, `/projects`, `/admin` are nested routers, and `static_content()` is merged in. `LiveReloadLayer` is added **only** in debug builds. The outer `ServiceBuilder` stack adds (outermost first) a request-logging middleware (`web/middleware/request_log.rs` → `request_log` table, fire-and-forget insert), the `TraceLayer`, the session layer, and compression.
 - **Templating**: askama templates in `templates/`, served via the `HtmlTemplate<T>` wrapper. Templates reference `BUILD_TIME_CACHE_BUST` (a compile-time UTC epoch) for asset cache-busting query strings.
 - **HTMX**: the frontend uses HTMX (`assets/vendor/htmx/`). Mutating handlers return `htmx_refresh()` or `htmx_redirect(...)` from `htmx_responses.rs` rather than rendering a response body.
 - **Sessions**: `tower-sessions` backed by SQLite, signed with a key from the `crypto_keys` table (auto-generated on first boot via `CryptoKey::get_or_create`). Expiry: 1 day inactivity, secure-only.
 - **Auth**: WebAuthn / passkeys via `webauthn-rs` (discoverable credentials, conditional UI). State machine in `AuthenticationState`: `Anonymous → AuthOptions → Authenticated`, or `Anonymous → RegistrationStarted → Authenticated`. Registration first creates the `UserDao` with `Role::Anonymous`; the SQL `INSERT` then conditionally upgrades to `Admin` (first user) or `Registered`.
-- **Authorization checks live in handlers**, not middleware. Pattern: `if !session_data.auth_state.is_admin() { return FORBIDDEN }` at the top of each mutating handler. Don't move these to a layer without auditing every route.
+- **Authorization checks live in handlers**, not middleware — *except* the `/admin` nest (`web/features/admin/`), which is gated as a group by the `require_admin` layer (`web/middleware/require_admin.rs`); handlers under `/admin` don't repeat the check. Everywhere else, the pattern is `if !session_data.auth_state.is_admin() { return FORBIDDEN }` at the top of each mutating handler. Don't move those behind a layer without auditing every route (tracked in PLAN.md "Tech debt").
 - **Errors**: handlers return `Result<Response, AppError>`. `AppError` wraps `anyhow::Error`, logs with a UUID trace id, and returns a 500 with that id to the client.
 - **`AppError` swallows status info** — if a handler needs to return e.g. a 404 or 403, return `Ok((StatusCode::X, "msg").into_response())` instead of bubbling via `?`. This is a deliberate pattern, see existing handlers for examples.
 

@@ -47,6 +47,9 @@
                     {% endfor %}
 
                     {% if auth_state.is_admin() %}
+                    <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center">
+                        <a class="text-sm text-div-grey uppercase" href="/admin/analytics">Analytics</a>
+                    </li>
                     <li class="bg-navy py-2 px-6 rounded-t font-display text-center">
                         <form hx-post="/pages">
                             <div class="text-div-grey uppercase">

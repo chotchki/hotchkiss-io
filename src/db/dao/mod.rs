@@ -3,5 +3,6 @@ pub mod attachments;
 pub mod certificate;
 pub mod content_pages;
 pub mod crypto_key;
+pub mod request_log;
 pub mod roles;
 pub mod users;
