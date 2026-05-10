@@ -51,7 +51,7 @@ This step isolates the launchd/codesign/migration parts from the git-hook automa
 - [x] 0.4.9 Verified: `https://hotchkiss.io/` → 307 → `/pages/Resume` → 200, 7290 B HTML, 27ms. TLS handshake clean (cert valid). Database content intact (redirect target is DB-derived). User confirmed the site looks right in browser. Tray-icon visual check deferred — `tray-wrapper` fixes pending in Phase 4 mean the icon may not yet look right; not a deploy blocker.
 - [x] 0.4.10 Killed PID 33187, slept 12s past ThrottleInterval, confirmed PID 33600 spawned (different PID), runs counter 2→3, `https://hotchkiss.io/` still serves. KeepAlive working as designed.
 - [x] 0.4.11 Swapped `.app` while PID 33600 was running (mmap'd binary kept process alive across the swap, as expected), `launchctl kickstart -k`, slept 12s. Result: PID 33857, runs 3→4, exactly one process (no zombies), site still serves. Atomic-ish swap pattern verified for the post-receive hook in 0.5.
-- [ ] 0.4.12 Once 0.4.9 confirms the new layout is fully working, the old container at `~/Library/Containers/io.hotchkiss.web/` can be deleted. *Wait until 0.6 (push-to-deploy validation) is also passing — keeping the container around is a free rollback target until then.* Also leave `/Applications/Hotchkiss-IO.app.prev` (the original PKG-installed root-owned bundle) until 0.6 for the same reason.
+- [x] 0.4.12 Cleanup done in two parts. (a) `/Applications/Hotchkiss-IO.app.prev` removed by user via `sudo rm -rf` during 0.6.1 (root-owned PKG-installed bundle was blocking the post-receive cleanup step — see 0.6.1 note). (b) `~/Library/Containers/io.hotchkiss.web/` (191 MB) deleted via SSH after 0.6 was fully passing. No rollback artifacts remain.
 
 ### 0.5 Bare repo + post-receive hook
 
@@ -68,7 +68,7 @@ This step isolates the launchd/codesign/migration parts from the git-hook automa
 - [x] 0.6.2 Subsumed by the 0.6.1 retry — `CARGO_TARGET_DIR` reuse already proven (cold 1m53s → warm 19.04s, well under the 60s target).
 - [x] 0.6.3 Pushed commit `9174472` with `let _: () = ;` in `src/main.rs`. Hook streamed compile output, terminated at `error: could not compile hotchkiss-io (bin "hotchkiss-io")` before reaching the swap block. Prod PID 76312 unchanged across the push, site still 307. *Note: `git push` exits 0 even when post-receive fails — that's standard git semantics (push status reflects ref update, not hook exit). The streamed compiler errors are loud enough not to miss; if we ever want hard-failure on origin, the hook would need to refuse the ref via `pre-receive` instead.* Reverted in `c9cee7e`.
 - [x] 0.6.4 Pushed `deploy-test/non-main` branch. Hook output: `post-receive: ignoring push to refs/heads/deploy-test/non-main (only refs/heads/main deploys)`. No build started, no swap. Branch deletion (`git push origin --delete`) also no-ops cleanly through the same filter.
-- [ ] 0.6.5 After 0.6.1 lands, also push to `github` so the GitHub mirror tracks the same SHA as production.
+- [x] 0.6.5 `git push github main` — mirror at `9978288`, same SHA production is running.
 
 ### 0.7 Tear down GitHub-Actions release path
 
