@@ -4,3 +4,9 @@ use hotchkiss_io::real_main;
 fn main() -> anyhow::Result<()> {
     real_main()
 }
+
+// PLAN 0.6.3 deliberate-failure smoke test — invalid syntax to force a build error.
+// Reverted in the immediately-following commit.
+fn deploy_test_broken_build() {
+    let _: () = ;
+}
