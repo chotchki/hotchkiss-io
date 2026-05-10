@@ -4,6 +4,19 @@ Completed phases, swept here from `PLAN.md` per the workflow rule (a phase exits
 
 ---
 
+## Phase 2 — DNS module testability — DONE 2026-05-10
+
+**Summary:** the DNS module had zero tests; the Phase 1 bug (a `type=A` pinned into `get_recs_by_name`'s query string) was the motivating example. Two concrete pieces landed; two follow-ups were deliberately deferred (now Phase 6).
+
+- **2.1 — pure URL builders.** Extracted four private associated fns on `CloudflareApi`: `dns_records_url(zone)`, `dns_record_url(zone, rec)`, `zones_query_url(zone_name)`, `dns_records_query_url(zone, name, rec_type)` (the query-param ones now build via `Url::query_pairs_mut().append_pair(...)` instead of a hand-formatted string — same output for our inputs, but properly encoded and trivially testable). `create_record` / `create_txt_record` / `delete_record` / `get_zone_id` / `get_recs_by_name` all call the helpers; no behavior change.
+- **2.2 — unit tests on the builders (5).** Pin the collection/single/zone-query URLs, assert `dns_records_query_url` emits exactly `name=` then `type=` over the right path, and — the regression guard for Phase 1 — `dns_records_query_type_is_a_parameter_not_hardcoded` loops `A`/`AAAA`/`TXT`/`CNAME` and checks the `type=` value tracks the argument.
+- **2.3 — HTTP-mocking decision.** Don't build it now. Mocking `clean_proof`/`create_proof`/`update_dns` needs `BASE_URL` (a `LazyLock<Url>` const) to become a `CloudflareApi` field so a fake server URL can be injected; then `wiremock` (async-first, fits the codebase). The regression class that bit us is covered by 2.2's pure tests; the remaining untested logic in those methods is set arithmetic + sequencing, lower-risk. Recorded as Phase 6.1.
+- **2.4 — testable `DnsValidator` decision logic.** Split the wait loops: `lookup_once` does one uncached resolver call and maps it to a `LookupOutcome` (`Found(Vec<RData>)` | `NoRecords`, with non-`NoRecordsFound` errors bubbling), and pure `exists_step(expected, outcome) -> WaitStep` / `not_existing_step(outcome) -> WaitStep` decide done-vs-keep-waiting. 7 unit tests: exact match, order-insensitive match, partial set → wait, wrong records → wait, no records → wait (for `exists`), and empty → done / leftovers → wait (for `not_existing`, the latter being the Phase 1 *symptom* — correct in isolation; the bug was the upstream deletion query). **Finding:** the `DnsValidator` timeout check is commented out *and* its condition was backwards (`timeout > Instant::now()` where `timeout = now + 300s` → true the whole window → would bail immediately). Left disabled (re-enabling changes the ACME path's runtime behavior — bounded retry would fail renewals on slow propagation), corrected the comment, tracked as Phase 6.2.
+
+Suite went 22 → 34 tests, `cargo build` + `cargo clippy --all-targets` clean (only the standing pre-existing warnings). No docs change needed — internal refactor. No deploy needed for correctness, but it shipped on the next `git push origin main` anyway.
+
+---
+
 ## Phase 5 — Drop the patched `cookie` fork — DONE 2026-05-10
 
 **Original hypothesis (wrong on the specifics):** the plan assumed the `chotchki/cookie-rs` `serde_support` fork existed to get serde on `cookie::Cookie`, possibly dead code, fixable via serde remote-derive. **What it actually was:** the only consumer is `src/db/dao/crypto_key.rs`, which stored the session-signing key as `sqlx::types::Json<cookie::Key>` — and `Json<T>` needs `T: Serialize + DeserializeOwned` directly (no `#[serde(with)]` hook on a generic wrapper), so the fork's `serde` feature on `Key` was load-bearing. Removing the `[patch.crates-io]` block straight up failed to compile (`Serialize`/`Deserialize` not implemented for `tower_sessions::cookie::Key`).
