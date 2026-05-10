@@ -13,9 +13,9 @@ Christopher Hotchkiss's personal site / CRM. A single self-contained Rust binary
 - `cargo test` — runs the suite. SQLx tests use `#[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]` and spin up isolated SQLite DBs per test.
 - `cargo test <test_name>` — single test (e.g. `cargo test roundtrip`).
 - `npm run format` — Prettier + Tailwind plugin formatting (templates / styles / config).
-- `./build/macos/build.sh` — produces a signed + notarized `.pkg`. Resolves `VERSION` from `$GITHUB_REF_NAME` (or `$VERSION` / `git describe`) and reads `SIGN_IDENTITY`, `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID` from env. Fails fast with a clear error if any are unset.
+- `./build/macos/build.sh` — builds an ad-hoc-signed `Hotchkiss-IO.app` (no Apple Developer ID, no notarization, no `.pkg`). Honors `CARGO_TARGET_DIR`; writes the bundle to `$CARGO_TARGET_DIR/Hotchkiss-IO.app` (or `target/Hotchkiss-IO.app` if unset) and prints `BUILT_APP=<absolute-path>` on stdout. Resolves `VERSION` from `$VERSION` → `$GITHUB_REF_NAME` → `git describe`, falling back to `0.0.0-dev`. The post-receive hook on the mini calls this.
 
-Releases are tag-triggered: bump `version` in `Cargo.toml`, commit, then `git tag v$VERSION && git push --tags`. `release.yml` runs on a GitHub-hosted `macos-14` runner, builds + signs + notarizes, and creates a draft release. Un-drafting the release fires `install.yml` on the self-hosted server runner, which downloads the `.pkg` and runs `installer -target /`.
+Deployment is push-to-deploy: `git push origin main` pushes to a bare repo at `~/repos/hotchkiss-io.git` on the Mac mini, whose `post-receive` hook (`build/macos/post-receive`) archives the pushed tree, runs `build/macos/build.sh` with a persistent `CARGO_TARGET_DIR`, atomically swaps the new `.app` into `/Applications`, and `launchctl kickstart -k`s the `io.hotchkiss.web` LaunchAgent. A failed build leaves the running app untouched. `origin` is the mini; `github` is a mirror — push there too to keep it current. Apple notarization / Developer ID / `.pkg` distribution was retired (2026-05): the binary only ever deploys to one self-hosted Mac, so ad-hoc signing is sufficient. One-time mini setup is documented in `build/macos/SETUP.md`.
 
 ## Build-time machinery (build.rs)
 
@@ -72,12 +72,15 @@ Attachments are stored as BLOBs in SQLite. `load_attachment[_by_id]` supports a 
 1. First CLI arg, if present (this is what `bacon` and dev use: `data/config.json`).
 2. Otherwise `~/Library/Application Support/io.hotchkiss.web/config.json` on macOS, `$HOME/...` elsewhere.
 
-Required fields: `cloudflare_token`, `database_path`, `domain`, `log_path`, `cache_path`. The `data/` directory in the repo is gitignored and contains the dev config + SQLite database.
+Required fields: `cloudflare_token`, `domain`. Optional path fields — `database_path`, `log_path`, `cache_path` — default to `~/Library/Application Support/io.hotchkiss.web/data/database.sqlite`, `~/Library/Logs/io.hotchkiss.web`, and `~/Library/Caches/io.hotchkiss.web` respectively when omitted (see `Settings::resolve` in `src/settings.rs`). The on-disk JSON is deserialized into a private `RawSettings`; unknown keys are silently ignored. The `data/` directory in the repo is gitignored and contains the dev config + SQLite database.
+
+The macOS app is **not sandboxed** (the `com.apple.security.app-sandbox` entitlement was dropped, 2026-05) — `NSHomeDirectory()` returns the real home, so the paths above are literal. On the production Mac the app runs as a LaunchAgent (`build/macos/io.hotchkiss.web.plist`) in the user GUI session, which keeps the tray icon alive; macOS Mojave+ lets the non-root process bind ports 80/443 because axum binds `INADDR_ANY`.
 
 ## Things to watch out for
 
 - **Patched `cookie` crate**: `Cargo.toml` patches `cookie` to a fork (`chotchki/cookie-rs` `serde_support` branch) to get serde on `cookie::Cookie`. Don't remove the `[patch.crates-io]` block when bumping deps.
-- **Vendored OpenSSL**: `openssl` is pinned with `features = ["vendored"]` to avoid system-OpenSSL packaging issues for the signed `.pkg`.
-- **Ports 80/443 are hardcoded** in `endpoints_provider_service.rs` — running locally as non-root will fail to bind. In practice you run via `bacon`/`cargo run` only after pointing a debug DNS at localhost, or you accept that the HTTP/HTTPS bind fails.
+- **Vendored OpenSSL**: `openssl` is pinned with `features = ["vendored"]` to avoid system-OpenSSL packaging issues.
+- **Ports 80/443 are hardcoded** in `endpoints_provider_service.rs` — running locally as non-root will fail to bind. In practice you run via `bacon`/`cargo run` only after pointing a debug DNS at localhost, or you accept that the HTTP/HTTPS bind fails. (On the production Mac it works unprivileged because macOS Mojave+ allows non-root binds to ports <1024 when binding `INADDR_ANY`.)
 - **`assets/styles/main.css` is generated** — never edit it; edit `styles/tailwind.css` and let `build.rs` recompile.
-- CI layout: `test_and_coverage.yml` runs on `macos-latest` per push (lint + test + grcov coverage). `release.yml` runs on `macos-14` (GitHub-hosted) on tag pushes — imports the Developer ID cert from a base64 secret into a temp keychain, signs and notarizes inline. `install.yml` runs on `self-hosted` and is the only workflow that needs your server: it fires on `release: types: [published]` and installs the latest `.pkg`.
+- **`git push origin main` deploys to production** — no staging step. The post-receive hook builds and swaps the live app, with ~10–15s of downtime during `launchctl kickstart -k`. A failed build aborts before the swap (running app keeps serving), but a *successful build of broken runtime behavior* goes live immediately. `origin` is the mini; `github` is the mirror.
+- CI layout: `test_and_coverage.yml` runs on `macos-latest` per push (lint + test + grcov coverage), `check_ip.yml` is a small scheduled IP check — both are informational and gate nothing. The `release.yml` / `install.yml` GitHub Actions workflows were deleted (2026-05); deployment is the `git push origin main` → `post-receive` hook flow described under "Common commands".

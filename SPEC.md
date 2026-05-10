@@ -30,8 +30,7 @@ Meta Note: This project delivers the hotchkiss-io website so fundamentally this 
   - I run various services that are non public
 
 ## Current site's pain
-- deployment is fragile, unsure if I should finally move to docker
-  - I really want auto builds to deploy since I don't want to copy stuff around
+- ~~deployment is fragile, unsure if I should finally move to docker~~ — **solved 2026-05**: `git push origin main` → post-receive hook on the mini builds, atomic-swaps the `.app`, restarts the LaunchAgent. No docker, no copying stuff around. (See PLAN.md Phase 0.)
 - What should be the landing page? that's always hard
 - No mini blog
 - Mobile posting is too hard, I am very open to enabling a PWA version to enable easier posting

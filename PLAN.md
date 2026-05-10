@@ -80,19 +80,19 @@ This step isolates the launchd/codesign/migration parts from the git-hook automa
 
 ### 0.8 Docs
 
-- [ ] 0.8.1 Update CLAUDE.md "Common commands" — `build/macos/build.sh` no longer needs the four Apple env vars; produces a signed `.app` (no `.pkg`).
-- [ ] 0.8.2 Replace CLAUDE.md "Releases are tag-triggered..." paragraph with the new flow: `git push mini main` triggers the post-receive hook on the mini. Note that Apple notarization / `.pkg` distribution was retired because the binary only deploys to a single self-hosted Mac.
-- [ ] 0.8.3 Update CLAUDE.md "Configuration" section — config now lives at `~/Library/Application Support/io.hotchkiss.web/config.json` (matches what the doc already claimed). List required fields (`cloudflare_token`, `domain`) and optional path fields with their default locations. Note the sandbox was dropped.
-- [ ] 0.8.4 Update CLAUDE.md "Things to watch out for" — drop sandbox-related caveats if any get added during 0.2; ensure the file-layout section reflects standard `~/Library/...` paths.
-- [ ] 0.8.5 Update SPEC.md "Current site's pain" — drop the "deployment is fragile / move to docker" line if Phase 0 holds up through ~5 deploys.
+- [x] 0.8.1 CLAUDE.md "Common commands" — `build/macos/build.sh` entry rewritten: ad-hoc-signed `.app`, no Apple env vars, honors `CARGO_TARGET_DIR`, prints `BUILT_APP=`.
+- [x] 0.8.2 CLAUDE.md "Releases are tag-triggered..." paragraph replaced with the push-to-deploy flow (`git push origin main` → bare repo → `post-receive` → build → atomic swap → `launchctl kickstart -k`), notes the failure-mode safety, the `origin`/`github` split, that notarization was retired 2026-05, and points at `build/macos/SETUP.md`.
+- [x] 0.8.3 CLAUDE.md "Configuration" section — required fields trimmed to `cloudflare_token` + `domain`, optional path fields documented with their `~/Library/...` defaults and the `RawSettings`/unknown-key behavior, plus a paragraph on the dropped sandbox + LaunchAgent + Mojave port-binding.
+- [x] 0.8.4 CLAUDE.md "Things to watch out for" — added a "`git push origin main` deploys to production" caveat, fixed the CI-layout bullet (workflows deleted), de-`.pkg`'d the vendored-OpenSSL note, and added the Mojave port-binding parenthetical to the ports caveat. *Left the `[patch.crates-io]` cookie caveat in place — Phase 5 removes it.*
+- [x] 0.8.5 SPEC.md "Current site's pain" — the "deployment is fragile / move to docker" line is now struck through and annotated as solved 2026-05 with a pointer to PLAN.md Phase 0. (Done at deploy #5 — close enough to the "~5 deploys" bar; the flow has been stable since the hook was fixed.)
 
 ### 0.9 Exit criteria
 
 - [x] 0.9.1 Cloudflare token + Omada password rotated (one-shot remediation for design-discussion leak — confirmed complete by user 2026-05-09).
-- [ ] 0.9.2 All boxes above ticked.
-- [ ] 0.9.3 Five consecutive pushes deploy cleanly without manual intervention.
-- [ ] 0.9.4 At least one deliberate failure case (broken build, killed process) handled gracefully.
-- [ ] 0.9.5 Sweep summary to PLAN_ARCHIVE.md per CLAUDE.md workflow rule.
+- [ ] 0.9.2 All boxes above ticked. *Blocked on 0.7.3 (delete GH secrets — user), 0.7.4 (confirm CI green after the push lands), 0.7.5 (tear down self-hosted runner — user). Phase 1's 1.6/1.7 are independent and don't gate Phase 0.*
+- [ ] 0.9.3 Five consecutive pushes deploy cleanly without manual intervention. *Progress: clean deploys since the hook was fixed — `cde6085`, `9978288`, `ed24ee3`, `d46c85d`, `<docs push>` = 5 (the deliberate broken-build test `9174472` sits between #1 and #2 as an intentional failure-path probe, not a regression). The 0.9.5 sweep push will be a 6th. Tick once the docs push lands clean.*
+- [x] 0.9.4 Failure cases exercised: broken-build push (0.6.3 — hook bailed pre-swap, prod untouched) and process kill (0.4.10 — `SIGKILL`'d the running PID, `KeepAlive` respawned it past `ThrottleInterval`). Both handled gracefully.
+- [ ] 0.9.5 Sweep summary to PLAN_ARCHIVE.md per CLAUDE.md workflow rule. *Gated on 0.9.2 — do this once the user has cleared the GH secrets + runner and CI is confirmed green.*
 
 Once 0.9 is green, Phase 3 (ifconfig.me swap) unblocks.
 
