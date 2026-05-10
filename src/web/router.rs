@@ -48,7 +48,16 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
         .nest("/attachments", attachments_router())
         .nest("/pages", pages_router())
         .nest("/projects", projects_router())
-        .nest("/admin", admin_router())
+        .nest("/admin", admin_router());
+
+    // Debug-only test-login seam (absent from release builds = prod).
+    #[cfg(debug_assertions)]
+    let router = router.nest(
+        "/test",
+        crate::web::features::test_login::test_router(),
+    );
+
+    let router = router
         .with_state(app_state)
         .merge(static_content())
         .fallback(fallback);

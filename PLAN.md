@@ -39,14 +39,14 @@ Two items deferred out of Phase 2 — neither urgent, both real.
 
 ### 8.2 Debug-only login seam
 
-- [ ] 8.2.1 `#[cfg(debug_assertions)] src/web/features/test_login.rs`: `test_router() -> Router<AppState>` with `POST /login` taking `role` (query or form) → `UserDao::find_by_display_name`-or-create with that `Role`, build `SessionData { auth_state: Authenticated(user) }`, `SessionData::update_session(&session, &data).await`, return 200. (`Session` extractor works — `/test` nests inside the top-level session layer.)
-- [ ] 8.2.2 In `create_router`: `#[cfg(debug_assertions)] { router = router.nest("/test", test_login::test_router()); }`. Confirm it's absent from a `--release` build.
-- [ ] 8.2.3 Sanity test: `POST {base}/test/login?role=admin` (capture the session cookie) → `GET {base}/admin/analytics` with the cookie → 200, body contains the dashboard heading; without the cookie → 403.
+- [x] 8.2.1 `#[cfg(debug_assertions)] src/web/features/test_login.rs::test_router()` — `POST /login` taking `?role=` (`Option<Role>`, strum variant names; defaults to `Admin`). Does a direct `INSERT INTO users (...) VALUES (...)` (a fresh user each call — bypasses `UserDao::create`'s first-user→Admin logic so the requested role is honored) then `SessionData::update_session(&session, &SessionData { auth_state: Authenticated(user) })`. (`Session` extractor works — `/test` nests inside the top-level session layer.)
+- [x] 8.2.2 `create_router`: `#[cfg(debug_assertions)] let router = router.nest("/test", crate::web::features::test_login::test_router());` (attribute on the `let`, so in release the line vanishes and `router` is unchanged); `#[cfg(debug_assertions)] pub mod test_login;` in `web/features/mod.rs`. *Absence from release confirmed against the deployed prod binary (no `test/login` string).*
+- [x] 8.2.3 Covered by `tests/web.rs::analytics_requires_admin` — `POST /test/login?role=Admin` (cookie-store client) → `GET /admin/analytics` → 200 + body contains "Analytics"; without login → 403.
 
 ### 8.3 Rust integration tests
 
-- [ ] 8.3.1 `tests/web.rs` (split as needed): analytics auth (403 anon, 403 registered, 200 admin + body checks); the request-log middleware records (hit a path, then query `request_log` via `TestServer::pool` and assert the row, incl. the `ConnectInfo` IP being `127.0.0.1`); a content page renders (seed a page, GET it, assert rendered markdown in the body). Each test gets its own DB via `spawn_test_server`.
-- [ ] 8.3.2 `cargo test` green incl. the new `tests/` integration tests; `cargo clippy --all-targets` clean.
+- [x] 8.3.1 `tests/web.rs`: `analytics_requires_admin` (anon → 403, `?role=Registered` → still 403, `?role=Admin` → 200 + the dashboard renders); `request_log_middleware_records_requests` (`GET /pages/Probe`, then poll `request_log` via `server.pool` for the row — asserts `status = 200`, `ip = 127.0.0.1`, i.e. `ConnectInfo` is being read). Content-page rendering is already covered by `tests/server.rs::harness_boots_and_serves`. Each test gets a fresh DB via `spawn_test_server`. (DB reads in tests use the runtime `sqlx::query(...)` — not `query!` — so no `DATABASE_URL` needed when compiling the `tests/` crate.)
+- [x] 8.3.2 `cargo test` 40 green (37 lib + 1 `tests/server.rs` + 2 `tests/web.rs`); `cargo clippy --all-targets` clean (5 standing pre-existing warnings, none new).
 
 ### 8.4 Playwright + virtual-authenticator e2e
 
