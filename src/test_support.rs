@@ -68,7 +68,7 @@ impl Drop for TempDb {
     }
 }
 
-/// Boot the web layer on `127.0.0.1:0` against a fresh migrated SQLite.
+/// Boot the web layer on a random loopback port against a fresh migrated SQLite.
 pub async fn spawn_test_server() -> Result<TestServer> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
