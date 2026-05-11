@@ -5,7 +5,6 @@ use sqlx::sqlite::SqliteJournalMode;
 use sqlx::sqlite::SqliteLockingMode;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::sqlite::SqliteSynchronous;
-use std::collections::HashMap;
 use std::io;
 use std::io::Cursor;
 use std::io::Write;
@@ -15,6 +14,10 @@ use std::str::FromStr;
 use std::{env, process::Command};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+
+/// Pinned Tailwind CLI release (arm64 macOS standalone binary). Bumping this
+/// changes the cache filename, forcing a re-download.
+const TAILWIND_VERSION: &str = "v4.3.0";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -60,45 +63,33 @@ async fn main() -> Result<()> {
         .await
         .context("The build time migrations failed")?;
 
-    //Download and cache the tailwind cli for build
-    let components = HashMap::from([
-        (
-            "tailwindcli",
-            "https://github.com/tailwindlabs/tailwindcss/releases/latest/download/tailwindcss-macos-arm64",
-        ),
-        (
-            "daisyui.js",
-            "https://github.com/saadeghi/daisyui/releases/latest/download/daisyui.js",
-        ),
-        (
-            "daisyui-theme.js",
-            "https://github.com/saadeghi/daisyui/releases/latest/download/daisyui-theme.js",
-        ),
-    ]);
-
-    for (file, comp) in components {
-        let cache_path = Path::new(&out_dir).join(file);
-        if !cache_path.is_file() {
-            let response = reqwest::get(comp).await?;
-            let mut content = Cursor::new(response.bytes().await?);
-            let mut cli_file = File::create(cache_path.clone()).await?;
-            tokio::io::copy(&mut content, &mut cli_file).await?;
-            let meta = cli_file.metadata().await?;
-            let mut perms = meta.permissions();
-            perms.set_mode(0o755);
-            cli_file.set_permissions(perms).await?;
-        }
+    // Download + cache the pinned Tailwind CLI (version-keyed filename, so
+    // bumping TAILWIND_VERSION re-downloads instead of reusing a stale binary).
+    let cli_path = Path::new(&out_dir).join(format!("tailwindcli-{TAILWIND_VERSION}"));
+    if !cli_path.is_file() {
+        let url = format!(
+            "https://github.com/tailwindlabs/tailwindcss/releases/download/{TAILWIND_VERSION}/tailwindcss-macos-arm64"
+        );
+        let bytes = reqwest::get(&url)
+            .await?
+            .error_for_status()
+            .with_context(|| format!("downloading the Tailwind CLI from {url}"))?
+            .bytes()
+            .await?;
+        let mut cli_file = File::create(&cli_path).await?;
+        tokio::io::copy(&mut Cursor::new(bytes), &mut cli_file).await?;
+        let mut perms = cli_file.metadata().await?.permissions();
+        perms.set_mode(0o755);
+        cli_file.set_permissions(perms).await?;
     }
 
-    //Get the tailwindcss cli
-    let output = Command::new(Path::new(&out_dir).join("tailwindcli"))
+    // Compile styles/tailwind.css -> assets/styles/main.css (gitignored).
+    let output = Command::new(&cli_path)
         .args(["-i", "styles/tailwind.css", "-o", "assets/styles/main.css"])
         .output()?;
-
     io::stdout().write_all(&output.stdout)?;
     io::stderr().write_all(&output.stderr)?;
-
-    assert!(output.status.success());
+    assert!(output.status.success(), "tailwind css build failed");
 
     Ok(())
 }

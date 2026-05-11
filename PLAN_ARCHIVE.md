@@ -4,6 +4,20 @@ Completed phases, swept here from `PLAN.md` per the workflow rule (a phase exits
 
 ---
 
+## Phase 9 — Tidy the Tailwind build pipeline; drop DaisyUI — DONE 2026-05-10
+
+**Summary:** small prerequisite for the upcoming mobile-posting / editor facelift — a reproducible CSS build, minus the unused DaisyUI download.
+
+- **9.1 Drop DaisyUI.** `build.rs` used to download three things into `$OUT_DIR` — the Tailwind CLI plus `daisyui.js` + `daisyui-theme.js` — but `styles/tailwind.css` never `@plugin "daisyui"`'d, so DaisyUI was fetched and never used. Removed the two `daisyui*` downloads (and the `HashMap` they lived in; the import too). `package.json` had no `daisyui` devDependency; `tailwind.css` had no `@plugin "daisyui"` — nothing else to remove. Decision (2026-05-10, user): the site is styled with hand-rolled Tailwind utilities and the facelift keeps doing that.
+- **9.2 Pin the Tailwind CLI.** Was `…/releases/latest/download/tailwindcss-macos-arm64` (unpinned → non-reproducible; a Tailwind release could break the build silently). Now `const TAILWIND_VERSION = "v4.3.0"` in `build.rs`, fetched from `…/releases/download/v4.3.0/tailwindcss-macos-arm64`, cached at `$OUT_DIR/tailwindcli-v4.3.0` (version-keyed filename → bumping the const forces a re-download, no stale binary). Added `.error_for_status()` on the fetch so a bad pin fails loudly instead of writing a 404 page into the CLI file. `cargo clean -p hotchkiss-io && cargo build` confirmed: `assets/styles/main.css` regenerated, header `tailwindcss v4.3.0`, ~35 KB (comparable to before). The standalone CLI still resolves `@plugin "@tailwindcss/typography"` — unchanged.
+- **9.3 Docs.** CLAUDE.md "Build-time machinery" point 2 rewritten (pinned CLI, version-keyed cache, DaisyUI removal note); the "Tailwind/DaisyUI build pipeline" Tech-debt item removed.
+
+**Not done (deliberately):** arch/OS-awareness of the CLI download — still hardcoded `tailwindcss-macos-arm64`. Every place `build.rs` runs today is arm64 macOS (dev machines, the mini's post-receive build, `macos-latest` CI), so this is future-proofing, not a bug; revisit if a Linux/x86 build ever appears.
+
+**Validation:** `cargo test` 40 green; `cargo clippy --all-targets` clean (5 standing pre-existing warnings); deployed via `git push origin main` — the prod build (release, on the mini) still produces a styled site.
+
+---
+
 ## Phase 8 — Local / e2e test harness — DONE 2026-05-10
 
 **Summary:** the running site is now testable without the prod machinery (no `:80`/`:443` bind, no IP/DNS/ACME coordinator, no passkey hardware). All-Rust — the e2e was prototyped with Playwright (TS) but, per user preference, redone with `chromiumoxide` so there's no Node toolchain.

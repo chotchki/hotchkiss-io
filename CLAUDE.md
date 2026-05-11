@@ -23,7 +23,7 @@ Deployment is push-to-deploy: `git push origin main` pushes to a bare repo at `~
 `build.rs` does three things that surprise people:
 
 1. **Creates an ephemeral SQLite schema DB at `$OUT_DIR/schema.db`** and runs `src/db/migrations/` against it, then writes `DATABASE_URL` into `.env` and exports it to rustc. This is what lets `sqlx::query!` / `query_as!` macros type-check at compile time. **If you add a migration or change a query, you may need `cargo clean -p hotchkiss-io` (or delete the OUT_DIR `schema.db`) for sqlx macros to re-validate.**
-2. **Downloads the Tailwind CLI and DaisyUI** into `OUT_DIR` (cached; arm64 macOS binary only) and compiles `styles/tailwind.css` → `assets/styles/main.css`. The compiled CSS is gitignored.
+2. **Downloads a pinned Tailwind CLI** (`TAILWIND_VERSION` in `build.rs`, currently `v4.3.0`, arm64 macOS standalone binary) into `OUT_DIR` (cached under a version-keyed filename, so bumping the pin re-downloads) and compiles `styles/tailwind.css` → `assets/styles/main.css`. The compiled CSS is gitignored. (DaisyUI used to be downloaded here too but was never wired into `tailwind.css` — removed 2026-05; the site is styled with hand-rolled Tailwind utilities.)
 3. Re-runs only when `assets/scripts`, `templates`, or `migrations` change.
 
 `assets/` and `templates/` are bundled into the binary at compile time via `rust-embed` (`web/static_content.rs`) and `askama` respectively — there are no loose static files at runtime besides the SQLite database.
