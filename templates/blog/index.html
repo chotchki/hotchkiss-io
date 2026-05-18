@@ -7,6 +7,13 @@
 {% block content %}
 <h1 class="text-2xl font-display text-navy mb-4">Blog</h1>
 
+{% if auth_state.is_admin() %}
+<form hx-post="/pages/blog" class="mb-4 flex flex-row gap-2">
+    <input class="border border-navy px-2 grow min-w-0" name="page_name" type="text" placeholder="post slug (e.g. my-first-post)" required />
+    <button class="px-3 bg-navy border-navy rounded-sm text-div-grey" type="submit"><i class="fa-solid fa-plus"></i> New post</button>
+</form>
+{% endif %}
+
 {% if posts.is_empty() %}
 <p class="text-navy italic">No posts yet.</p>
 {% else %}
