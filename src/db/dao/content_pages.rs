@@ -220,6 +220,42 @@ impl ContentPageDao {
         Ok(content_page)
     }
 
+    pub async fn find_by_parent_newest_first(
+        executor: impl SqliteExecutor<'_>,
+        parent_page_id: Option<i64>,
+        limit: Option<i64>,
+    ) -> Result<Vec<ContentPageDao>> {
+        let limit = limit.unwrap_or(i64::MAX);
+        let content_pages: Vec<ContentPageDao> = query_as!(
+            ContentPageDao,
+            r#"
+                select
+                    page_id as "page_id!",
+                    parent_page_id,
+                    page_name,
+                    page_category,
+                    page_markdown,
+                    page_cover_attachment_id as "page_cover_attachment_id?",
+                    page_order,
+                    page_creation_date as "page_creation_date: DateTime<Utc>",
+                    page_modified_date as "page_modified_date: DateTime<Utc>",
+                    special_page
+                from
+                    content_pages
+                where
+                    parent_page_id IS ?1
+                order by page_creation_date DESC, page_id DESC
+                limit ?2
+        "#,
+            parent_page_id,
+            limit
+        )
+        .fetch_all(executor)
+        .await?;
+
+        Ok(content_pages)
+    }
+
     pub async fn find_by_path(
         executor: impl sqlx::SqliteExecutor<'_> + Clone,
         paths: &[&str],
@@ -295,6 +331,75 @@ mod tests {
 
         let found_cp = ContentPageDao::find_by_name(&pool, Some(parent_pg.page_id), "test").await?;
         assert_eq!(leaf_pg.clone(), found_cp.unwrap());
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn newest_first(pool: SqlitePool) -> Result<()> {
+        let parent =
+            ContentPageDao::create(&pool, None, "parent".to_string(), None, "".to_string(), None)
+                .await?;
+
+        let empty =
+            ContentPageDao::find_by_parent_newest_first(&pool, Some(parent.page_id), None).await?;
+        assert!(empty.is_empty());
+
+        let a = ContentPageDao::create(
+            &pool,
+            Some(parent.page_id),
+            "a".to_string(),
+            None,
+            "".to_string(),
+            None,
+        )
+        .await?;
+        let b = ContentPageDao::create(
+            &pool,
+            Some(parent.page_id),
+            "b".to_string(),
+            None,
+            "".to_string(),
+            None,
+        )
+        .await?;
+        let c = ContentPageDao::create(
+            &pool,
+            Some(parent.page_id),
+            "c".to_string(),
+            None,
+            "".to_string(),
+            None,
+        )
+        .await?;
+
+        // CURRENT_TIMESTAMP has 1s resolution; tiebreaker is page_id DESC,
+        // so insertion-order-reversed is the expected sort even when all share a timestamp.
+        let all =
+            ContentPageDao::find_by_parent_newest_first(&pool, Some(parent.page_id), None).await?;
+        assert_eq!(vec![c.clone(), b.clone(), a.clone()], all);
+
+        let two =
+            ContentPageDao::find_by_parent_newest_first(&pool, Some(parent.page_id), Some(2))
+                .await?;
+        assert_eq!(vec![c.clone(), b.clone()], two);
+
+        // posts under a different parent are not returned
+        let other_parent =
+            ContentPageDao::create(&pool, None, "other".to_string(), None, "".to_string(), None)
+                .await?;
+        ContentPageDao::create(
+            &pool,
+            Some(other_parent.page_id),
+            "z".to_string(),
+            None,
+            "".to_string(),
+            None,
+        )
+        .await?;
+        let still_three =
+            ContentPageDao::find_by_parent_newest_first(&pool, Some(parent.page_id), None).await?;
+        assert_eq!(3, still_three.len());
 
         Ok(())
     }
