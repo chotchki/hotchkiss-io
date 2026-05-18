@@ -9,7 +9,9 @@
 
 {% if auth_state.is_admin() %}
 <form hx-post="/pages/blog" class="mb-4 flex flex-row gap-2">
-    <input class="border border-navy px-2 grow min-w-0" name="page_name" type="text" placeholder="post slug (e.g. my-first-post)" required />
+    <input class="border border-navy px-2 grow min-w-0" name="page_name" type="text"
+        placeholder="post slug (e.g. my-first-post)" required
+        oninput="this.value = this.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')" />
     <button class="px-3 bg-navy border-navy rounded-sm text-div-grey" type="submit"><i class="fa-solid fa-plus"></i> New post</button>
 </form>
 {% endif %}
