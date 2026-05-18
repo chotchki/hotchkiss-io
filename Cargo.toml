@@ -106,6 +106,10 @@ mdast_util_to_markdown = "0.0.1"
 tray-wrapper = "0.4.1"
 clap = { version = "4.5.41", features = ["derive"] }
 
+#Resolves the host's LAN IP for test_support::TestServer::lan_url (used by iOS
+#Simulator e2e). Lives in regular deps because test_support is pub from the lib.
+local-ip-address = "0.6"
+
 #Need to find the homedir
 [target."cfg(target_os = \"macos\")".dependencies]
 objc2-foundation = { version = "0.3.1", features = [
@@ -116,5 +120,6 @@ objc2-foundation = { version = "0.3.1", features = [
 [dev-dependencies]
 chromiumoxide = "0.9.1"
 futures = "0.3.32"
+ios-inspect = { path = "../skylander-portal-controller/tools/ios-inspect" }
 tempfile = "3"
 tracing-test = { version = "0.2.5", features = ["no-env-filter"] }
