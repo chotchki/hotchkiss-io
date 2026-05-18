@@ -23,13 +23,12 @@ use tracing::debug;
 use url::Url;
 use webauthn_rs::{Webauthn, WebauthnBuilder};
 
-pub const HTTP_PORT: u16 = 80;
-pub const HTTPS_PORT: u16 = 443;
-
 pub struct EndpointsProviderService {
     pool: SqlitePool,
     session_store: SqliteStore,
     webauthn: Webauthn,
+    http_port: u16,
+    https_port: u16,
 }
 
 impl EndpointsProviderService {
@@ -46,6 +45,8 @@ impl EndpointsProviderService {
             pool,
             session_store,
             webauthn,
+            http_port: settings.http_port,
+            https_port: settings.https_port,
         })
     }
 
@@ -58,8 +59,8 @@ impl EndpointsProviderService {
             webauthn: self.webauthn.clone(),
         };
 
-        let http_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), HTTP_PORT);
-        let https_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), HTTPS_PORT);
+        let http_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.http_port);
+        let https_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.https_port);
 
         //let http = tokio::spawn(Self::http_server(http_addr));
         //let https = tokio::spawn(Self::https_server(https_addr, app_state, config));
@@ -72,7 +73,7 @@ impl EndpointsProviderService {
 
         let mut set = JoinSet::new();
         set.spawn(Self::https_server(https_addr, app_state, config));
-        set.spawn(Self::http_server(http_addr));
+        set.spawn(Self::http_server(http_addr, self.https_port));
 
         let session_store = self.session_store.clone();
         set.spawn(async move {
@@ -112,11 +113,11 @@ impl EndpointsProviderService {
         Ok(())
     }
 
-    async fn http_server(addr: SocketAddr) -> Result<()> {
+    async fn http_server(addr: SocketAddr, https_port: u16) -> Result<()> {
         tracing::info!("HTTP Server listening on {}", addr);
 
         let redirect = move |Host(host): Host, uri: Uri| async move {
-            match make_https(&host, uri, HTTPS_PORT) {
+            match make_https(&host, uri, https_port) {
                 Ok(uri) => {
                     debug!("Got connnection, redirecting");
                     Ok(Redirect::permanent(&uri.to_string()))

@@ -14,12 +14,14 @@ use tracing::debug;
 #[derive(Debug)]
 pub struct IpProviderService {
     client: CloudflareTrace,
+    static_ip: Option<IpAddr>,
 }
 
 impl IpProviderService {
-    pub fn create() -> Result<IpProviderService> {
+    pub fn create(static_ip: Option<IpAddr>) -> Result<IpProviderService> {
         Ok(IpProviderService {
             client: CloudflareTrace::new()?,
+            static_ip,
         })
     }
 
@@ -56,7 +58,9 @@ impl IpProviderService {
     }
 
     async fn server_ips(&self) -> Result<HashSet<IpAddr>> {
-        let current_ip = if cfg!(debug_assertions) {
+        let current_ip = if let Some(ip) = self.static_ip {
+            ip
+        } else if cfg!(debug_assertions) {
             IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
         } else {
             IpAddr::V4(self.client.public_ip().await?)

@@ -32,7 +32,7 @@ impl ServiceCoordinator {
         let dns_validator = DnsValidator::new(resolver.clone());
         let cloudflare_client = CloudflareClient::new(settings.clone(), dns_validator.clone())?;
 
-        let ip_provider_service = IpProviderService::create()?;
+        let ip_provider_service = IpProviderService::create(settings.static_ip)?;
         let dns_provider_service = DnsProviderService::create(
             settings.clone(),
             resolver.clone(),

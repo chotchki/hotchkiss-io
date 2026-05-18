@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::{
     fs,
+    net::IpAddr,
     path::{Path, PathBuf},
 };
 use tracing::info;
@@ -14,6 +15,9 @@ pub struct Settings {
     pub log_path: PathBuf,
     #[allow(dead_code)]
     pub cache_path: PathBuf,
+    pub http_port: u16,
+    pub https_port: u16,
+    pub static_ip: Option<IpAddr>,
 }
 
 #[derive(Deserialize)]
@@ -23,6 +27,9 @@ struct RawSettings {
     database_path: Option<String>,
     log_path: Option<String>,
     cache_path: Option<String>,
+    http_port: Option<u16>,
+    https_port: Option<u16>,
+    static_ip: Option<IpAddr>,
 }
 
 impl Settings {
@@ -70,6 +77,9 @@ impl Settings {
                     .join("Caches")
                     .join("io.hotchkiss.web")
             }),
+            http_port: raw.http_port.unwrap_or(80),
+            https_port: raw.https_port.unwrap_or(443),
+            static_ip: raw.static_ip,
         }
     }
 
@@ -137,6 +147,33 @@ mod test {
         assert_eq!(s.domain, "do");
         assert_eq!(s.log_path, PathBuf::from("t"));
         assert_eq!(s.cache_path, PathBuf::from("tc"));
+        assert_eq!(s.http_port, 80);
+        assert_eq!(s.https_port, 443);
+
+        Ok(())
+    }
+
+    #[test]
+    fn load_with_custom_ports() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+
+        writeln!(
+            file,
+            r#"
+            {{
+                "cloudflare_token": "ctoken",
+                "domain": "do",
+                "http_port": 8080,
+                "https_port": 8443
+            }}
+            "#
+        )?;
+
+        let args: Vec<String> = vec![" ".into(), file.path().to_string_lossy().to_string()];
+
+        let s = Settings::load(args.into_iter()).unwrap();
+        assert_eq!(s.http_port, 8080);
+        assert_eq!(s.https_port, 8443);
 
         Ok(())
     }
@@ -150,6 +187,9 @@ mod test {
             database_path: None,
             log_path: None,
             cache_path: None,
+            http_port: None,
+            https_port: None,
+            static_ip: None,
         };
 
         let s = Settings::resolve(raw, &home);
@@ -169,5 +209,31 @@ mod test {
             s.cache_path,
             PathBuf::from("/Users/test/Library/Caches/io.hotchkiss.web"),
         );
+        assert_eq!(s.http_port, 80);
+        assert_eq!(s.https_port, 443);
+        assert!(s.static_ip.is_none());
+    }
+
+    #[test]
+    fn load_with_static_ip() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+
+        writeln!(
+            file,
+            r#"
+            {{
+                "cloudflare_token": "ctoken",
+                "domain": "do",
+                "static_ip": "192.168.1.42"
+            }}
+            "#
+        )?;
+
+        let args: Vec<String> = vec![" ".into(), file.path().to_string_lossy().to_string()];
+
+        let s = Settings::load(args.into_iter()).unwrap();
+        assert_eq!(s.static_ip, Some("192.168.1.42".parse().unwrap()));
+
+        Ok(())
     }
 }
