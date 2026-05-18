@@ -15,6 +15,7 @@ pub fn static_content() -> Router {
     Router::new()
         //.route("/favicon.ico", get(static_handler))
         .route("/images/{*file}", get(static_handler))
+        .route("/manifest.webmanifest", get(static_handler))
         .route("/robots.txt", get(static_handler))
         .route("/scripts/{*file}", get(static_handler))
         .route("/styles/{*file}", get(static_handler))

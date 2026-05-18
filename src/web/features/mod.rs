@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod blog;
 pub mod login;
 pub mod pages;
 #[cfg(debug_assertions)]

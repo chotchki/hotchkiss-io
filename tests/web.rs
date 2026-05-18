@@ -91,3 +91,102 @@ async fn request_log_middleware_records_requests() {
     assert_eq!(status, 200);
     assert_eq!(ip.as_deref(), Some("127.0.0.1"));
 }
+
+#[tokio::test]
+async fn blog_index_empty_state() {
+    let server = spawn_test_server().await.expect("spawn");
+    let resp = reqwest::get(server.url("/blog")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("No posts yet"), "body was: {body}");
+}
+
+#[tokio::test]
+async fn blog_index_lists_seeded_post() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_blog_post(
+            "my-first-post",
+            "Hello, world. This is the body of my first post.",
+        )
+        .await
+        .expect("seed");
+
+    let body = reqwest::get(server.url("/blog"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("my-first-post"), "title missing: {body}");
+    assert!(
+        body.contains("Hello, world. This is the body of my first post."),
+        "excerpt missing: {body}"
+    );
+}
+
+#[tokio::test]
+async fn blog_post_200_and_404() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_blog_post("real-post", "Body text.")
+        .await
+        .expect("seed");
+
+    let resp = reqwest::get(server.url("/blog/real-post")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let resp = reqwest::get(server.url("/blog/no-such-post"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn blog_feed_serves_atom_with_entry() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_blog_post("feed-post", "Feed body content.")
+        .await
+        .expect("seed");
+
+    let resp = reqwest::get(server.url("/blog/feed.xml")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(ct.contains("atom"), "unexpected content-type: {ct}");
+
+    let body = resp.text().await.unwrap();
+    assert!(body.starts_with("<?xml"), "not xml: {body}");
+    assert!(body.contains("<feed"));
+    assert!(body.contains("feed-post"));
+    assert!(body.contains("Feed body content"));
+}
+
+#[tokio::test]
+async fn manifest_webmanifest_served() {
+    let server = spawn_test_server().await.expect("spawn");
+    let resp = reqwest::get(server.url("/manifest.webmanifest"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .map(|h| h.to_str().unwrap().to_string())
+        .unwrap_or_default();
+    // mime_guess maps .webmanifest → application/manifest+json on recent versions;
+    // either that or application/json is acceptable. octet-stream would mean a regression.
+    assert!(
+        ct.contains("manifest+json") || ct.contains("json"),
+        "unexpected content-type for manifest: {ct}"
+    );
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("\"name\""), "manifest body wrong: {body}");
+    assert!(body.contains("\"icons\""));
+}

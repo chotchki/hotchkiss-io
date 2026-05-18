@@ -27,7 +27,7 @@
     Save Edits <i class="fa-solid fa-floppy-disk"></i></button>
 </div>
 
-<form id="update-page" hx-put="./{{page.page_name}}">
+<form id="update-page" hx-put="/pages/{{page_path}}">
   <div class="m-2 flex flex-col">
     <div>
       Markdown:

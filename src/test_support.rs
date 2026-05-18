@@ -48,6 +48,23 @@ impl TestServer {
         )
         .await
     }
+
+    /// Seed a child of the `blog` special_page (seeded by migration 0010).
+    pub async fn seed_blog_post(&self, slug: &str, markdown: &str) -> Result<()> {
+        let blog = ContentPageDao::find_by_name(&self.pool, None, "blog")
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("blog special_page missing — migration 0010?"))?;
+        ContentPageDao::create(
+            &self.pool,
+            Some(blog.page_id),
+            slug.to_string(),
+            None,
+            markdown.to_string(),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 impl Drop for TestServer {

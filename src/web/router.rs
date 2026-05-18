@@ -4,6 +4,7 @@ use crate::{
     web::{
         features::{
             admin::admin_router,
+            blog::blog_router,
             pages::{
                 attachments::attachments_router, pages_router, projects::projects_router,
                 redirect_to_first_page,
@@ -48,6 +49,7 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
         .nest("/attachments", attachments_router())
         .nest("/pages", pages_router())
         .nest("/projects", projects_router())
+        .nest("/blog", blog_router())
         .nest("/admin", admin_router());
 
     // Debug-only test-login seam (absent from release builds = prod).
