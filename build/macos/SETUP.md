@@ -51,6 +51,15 @@ cp build/macos/io.hotchkiss.web.plist "$HOME/Library/LaunchAgents/"
 
 It will be `bootstrap`ed in step 6 once an `.app` exists in `/Applications`.
 
+**Beta instance (Phase 12).** A second agent, `io.hotchkiss.web.beta`
+(`build/macos/io.hotchkiss.web.beta.plist`), runs `Hotchkiss-IO-Beta.app`
+with an explicit beta config path as `argv[1]` (the prod agent relies on the
+default config location, so beta *must* point at its own config or it would
+read prod's). Prerequisites before bootstrapping it: the beta log dir
+`~/Library/Logs/io.hotchkiss.web.beta/` must exist, and a beta `config.json`
+must be in place (see Phase 12 / 12.6 for the beta config + Cloudflare token).
+Prod's label/plist are intentionally left as `io.hotchkiss.web` (not renamed).
+
 ## 5. Bare repo
 
 ```sh
@@ -89,3 +98,65 @@ rename until kickstart swaps it.
 curl -sI https://hotchkiss.io/                          # 307 → /pages/Resume
 launchctl print "gui/$(id -u)/io.hotchkiss.web" | head  # state running, pid set
 ```
+
+## 8. Beta instance (Phase 12)
+
+Beta runs the *same binary* as a second LaunchAgent on the same mini, on alternate
+ports, with its own data dir. `git push origin main` deploys beta (bleeding edge);
+prod only moves on a `v*` tag. Beta's WebAuthn `rp_id` is `hotchkiss.io` (the
+registrable parent) so your existing prod passkey authenticates against beta.
+
+1. **Directories:**
+
+   ```sh
+   mkdir -p "$HOME/Library/Application Support/io.hotchkiss.web.beta/data"
+   mkdir -p "$HOME/Library/Logs/io.hotchkiss.web.beta"
+   mkdir -p "$HOME/Library/Caches/io.hotchkiss.web.beta"
+   ```
+
+2. **Config** — copy the template and fill in the Cloudflare token (the **same
+   one prod uses** — CF can't scope a token narrower than the `hotchkiss.io` zone):
+
+   ```sh
+   cp build/macos/beta-config.sample.json \
+      "$HOME/Library/Application Support/io.hotchkiss.web.beta/config.json"
+   # then edit: cloudflare_token
+   ```
+
+   No `static_ip` — beta is public, so (like prod) it discovers the public IP
+   itself and its `DnsProviderService` keeps `beta.hotchkiss.io` pointed at it.
+   Ports `8080`/`8443` coexist with prod's `80`/`443`. Beta deploys as a
+   **release** build, so it orders a real, publicly-trusted LE-prod cert (no
+   iPhone profile needed to install the PWA).
+
+3. **LaunchAgent:**
+
+   ```sh
+   cp build/macos/io.hotchkiss.web.beta.plist "$HOME/Library/LaunchAgents/"
+   ```
+
+4. **Cloudflare (12.7) + router:** beta reuses the **prod** CF token (same
+   `hotchkiss.io`-zone DNS-edit access — CF can't scope narrower). Create a
+   `beta.hotchkiss.io` A record **grey-cloud
+   (DNS-only)** — beta's `DnsProviderService` then keeps it pointed at the
+   public IP (same as prod's `hotchkiss.io`), so beta serves its own LE cert
+   end-to-end (grey, not orange/proxied). Forward external `:8443` → the mini's
+   `:8443` on the router; prod keeps `:443`.
+
+5. **Cut over the deploy hook (12.8):** re-copy `build/macos/post-receive` into
+   `~/repos/hotchkiss-io.git/hooks/post-receive` (then `chmod +x`). After this,
+   `git push origin main` → beta and prod only deploys on a `v*` tag — so first
+   cut a bootstrap tag from current main:
+   `git tag v0.x.y && git push origin v0.x.y`.
+
+6. **Bootstrap the agent** once a `Hotchkiss-IO-Beta.app` exists in `/Applications`
+   (i.e. after the first `main` push post-cutover):
+
+   ```sh
+   launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/io.hotchkiss.web.beta.plist"
+   ```
+
+The first beta deploy orders `beta.hotchkiss.io` from LE prod once; every later
+`main` push snapshots prod's DB into beta (`post-receive` → `snapshot_prod_db_into_beta`)
+and preserves that cert, so beta never re-orders and never trips the 5/week
+duplicate-cert rate limit.

@@ -1,0 +1,10 @@
+{
+  "cloudflare_token": "REPLACE_WITH_CF_TOKEN_SAME_AS_PROD",
+  "domain": "beta.hotchkiss.io",
+  "webauthn_rp_id": "hotchkiss.io",
+  "http_port": 8080,
+  "https_port": 8443,
+  "database_path": "/Users/chotchki/Library/Application Support/io.hotchkiss.web.beta/data/database.sqlite",
+  "log_path": "/Users/chotchki/Library/Logs/io.hotchkiss.web.beta",
+  "cache_path": "/Users/chotchki/Library/Caches/io.hotchkiss.web.beta"
+}

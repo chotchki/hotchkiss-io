@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-	<string>Hotchkiss-IO</string>
+	<string>%BUNDLE_NAME%</string>
 	<key>CFBundleIdentifier</key>
-	<string>io.hotchkiss.web</string>
+	<string>%BUNDLE_ID%</string>
 	<key>CFBundleVersion</key>
 	<string>%VERSION%</string>
 	<key>CFBundlePackageType</key>

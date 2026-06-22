@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.hotchkiss.web.beta</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/Hotchkiss-IO-Beta.app/Contents/MacOS/hotchkiss-io</string>
+        <string>/Users/chotchki/Library/Application Support/io.hotchkiss.web.beta/config.json</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>WorkingDirectory</key>
+    <string>/Users/chotchki</string>
+    <key>StandardOutPath</key>
+    <string>/Users/chotchki/Library/Logs/io.hotchkiss.web.beta/launchd-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/chotchki/Library/Logs/io.hotchkiss.web.beta/launchd-stderr.log</string>
+</dict>
+</plist>

@@ -39,7 +39,10 @@ impl EndpointsProviderService {
         let origin = Url::parse(&format!("https://{}/", settings.domain))
             .context("Parsing the rp_origin")?;
 
-        let webauthn = WebauthnBuilder::new(&settings.domain, &origin)?.build()?;
+        // rp_id defaults to the served domain but can be a registrable parent
+        // (beta sets `hotchkiss.io` so prod passkeys authenticate against
+        // `beta.hotchkiss.io`). The origin stays the actual served domain.
+        let webauthn = WebauthnBuilder::new(&settings.webauthn_rp_id, &origin)?.build()?;
 
         Ok(Self {
             pool,

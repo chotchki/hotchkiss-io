@@ -2,7 +2,7 @@
 # Massive thanks to @dylanwh for the original approach
 # https://github.com/dylanwh/lilguy/blob/main/macos/build.sh
 #
-# Builds a signed Hotchkiss-IO.app for direct deployment on a self-hosted
+# Builds a signed Hotchkiss-IO[-Beta].app for direct deployment on a self-hosted
 # Mac. Ad-hoc signed (no Apple Developer ID, no notarization, no .pkg) —
 # the binary never leaves machines we control, so spctl --add on the target
 # Mac is enough.
@@ -10,6 +10,36 @@
 # Honors CARGO_TARGET_DIR so the post-receive deploy hook can persist
 # incremental build artifacts across pushes.
 set -euo pipefail
+
+# Profile selection: --profile beta|prod (default prod). Determines the app
+# bundle name + identifier so the beta and prod .apps coexist in /Applications
+# and register as distinct LaunchServices entries. The install path and
+# LaunchAgent label are the post-receive hook's concern, not build.sh's.
+PROFILE="prod"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --profile)   PROFILE="${2:-}"; shift 2 ;;
+    --profile=*) PROFILE="${1#*=}"; shift ;;
+    *) echo "build.sh: unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+case "$PROFILE" in
+  prod)
+    BUNDLE_NAME="Hotchkiss-IO"
+    BUNDLE_ID="io.hotchkiss.web"
+    APP_BASENAME="Hotchkiss-IO.app"
+    ;;
+  beta)
+    BUNDLE_NAME="Hotchkiss-IO Beta"
+    BUNDLE_ID="io.hotchkiss.web.beta"
+    APP_BASENAME="Hotchkiss-IO-Beta.app"
+    ;;
+  *)
+    echo "build.sh: --profile must be 'beta' or 'prod', got '$PROFILE'" >&2
+    exit 2
+    ;;
+esac
 
 # Resolve VERSION: env override → CI tag → git describe → dev placeholder.
 # Always strip a leading 'v' so artifact filenames stay numeric
@@ -27,7 +57,7 @@ VERSION="${VERSION#v}"
 
 EXE="hotchkiss-io"
 TARGET_DIR="${CARGO_TARGET_DIR:-target}"
-APP="$TARGET_DIR/Hotchkiss-IO.app"
+APP="$TARGET_DIR/$APP_BASENAME"
 
 rustup target add aarch64-apple-darwin
 
@@ -37,10 +67,14 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$TARGET_DIR/aarch64-apple-darwin/release/$EXE" "$APP/Contents/MacOS/$EXE"
-sed -e "s;%VERSION%;$VERSION;g" build/macos/Info.plist > "$APP/Contents/Info.plist"
+sed -e "s;%VERSION%;$VERSION;g" \
+    -e "s;%BUNDLE_NAME%;$BUNDLE_NAME;g" \
+    -e "s;%BUNDLE_ID%;$BUNDLE_ID;g" \
+    build/macos/Info.plist > "$APP/Contents/Info.plist"
 cp build/macos/HotchkissLogox1024.icns "$APP/Contents/Resources/"
 
 codesign --force --sign - --options runtime "$APP/Contents/MacOS/$EXE"
 
 ABSOLUTE_APP="$(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
 echo "BUILT_APP=$ABSOLUTE_APP"
+echo "PROFILE=$PROFILE"

@@ -1,10 +1,17 @@
 #!/bin/bash
-# Bare-repo post-receive hook: builds and atomically swaps Hotchkiss-IO.app
-# on a `git push` to refs/heads/main. Drops everything else.
+# Bare-repo post-receive hook: dispatches by the pushed ref.
 #
-# Caller (git) sets GIT_DIR to the bare repo. We extract the pushed tree
-# into a fixed work dir (wiped each run), set CARGO_TARGET_DIR so cargo
-# reuses incremental artifacts across pushes, then hand off to build.sh.
+#   refs/heads/main  -> beta  (Hotchkiss-IO-Beta.app / io.hotchkiss.web.beta)
+#                             bleeding edge, rebuilt on every main push
+#   refs/tags/v*     -> prod  (Hotchkiss-IO.app      / io.hotchkiss.web)
+#                             deliberate promotion, only a version tag ships it
+#   anything else    -> ignored
+#
+# Caller (git) sets GIT_DIR to the bare repo. For each deploying ref we extract
+# that tree into a per-profile work dir (wiped each run), set CARGO_TARGET_DIR
+# so cargo reuses incremental artifacts across pushes of the same profile, then
+# hand off to build.sh --profile. Per-profile src + target dirs mean a main push
+# and a tag push that land close together never clobber each other's build state.
 #
 # On any failure before the swap, the running app keeps serving.
 set -euo pipefail
@@ -13,45 +20,123 @@ set -euo pipefail
 # launchctl / homebrew tools live so build.sh can find them.
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-DEPLOY_REF="refs/heads/main"
 WORK_ROOT="$HOME/.cache/hotchkiss-io-build"
-SRC_DIR="$WORK_ROOT/src"
-export CARGO_TARGET_DIR="$WORK_ROOT/target"
-APP_DST="/Applications/Hotchkiss-IO.app"
-APP_PREV="/Applications/Hotchkiss-IO.app.prev"
-LAUNCH_LABEL="io.hotchkiss.web"
 
-while read -r oldsha newsha ref; do
-    if [[ "$ref" != "$DEPLOY_REF" ]]; then
-        echo "post-receive: ignoring push to $ref (only $DEPLOY_REF deploys)" >&2
-        continue
+# deploy <newsha> <profile> <app_dst> <launch_label>
+#
+# Build the pushed tree with build.sh --profile, then atomically swap the bundle
+# into /Applications and kickstart the LaunchAgent. Aborts (leaving the running
+# app untouched) on any failure before the swap.
+deploy() {
+    local newsha="$1" profile="$2" app_dst="$3" launch_label="$4"
+    local src_dir="$WORK_ROOT/$profile/src"
+    local app_prev="$app_dst.prev"
+    export CARGO_TARGET_DIR="$WORK_ROOT/$profile/target"
+
+    echo "post-receive: deploying $newsha -> $profile" >&2
+
+    rm -rf "$src_dir"
+    mkdir -p "$src_dir"
+    git archive --format=tar "$newsha" | tar -x -C "$src_dir"
+
+    cd "$src_dir"
+
+    # build.sh prints BUILT_APP=<absolute-path> on success. Declare first so the
+    # command-substitution's exit status isn't masked by `local` (set -e + the
+    # pipefail above then abort the deploy if the build fails).
+    local built
+    built=$(./build/macos/build.sh --profile "$profile" | tee /dev/stderr | awk -F= '/^BUILT_APP=/ {print $2}')
+    if [[ -z "$built" || ! -d "$built" ]]; then
+        echo "post-receive: build.sh did not produce a usable app bundle for $profile" >&2
+        exit 1
     fi
 
-    echo "post-receive: deploying $newsha" >&2
-
-    rm -rf "$SRC_DIR"
-    mkdir -p "$SRC_DIR"
-    git archive --format=tar "$newsha" | tar -x -C "$SRC_DIR"
-
-    cd "$SRC_DIR"
-
-    # build.sh prints BUILT_APP=<absolute-path> on success.
-    BUILT=$(./build/macos/build.sh | tee /dev/stderr | awk -F= '/^BUILT_APP=/ {print $2}')
-    if [[ -z "$BUILT" || ! -d "$BUILT" ]]; then
-        echo "post-receive: build.sh did not produce a usable app bundle" >&2
-        exit 1
+    # Beta boots on fresh prod data: snapshot prod's DB into beta's path
+    # (sessions reset, beta's own cert preserved) before the kickstart. (12.5)
+    if [[ "$profile" == beta ]]; then
+        snapshot_prod_db_into_beta
     fi
 
     # Atomic-ish swap: rename current out, rename new in, kickstart, drop old.
     # The mmap'd binary keeps the old process alive across the rename until
     # kickstart -k swaps it for the new one.
-    rm -rf "$APP_PREV"
-    if [[ -d "$APP_DST" ]]; then
-        mv "$APP_DST" "$APP_PREV"
+    rm -rf "$app_prev"
+    if [[ -d "$app_dst" ]]; then
+        mv "$app_dst" "$app_prev"
     fi
-    mv "$BUILT" "$APP_DST"
-    launchctl kickstart -k "gui/$(id -u)/$LAUNCH_LABEL"
-    rm -rf "$APP_PREV"
+    mv "$built" "$app_dst"
+    launchctl kickstart -k "gui/$(id -u)/$launch_label"
+    rm -rf "$app_prev"
 
-    echo "post-receive: deployed $newsha" >&2
+    echo "post-receive: deployed $newsha -> $profile" >&2
+}
+
+# snapshot_prod_db_into_beta
+#
+# Replace beta's SQLite DB with a consistent online snapshot of LIVE prod, then:
+#   - reset beta's session state (drop crypto_keys rows so beta regenerates its
+#     own signing key on boot, and the library-owned tower_sessions table) so
+#     prod's sessions don't cross to beta;
+#   - preserve beta's OWN certificate(s) so beta never re-orders
+#     beta.hotchkiss.io from LE prod (the 5/week duplicate-cert rate limit would
+#     otherwise take beta's HTTPS down after a few pushes).
+# Users/passkeys carry over intact, so chris's prod passkey authenticates on beta
+# (beta's WebAuthn rp_id is the registrable parent hotchkiss.io — see 12.1/12.6).
+#
+# Uses the SQLite online-backup API (.backup), NOT cp: prod is live and may be
+# mid-write, and .backup yields a consistent point-in-time copy without quiescing
+# prod. Needs the macOS system /usr/bin/sqlite3 (already on PATH above).
+snapshot_prod_db_into_beta() {
+    local prod_db="$HOME/Library/Application Support/io.hotchkiss.web/data/database.sqlite"
+    local beta_db="$HOME/Library/Application Support/io.hotchkiss.web.beta/data/database.sqlite"
+    local cert_dump="$WORK_ROOT/beta/beta_certs.sql"
+
+    if [[ ! -f "$prod_db" ]]; then
+        echo "post-receive: prod DB not found at $prod_db — skipping beta snapshot" >&2
+        return 0
+    fi
+
+    # 1. Capture beta's own cert rows (as INSERTs) before the overwrite. First
+    #    beta deploy has no beta DB yet -> empty dump -> beta orders its cert once
+    #    on first boot (expected); every push thereafter preserves it.
+    mkdir -p "$WORK_ROOT/beta"
+    rm -f "$cert_dump"
+    if [[ -f "$beta_db" ]]; then
+        sqlite3 "$beta_db" ".mode insert certificates" "SELECT * FROM certificates;" > "$cert_dump" 2>/dev/null || true
+    fi
+
+    # 2. Consistent online snapshot of LIVE prod into beta's path. Replacing the
+    #    file under the still-running old beta process is safe (unlink-while-open);
+    #    the kickstart below restarts beta onto the new file.
+    mkdir -p "$(dirname "$beta_db")"
+    rm -f "$beta_db" "$beta_db-wal" "$beta_db-shm"
+    sqlite3 "$prod_db" ".backup '$beta_db'"
+
+    # 3. Reset session state (beta regenerates its own signing key on boot) and
+    #    drop prod's visitor log (privacy — beta is publicly reachable).
+    sqlite3 "$beta_db" "DELETE FROM crypto_keys;"
+    sqlite3 "$beta_db" "DELETE FROM request_log;"
+    sqlite3 "$beta_db" "DELETE FROM tower_sessions;" 2>/dev/null || true
+
+    # 4. Drop prod's carried-over certs, restore beta's own (if any).
+    sqlite3 "$beta_db" "DELETE FROM certificates;"
+    if [[ -s "$cert_dump" ]]; then
+        sqlite3 "$beta_db" < "$cert_dump"
+    fi
+
+    echo "post-receive: snapshotted prod DB into beta (sessions reset, beta cert preserved)" >&2
+}
+
+while read -r oldsha newsha ref; do
+    case "$ref" in
+        refs/heads/main)
+            deploy "$newsha" beta "/Applications/Hotchkiss-IO-Beta.app" "io.hotchkiss.web.beta"
+            ;;
+        refs/tags/v*)
+            deploy "$newsha" prod "/Applications/Hotchkiss-IO.app" "io.hotchkiss.web"
+            ;;
+        *)
+            echo "post-receive: ignoring push to $ref (main -> beta, v* tag -> prod)" >&2
+            ;;
+    esac
 done

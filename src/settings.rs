@@ -11,6 +11,10 @@ use tracing::info;
 pub struct Settings {
     pub cloudflare_token: String,
     pub domain: String,
+    /// WebAuthn relying-party id. Defaults to `domain`, but can be a
+    /// registrable parent of it (beta sets `hotchkiss.io` so prod passkeys
+    /// authenticate against `beta.hotchkiss.io`).
+    pub webauthn_rp_id: String,
     pub database_path: PathBuf,
     pub log_path: PathBuf,
     #[allow(dead_code)]
@@ -24,6 +28,7 @@ pub struct Settings {
 struct RawSettings {
     cloudflare_token: String,
     domain: String,
+    webauthn_rp_id: Option<String>,
     database_path: Option<String>,
     log_path: Option<String>,
     cache_path: Option<String>,
@@ -61,9 +66,11 @@ impl Settings {
             .join("Library")
             .join("Application Support")
             .join("io.hotchkiss.web");
+        let domain = raw.domain;
         Settings {
             cloudflare_token: raw.cloudflare_token,
-            domain: raw.domain,
+            webauthn_rp_id: raw.webauthn_rp_id.unwrap_or_else(|| domain.clone()),
+            domain,
             database_path: raw
                 .database_path
                 .map(PathBuf::from)
@@ -174,6 +181,8 @@ mod test {
         let s = Settings::load(args.into_iter()).unwrap();
         assert_eq!(s.http_port, 8080);
         assert_eq!(s.https_port, 8443);
+        // rp_id defaults to the domain when omitted
+        assert_eq!(s.webauthn_rp_id, "do");
 
         Ok(())
     }
@@ -184,6 +193,7 @@ mod test {
         let raw = RawSettings {
             cloudflare_token: "ctoken".into(),
             domain: "do".into(),
+            webauthn_rp_id: None,
             database_path: None,
             log_path: None,
             cache_path: None,
@@ -195,6 +205,7 @@ mod test {
         let s = Settings::resolve(raw, &home);
         assert_eq!(s.cloudflare_token, "ctoken");
         assert_eq!(s.domain, "do");
+        assert_eq!(s.webauthn_rp_id, "do");
         assert_eq!(
             s.database_path,
             PathBuf::from(
@@ -233,6 +244,30 @@ mod test {
 
         let s = Settings::load(args.into_iter()).unwrap();
         assert_eq!(s.static_ip, Some("192.168.1.42".parse().unwrap()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn load_with_webauthn_rp_id() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+
+        writeln!(
+            file,
+            r#"
+            {{
+                "cloudflare_token": "ctoken",
+                "domain": "beta.hotchkiss.io",
+                "webauthn_rp_id": "hotchkiss.io"
+            }}
+            "#
+        )?;
+
+        let args: Vec<String> = vec![" ".into(), file.path().to_string_lossy().to_string()];
+
+        let s = Settings::load(args.into_iter()).unwrap();
+        assert_eq!(s.domain, "beta.hotchkiss.io");
+        assert_eq!(s.webauthn_rp_id, "hotchkiss.io");
 
         Ok(())
     }
