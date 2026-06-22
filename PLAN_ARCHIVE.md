@@ -118,3 +118,23 @@ Per-task detail (all `[x]`): 4.1 version determined (0.4.1, manifest edit requir
 **Validation:** 5 consecutive clean push-to-deploys (`cde6085`, `9978288`, `ed24ee3`, `d46c85d`, `8e5cfb5`) plus the 0.9.5 sweep push as a 6th. Two deliberate failure-path probes both handled gracefully: (a) the very first push hit a swap abort on the root-owned `.prev` — `set -e` stopped the hook before it touched `/Applications`, production kept serving; (b) an intentional `let _: () = ;` syntax error (commit `9174472`, reverted in `c9cee7e`) made the build fail — hook bailed pre-swap, prod PID unchanged. Also: killing the running PID confirmed `KeepAlive` respawns it past `ThrottleInterval`. `git push` exits 0 even when `post-receive` fails (standard git semantics — push status reflects the ref update, not the hook); the streamed compiler output is loud enough to notice, but if hard-fail-on-origin is ever wanted, a `pre-receive` hook would be the lever. `test_and_coverage.yml` green on the final push; `check_ip.yml` is schedule-triggered (not push) and informational.
 
 **Deferred follow-ups (live in `PLAN.md`):** Phase 3 (swap `ifconfig.me` → Cloudflare `cdn-cgi/trace`) is now unblocked. Phase 5 (retire the `cookie-rs` fork via serde remote-derive) was opened during this work. `0.4.7` (`spctl --add`) was deliberately not done — launchd execs the binary directly so Gatekeeper isn't in the path; would only be needed if some future code opens the bundle via LaunchServices.
+
+---
+
+## 2026-06-22
+
+## Phase 1 - Fix `get_recs_by_name` hardcoded `type=A` filter
+
+**Symptom:** ACME cert renewal hangs forever in `DnsValidator::ensure_not_existing` polling for a stale `_acme-challenge` TXT record that never disappears.
+
+**Root cause:** `CloudflareApi::get_recs_by_name` pinned the Cloudflare query to `type=A`. When `clean_proof` calls it for the `_acme-challenge` domain, Cloudflare returns 0 results (no A records exist there), the delete loop is a no-op, and no TXT records are ever removed. `ensure_not_existing` then polls indefinitely.
+
+- [x] 1.1 - Add a record-type parameter to `CloudflareApi::get_recs_by_name` (`rec_type: &str`) and use it in the query string.
+- [x] 1.2 - Update `clean_proof` (`cloudflare_client.rs`) to pass `"TXT"`.
+- [x] 1.3 - Update `update_dns` (`cloudflare_client.rs`) to pass `"A"` (preserves current behavior; keeps `Ipv4Addr::from_str(&rec.content)` parsing safe).
+- [x] 1.4 - `cargo build` + `cargo clippy` clean (only pre-existing warnings remain).
+- [x] 1.5 - `cargo test` passes.
+- [x] 1.6 - Manual e2e: confirm the next real ACME renewal in prod succeeds — `clean_proof` deletes any leftover `_acme-challenge` TXT records before `create_proof` recreates them. **Confirmed 2026-06-22**: cert rolled over in prod, renewal succeeded. (Phase 2 added unit coverage for the URL-construction class of bug; an automated ACME-path e2e is still a gap — tracked in Phase 6.)
+- [x] 1.7 - Docs: no CLAUDE.md changes needed (behavior fix, no architectural shift). **Confirmed 2026-06-22** — none needed.
+
+

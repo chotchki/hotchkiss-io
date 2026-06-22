@@ -3,3 +3,5 @@
 .DS_Store
 assets/styles/main.css
 .env
+.claude/plan-bridge-state.json
+.claude/plan-bridge-state.json.lock

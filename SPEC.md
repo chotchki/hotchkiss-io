@@ -3,35 +3,43 @@
 Meta Note: This project delivers the hotchkiss-io website so fundamentally this project and the site itself are intertwined.
 
 ## Goals
-- Central place for Christopher Hotchkiss aka chotchki (me) to present himself to the world, the desired content:
-  - Showcase of the projects I've done.
-  - Resume since I still like to be gainfully employeed
 
-- Why my own site? I currently have content on github and tons of unposted projects / content. I'd really like to share it but I hate that someone else ends up owning the experience.
+**This is now a personal portfolio with a clock on it.** Its job is to be the curated front door to chotchki's work, rather than a personal playground that happens to present me. Everything below is reprioritized around that reader.
 
-- Self hosted, I've run my own website for years on my own hardware and I prefer it that way!
-- Self contained, I don't want to depend on external services more than I need to, right now this is:
-  - Let's Encrypt for certs
-  - Cloudflare for Dynamic DNS — also serves public-IPv4 discovery via `1.1.1.1/cdn-cgi/trace` (was `ifconfig.me`; folded into the Cloudflare dependency we already have, 2026-05)
+- **Audience:** a technical visitor evaluating chotchki's work. The landing page orients them fast and routes them to proof.
+- **Thesis:** Much of chotchki's depth comes from work that isn't publicly visible, so it can't be shown directly. The GitHub + 3D **side projects are the tangible, clickable proof of range** that compensates: public deliverables anyone can actually verify. The site's job is to make the two reinforce each other — depth from the background, evidence from the projects. The site itself is just one of those side projects: a decent artifact, not the headline.
+- **Why my own site?** Content's scattered across GitHub and a pile of unposted projects. I want to share it without someone else owning the experience.
+- **Still true, still differentiators** (built — see PLAN_ARCHIVE): self-hosted on my own hardware; self-contained, minimal external deps — Let's Encrypt (certs) and Cloudflare (dynamic DNS + public-IPv4 discovery via `1.1.1.1/cdn-cgi/trace`).
 
-### Content/Features (current and TBD)
-- Projects should support showing the PARTICULAR project type.
-  - OpenSCAD should show models
-    - The code should be availible with an auto generated lower res stl
-    - Need a way to easily bulk load my countless prints
-  - Software should show what it does
-    - Its okay to link out to GitHub but I want to have the front door since its MY stuff
+## Portfolio — the three pillars
 
-- Mini Blog — "not super important" but the lack of one might be exactly why I never post; v1 spec below ("Mini Blog (v1)").
-- Analytics, who is scraping my site? — **v1 shipped 2026-05** (`/admin/analytics`, admin-only: request log + per-day / top-paths / top-user-agents / distinct-IP aggregates). See PLAN.md Phase 7.
-- Backups, the more content that's added the more intrinsic value it has
-- Would like to add features that are restricted to the family/approved people
-  - I run various services that are non public
+Each pillar is a PLAN phase (14–16), fronted by a landing page (Phase 13). The hard problem is called out per pillar because none of these is "build a page" — the hard part is curation and capture, not code. The pillars are not independent: the résumé carries the *weight* (the depth of the background) but lacks public evidence; the side projects carry the *evidence* but not the weight. The win condition is each covering the other's gap.
+
+### Pillar 1 — Software / GitHub  → Phase 14
+- A curated `/projects` front door to 3–5 *lead* projects. Each gets its own page: what it does, why it's interesting, the problem and my role, media (screenshot/demo), link out to GitHub. Linking out is fine — I just want the front door to be mine.
+- **Role in the pitch:** these side projects are the *verifiable* half of the story — public, clickable deliverables that prove range the less-visible background work can't show. Curate for **breadth and clickability**, not just polish.
+- **This site** is one entry here, *not* the lead — it surfaces engineering that's currently invisible (self-hosted Rust binary; self-managed DNS/ACME; passkeys over HTMX; push-to-deploy; macOS tray app).
+- **Hard problem — curation, not code:** which 3–5 lead, in what order, and the one-sentence hook for each. Hand-curate the lead set; defer any GitHub-API auto-listing.
+
+### Pillar 2 — 3D printing / OpenSCAD  → Phase 15
+- A gallery of hand-picked prints/models: model viewer (the STL viewer already exists), photos, description, downloadable STL + OpenSCAD source, ideally an auto-generated lower-res STL.
+- **Role in the pitch:** tangible range in a different medium — physical things I designed and made. Hardware/CAD breadth most software portfolios don't have.
+- **Hard problem — ingestion:** countless prints, no easy bulk-load. **Don't let that block shipping 5 great ones by hand.** The bulk loader is deferred (backlog / earn-it — build it only if hand-loading the lead set proves too slow).
+
+### Pillar 3 — Resume / background capture  → Phase 16
+- A clean, current `/resume` page + a one-click downloadable PDF. Table stakes.
+- **Hard problem — making less-visible work *credible*, not just recording it:** the work can't be clicked into and verified the way the side projects can. The capture (a writing problem, best as a drafting partnership) has to extract scope, scale, impact, and decisions — and find what can be **written up in a public-safe form**. The narrative leans on the side projects as the tangible proof of range. Host the result — do **not** build a resume CMS. Decide public vs gated, and what to lead with.
+
+### Supporting content (lower priority)
+- **Mini Blog** — v1 shipped (Phase 10); proof-of-life. No editor facelift now (slice (b) parked) unless cadence demands it.
+- **Analytics** — v1 shipped 2026-05 (`/admin/analytics`, admin-only). See PLAN_ARCHIVE Phase 7.
+- **Backups** — more content → more worth protecting. (Backlog.)
+- **Family / approved-people-only features** — I run non-public services; gated content is a later want. (Backlog.)
 
 ## Current site's pain
 - ~~deployment is fragile, unsure if I should finally move to docker~~ — **solved 2026-05**: `git push origin main` → post-receive hook on the mini builds, atomic-swaps the `.app`, restarts the LaunchAgent. No docker, no copying stuff around. (See PLAN.md Phase 0.)
-- What should be the landing page? that's always hard
-- No mini blog
+- ~~What should be the landing page? that's always hard~~ — **answered 2026-06**: with the audience pinned to a technical visitor, the landing page is identity + a one-line value prop + three pillar doors (Software / 3D / Resume). See Phase 13.
+- ~~No mini blog~~ — **solved 2026-05**: `/blog` shipped (Phase 10).
 - Mobile posting is too hard, I am very open to enabling a PWA version to enable easier posting
   - easier == I can add an annoucement, attach a couple photos from a phone with a nice interface
 - too experimental? I'm mixed on this because this site is also a source of experiments for me
