@@ -2797,6 +2797,7 @@ dependencies = [
 [[package]]
 name = "ios-inspect"
 version = "0.0.1"
+source = "git+https://github.com/chotchki/ios-inspect?branch=main#9d524ad1d5806490c1bf9f299ed4836928ba2e37"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
