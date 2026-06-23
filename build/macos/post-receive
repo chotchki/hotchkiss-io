@@ -65,7 +65,16 @@ deploy() {
         mv "$app_dst" "$app_prev"
     fi
     mv "$built" "$app_dst"
-    launchctl kickstart -k "gui/$(id -u)/$launch_label"
+    # kickstart restarts a LOADED agent; if it isn't bootstrapped yet (first
+    # deploy of a profile, or after a maintenance unload) it exits non-zero —
+    # bootstrap instead of letting `set -e` abort with the bundle already swapped
+    # in (which would misreport a good deploy as a failed push). A genuine restart
+    # failure of an already-loaded agent still fails (bootstrap of a loaded
+    # service errors), so real problems aren't swallowed.
+    if ! launchctl kickstart -k "gui/$(id -u)/$launch_label"; then
+        echo "post-receive: $launch_label not loaded; bootstrapping" >&2
+        launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/$launch_label.plist"
+    fi
     rm -rf "$app_prev"
 
     echo "post-receive: deployed $newsha -> $profile" >&2
@@ -77,9 +86,11 @@ deploy() {
 #   - reset beta's session state (drop crypto_keys rows so beta regenerates its
 #     own signing key on boot, and the library-owned tower_sessions table) so
 #     prod's sessions don't cross to beta;
-#   - preserve beta's OWN certificate(s) so beta never re-orders
-#     beta.hotchkiss.io from LE prod (the 5/week duplicate-cert rate limit would
-#     otherwise take beta's HTTPS down after a few pushes).
+#   - drop prod's visitor log (request_log) and prod's Let's Encrypt ACME account
+#     key (instant_acme_domains) — neither belongs on a public beta;
+#   - preserve beta's OWN cert + ACME account (captured before the overwrite,
+#     restored after) so beta never re-orders beta.hotchkiss.io from LE prod (the
+#     5/week duplicate-cert limit) nor re-mints its ACME account on every push.
 # Users/passkeys carry over intact, so chris's prod passkey authenticates on beta
 # (beta's WebAuthn rp_id is the registrable parent hotchkiss.io — see 12.1/12.6).
 #
@@ -89,7 +100,9 @@ deploy() {
 snapshot_prod_db_into_beta() {
     local prod_db="$HOME/Library/Application Support/io.hotchkiss.web/data/database.sqlite"
     local beta_db="$HOME/Library/Application Support/io.hotchkiss.web.beta/data/database.sqlite"
+    local beta_domain="beta.hotchkiss.io"
     local cert_dump="$WORK_ROOT/beta/beta_certs.sql"
+    local acme_dump="$WORK_ROOT/beta/beta_acme.sql"
 
     if [[ ! -f "$prod_db" ]]; then
         echo "post-receive: prod DB not found at $prod_db — skipping beta snapshot" >&2
@@ -100,9 +113,10 @@ snapshot_prod_db_into_beta() {
     #    beta deploy has no beta DB yet -> empty dump -> beta orders its cert once
     #    on first boot (expected); every push thereafter preserves it.
     mkdir -p "$WORK_ROOT/beta"
-    rm -f "$cert_dump"
+    rm -f "$cert_dump" "$acme_dump"
     if [[ -f "$beta_db" ]]; then
-        sqlite3 "$beta_db" ".mode insert certificates" "SELECT * FROM certificates;" > "$cert_dump" 2>/dev/null || true
+        sqlite3 "$beta_db" ".mode insert certificates" "SELECT * FROM certificates WHERE domain = '$beta_domain';" > "$cert_dump" 2>/dev/null || true
+        sqlite3 "$beta_db" ".mode insert instant_acme_domains" "SELECT * FROM instant_acme_domains WHERE domain = '$beta_domain';" > "$acme_dump" 2>/dev/null || true
     fi
 
     # 2. Consistent online snapshot of LIVE prod into beta's path. Replacing the
@@ -112,31 +126,43 @@ snapshot_prod_db_into_beta() {
     rm -f "$beta_db" "$beta_db-wal" "$beta_db-shm"
     sqlite3 "$prod_db" ".backup '$beta_db'"
 
-    # 3. Reset session state (beta regenerates its own signing key on boot) and
-    #    drop prod's visitor log (privacy — beta is publicly reachable).
+    # 3. Scrub prod secrets/state that must not live on the public beta: session
+    #    key (beta regenerates its own), visitor log (privacy), prod's LE ACME
+    #    account key, and sessions.
     sqlite3 "$beta_db" "DELETE FROM crypto_keys;"
     sqlite3 "$beta_db" "DELETE FROM request_log;"
+    sqlite3 "$beta_db" "DELETE FROM instant_acme_domains;"
     sqlite3 "$beta_db" "DELETE FROM tower_sessions;" 2>/dev/null || true
 
-    # 4. Drop prod's carried-over certs, restore beta's own (if any).
+    # 4. Drop prod's carried-over cert, restore beta's own cert + ACME account.
     sqlite3 "$beta_db" "DELETE FROM certificates;"
     if [[ -s "$cert_dump" ]]; then
         sqlite3 "$beta_db" < "$cert_dump"
     fi
+    if [[ -s "$acme_dump" ]]; then
+        sqlite3 "$beta_db" < "$acme_dump"
+    fi
 
-    echo "post-receive: snapshotted prod DB into beta (sessions reset, beta cert preserved)" >&2
+    echo "post-receive: snapshotted prod DB into beta (sessions reset; beta cert + ACME account preserved; prod LE key scrubbed)" >&2
 }
 
+failed=0
 while read -r oldsha newsha ref; do
     case "$ref" in
         refs/heads/main)
-            deploy "$newsha" beta "/Applications/Hotchkiss-IO-Beta.app" "io.hotchkiss.web.beta"
+            # Subshell-isolate each ref (a single push can carry main AND a v*
+            # tag) so one ref's failure can't abort the others; </dev/null keeps
+            # the build from consuming the loop's ref list on stdin.
+            ( deploy "$newsha" beta "/Applications/Hotchkiss-IO-Beta.app" "io.hotchkiss.web.beta" ) </dev/null \
+                || { echo "post-receive: beta deploy of $newsha FAILED" >&2; failed=1; }
             ;;
         refs/tags/v*)
-            deploy "$newsha" prod "/Applications/Hotchkiss-IO.app" "io.hotchkiss.web"
+            ( deploy "$newsha" prod "/Applications/Hotchkiss-IO.app" "io.hotchkiss.web" ) </dev/null \
+                || { echo "post-receive: prod deploy of $newsha FAILED" >&2; failed=1; }
             ;;
         *)
             echo "post-receive: ignoring push to $ref (main -> beta, v* tag -> prod)" >&2
             ;;
     esac
 done
+exit "$failed"

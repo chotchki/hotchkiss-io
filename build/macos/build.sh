@@ -18,7 +18,9 @@ set -euo pipefail
 PROFILE="prod"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --profile)   PROFILE="${2:-}"; shift 2 ;;
+    --profile)
+      [[ $# -ge 2 ]] || { echo "build.sh: --profile requires a value ('beta' or 'prod')" >&2; exit 2; }
+      PROFILE="$2"; shift 2 ;;
     --profile=*) PROFILE="${1#*=}"; shift ;;
     *) echo "build.sh: unknown argument: $1" >&2; exit 2 ;;
   esac
