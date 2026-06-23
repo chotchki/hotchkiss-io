@@ -36,12 +36,19 @@ impl EndpointsProviderService {
         let session_store = SqliteStore::new(pool.clone());
         session_store.migrate().await?;
 
-        let origin = Url::parse(&format!("https://{}/", settings.domain))
-            .context("Parsing the rp_origin")?;
+        // The rp_origin must match the browser's origin exactly, *including* a
+        // non-default port: prod serves :443 (port omitted), but beta serves
+        // :8443, and without the port WebAuthn rejects every ceremony with
+        // "relying party origin does not match our servers information".
+        let origin_str = if settings.https_port == 443 {
+            format!("https://{}/", settings.domain)
+        } else {
+            format!("https://{}:{}/", settings.domain, settings.https_port)
+        };
+        let origin = Url::parse(&origin_str).context("Parsing the rp_origin")?;
 
         // rp_id defaults to the served domain but can be a registrable parent
-        // (beta sets `hotchkiss.io` so prod passkeys authenticate against
-        // `beta.hotchkiss.io`). The origin stays the actual served domain.
+        // (beta sets `hotchkiss.io` so prod passkeys authenticate against beta).
         let webauthn = WebauthnBuilder::new(&settings.webauthn_rp_id, &origin)?.build()?;
 
         Ok(Self {
