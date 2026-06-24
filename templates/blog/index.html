@@ -5,6 +5,7 @@
 {% block head %}{% endblock %}
 
 {% block content %}
+<div class="max-w-5xl mx-auto">
 <h1 class="text-2xl font-display text-navy mb-4">Blog</h1>
 
 {% if auth_state.is_admin() %}
@@ -24,12 +25,12 @@
     <li class="border-2 border-navy rounded-md overflow-hidden bg-body-grey">
         <a href="/blog/{{post.page_name}}" class="block hover:opacity-90">
             {% if let Some(cover_id) = post.page_cover_attachment_id %}
-            <div class="aspect-video bg-navy">
+            <div class="h-40 bg-navy">
                 <img src="/attachments/id/{{cover_id}}" alt="" class="w-full h-full object-cover" />
             </div>
             {% else %}
-            <div class="aspect-video bg-navy flex items-center justify-center">
-                <i class="text-6xl text-yellow fa-solid fa-pen-nib"></i>
+            <div class="h-40 bg-navy flex items-center justify-center">
+                <i class="text-5xl text-yellow fa-solid fa-pen-nib"></i>
             </div>
             {% endif %}
             <div class="p-4">
@@ -44,4 +45,5 @@
     {% endfor %}
 </ul>
 {% endif %}
+</div>
 {% endblock %}

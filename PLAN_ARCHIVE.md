@@ -162,3 +162,19 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] 12.11 - Retire Phase 11.3, 11.8, 11.9 (content absorbed into 12.6, 12.7, 12.9, 12.10). Update PLAN.md. (Phase 11 folded 2026-06-22; this box stays as the marker that the absorbed content actually lands in 12.6/12.9/12.10.)
 
 
+---
+
+## 2026-06-24
+
+## Phase A - Diagram rendering (D2, source-in-HTML + HTMX swap)
+- [x] A.0 - Phase exit: pages+blog embed ```d2; served HTML carries source (LLM/no-JS), HTMX swaps in the D2-rendered SVG; degrades gracefully; mobile
+- [x] A.1 - Decide rendering point (RESOLVED: request-time from inline markdown fence)
+- [x] A.2 - Diagram backend: D2 via brew-installed binary (shell out)
+- [x] A.3 - Transformer: fenced d2 -> source placeholder + HTMX swap target
+- [x] A.4 - Cache compiled SVG by source hash
+- [x] A.5 - Broken d2 source fails visibly, never a 500
+- [x] A.6 - Mobile: SVG scales within the column at 390px
+- [x] A.7 - e2e + CLAUDE.md/SPEC update
+- [x] A.8 - HTMX swap-by-hash delivery: source in HTML + GET /diagram/{hash}
+- [x] A.9 - Diagram sizing: max-height cap + click-to-zoom lightbox
+
