@@ -139,3 +139,4 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] A.6 - Mobile: SVG scales within the column at 390px
 - [x] A.7 - e2e + CLAUDE.md/SPEC update
 - [x] A.8 - HTMX swap-by-hash delivery: source in HTML + GET /diagram/{hash}
+- [x] A.9 - Diagram sizing: max-height cap + click-to-zoom lightbox

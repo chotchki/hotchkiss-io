@@ -106,6 +106,7 @@ The served page carries the **d2 source**, not an opaque image — friendlier to
 The id is a **content hash of the source bytes only** (SHA-256, 128-bit hex) — content-addressed. Two different diagrams can't collide; two identical ones dedupe harmlessly. Nothing page- or position-specific goes into the hash.
 
 ### Behavior
-- The swapped SVG is embedded as a base64 `data:` URI `<img class="max-w-full h-auto">` — isolated (no id/font collisions across diagrams) + responsive on a 390px phone.
+- The swapped SVG is embedded as a base64 `data:` URI `<img>` — isolated (no id/font collisions across diagrams).
+- **Sizing:** the natural SVG size is injected so the `<img>` has intrinsic dimensions, then `max-width:100%` + a `max-height` cap keep it from dominating the page (responsive on a 390px phone). The full diagram is reachable via **click-to-zoom**: a zero-dependency pan/zoom lightbox (`assets/scripts/diagram-zoom.js`, pattern borrowed from recon-gen's `qs-lightbox`), bound by event delegation so it catches HTMX-swapped-in diagrams.
 - Render output cached in-memory by hash (rebuilt after a restart; mirrors the on-the-fly AVIF precedent).
 - A bad source or a stale/unknown hash returns a visible error block at HTTP 200 (so HTMX still swaps), never a 500 — surface the failure, don't swallow it.

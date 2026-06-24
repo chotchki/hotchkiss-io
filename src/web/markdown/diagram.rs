@@ -182,11 +182,42 @@ fn render_d2(source: &str) -> Result<String> {
 /// Embed the SVG as a base64 `data:` URI inside a responsive `<img>` — isolated,
 /// so its ids / fonts can't collide with the page or sibling diagrams. This is
 /// the HTMX swap response, so it never touches the markdown round-trip.
+/// In-flow diagrams are capped to a reasonable height so a tall diagram doesn't
+/// dominate the page; click-to-zoom (`diagram-zoom.js`) shows the full thing.
+const MAX_DIAGRAM_HEIGHT_PX: u32 = 480;
+
 fn wrap_svg(svg: &str) -> String {
-    let b64 = BASE64.encode(svg.as_bytes());
+    // Give the SVG a definite intrinsic size. d2's outer <svg> has only a
+    // viewBox, so an <img> can't size it and stretches it huge; with the size
+    // injected, max-width:100% + max-height:<cap> scale it down proportionally.
+    let sized = match natural_size(svg) {
+        Some((w, h)) => with_intrinsic_size(svg, w, h),
+        None => svg.to_string(),
+    };
+    let b64 = BASE64.encode(sized.as_bytes());
+    // `data-zoomable` + tabindex/role are the click-to-zoom hook (diagram-zoom.js).
     format!(
-        "<div class=\"diagram my-4\"><img class=\"max-w-full h-auto\" alt=\"diagram\" src=\"data:image/svg+xml;base64,{b64}\" /></div>"
+        "<div class=\"diagram my-4\"><img class=\"mx-auto block cursor-zoom-in\" \
+style=\"max-width:100%;max-height:{MAX_DIAGRAM_HEIGHT_PX}px\" alt=\"diagram\" \
+data-zoomable=\"true\" tabindex=\"0\" role=\"button\" aria-label=\"Zoom diagram\" \
+src=\"data:image/svg+xml;base64,{b64}\" /></div>"
     )
+}
+
+/// Natural (width, height) in px from the SVG's first `viewBox`
+/// ("minx miny width height").
+fn natural_size(svg: &str) -> Option<(u32, u32)> {
+    let start = svg.find("viewBox=\"")? + "viewBox=\"".len();
+    let end = svg[start..].find('"')? + start;
+    let mut nums = svg[start..end].split_whitespace().skip(2);
+    let w = nums.next()?.parse::<f64>().ok()?;
+    let h = nums.next()?.parse::<f64>().ok()?;
+    Some((w.ceil() as u32, h.ceil() as u32))
+}
+
+/// Inject `width`/`height` into the (first) `<svg>` so an `<img>` can size it.
+fn with_intrinsic_size(svg: &str, w: u32, h: u32) -> String {
+    svg.replacen("<svg", &format!("<svg width=\"{w}\" height=\"{h}\""), 1)
 }
 
 /// A visible, non-fatal error block for a broken/missing diagram. Surfaces the
@@ -239,11 +270,22 @@ mod tests {
     }
 
     #[test]
+    fn natural_size_from_viewbox() {
+        assert_eq!(
+            natural_size(r#"<svg viewBox="0 0 256 600"><g></g></svg>"#),
+            Some((256, 600))
+        );
+        assert_eq!(natural_size("<svg></svg>"), None);
+    }
+
+    #[test]
     fn registered_d2_renders_or_errors_visibly() {
         let hash = register("x -> y -> z");
         let out = render_registered(&hash).expect("registered hash should resolve");
         if available() {
             assert!(out.contains("data:image/svg+xml;base64,"), "expected the diagram image: {out}");
+            assert!(out.contains("max-height:"), "in-flow diagram must cap its height: {out}");
+            assert!(out.contains("data-zoomable=\"true\""), "click-to-zoom hook missing: {out}");
         } else {
             assert!(out.contains("diagram-error"), "expected a visible error block: {out}");
         }
