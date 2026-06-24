@@ -15,7 +15,8 @@ jobs:
           rustup update && \
           rustup target add aarch64-apple-darwin && \
           cargo install grcov && \
-          rustup component add llvm-tools
+          rustup component add llvm-tools && \
+          brew install d2
       - name: Check out code
         uses: actions/checkout@v4
       - name: Cache Dependencies

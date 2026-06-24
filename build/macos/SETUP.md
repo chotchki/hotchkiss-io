@@ -13,7 +13,10 @@ xcode-select --install                 # full Xcode not required
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 rustup target add aarch64-apple-darwin
+brew install d2                        # inline diagram rendering (CLAUDE.md "Content model")
 ```
+
+The app shells out to `d2` at runtime to render ` ```d2 ` diagram fences. Without it, diagrams degrade to a visible error block (the rest of the page is fine). The runtime resolves it via `$D2_BIN` → `/opt/homebrew/bin/d2` → `/usr/local/bin/d2` → PATH, so the LaunchAgent's minimal PATH isn't a problem.
 
 ## 2. Standard directory layout
 

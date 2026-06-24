@@ -190,3 +190,131 @@ async fn manifest_webmanifest_served() {
     assert!(body.contains("\"name\""), "manifest body wrong: {body}");
     assert!(body.contains("\"icons\""));
 }
+
+/// Mirrors the runtime d2 resolver enough to gate the happy-path assertions on a
+/// box without d2 (the server itself uses the resolver in `web::markdown::diagram`).
+fn d2_present() -> bool {
+    std::path::Path::new("/opt/homebrew/bin/d2").is_file()
+        || std::path::Path::new("/usr/local/bin/d2").is_file()
+        || std::process::Command::new("d2")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+}
+
+/// Pull the diagram hash out of an `hx-get="/diagram/<hash>"` in a page body.
+fn hash_from_body(body: &str) -> Option<String> {
+    body.split("/diagram/")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .map(|s| s.to_string())
+}
+
+#[tokio::test]
+async fn d2_fence_emits_source_and_swap_target() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("diagram-page", "# Title\n\n```d2\nx -> y -> z\n```\n")
+        .await
+        .expect("seed");
+
+    let body = reqwest::get(server.url("/pages/diagram-page"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    // The SERVED HTML carries the source (LLM/no-JS friendly) + the swap target.
+    assert!(body.contains("hx-get=\"/diagram/"), "expected the HTMX swap target");
+    assert!(
+        body.contains("x -&gt; y"),
+        "the d2 source should be in the served HTML: {body}"
+    );
+}
+
+#[tokio::test]
+async fn d2_fence_emits_swap_target_on_a_blog_post() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_blog_post("diagram-post", "```d2\nx -> y\n```\n")
+        .await
+        .expect("seed");
+
+    let body = reqwest::get(server.url("/blog/diagram-post"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("hx-get=\"/diagram/"));
+}
+
+#[tokio::test]
+async fn diagram_endpoint_renders_registered_source() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("diagram-page2", "```d2\nx -> y\n```\n")
+        .await
+        .expect("seed");
+
+    // Render the page first so the source registers, then follow the swap.
+    let body = reqwest::get(server.url("/pages/diagram-page2"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let hash = hash_from_body(&body).expect("page should carry a diagram hash");
+
+    let resp = reqwest::get(server.url(&format!("/diagram/{hash}")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    if d2_present() {
+        assert!(
+            resp.text().await.unwrap().contains("data:image/svg+xml"),
+            "the endpoint should return the rendered diagram"
+        );
+    }
+}
+
+#[tokio::test]
+async fn diagram_endpoint_unknown_hash_is_error_block_not_500() {
+    let server = spawn_test_server().await.expect("spawn");
+    let resp = reqwest::get(server.url("/diagram/deadbeefdeadbeefdeadbeefdeadbeef"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "unknown hash must not 500");
+    assert!(resp.text().await.unwrap().contains("diagram-error"));
+}
+
+#[tokio::test]
+async fn broken_d2_endpoint_is_error_block() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("broken-diagram", "```d2\nx -> -> -> {{{\n```\n")
+        .await
+        .expect("seed");
+
+    let body = reqwest::get(server.url("/pages/broken-diagram"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let hash = hash_from_body(&body).expect("page should carry a diagram hash");
+
+    let resp = reqwest::get(server.url(&format!("/diagram/{hash}")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "a broken diagram must not 500");
+    if d2_present() {
+        assert!(
+            resp.text().await.unwrap().contains("diagram-error"),
+            "the failure should be visible, not swallowed"
+        );
+    }
+}

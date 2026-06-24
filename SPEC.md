@@ -4,7 +4,7 @@ Meta Note: This project delivers the hotchkiss-io website so fundamentally this 
 
 ## Goals
 
-**This is now a personal portfolio with a clock on it.** Its job is to be the curated front door to chotchki's work, rather than a personal playground that happens to present me. Everything below is reprioritized around that reader.
+**This is a personal portfolio site.** Its job is to be the curated front door to chotchki's work, rather than a personal playground that happens to present me. Everything below is reprioritized around that reader.
 
 - **Audience:** a technical visitor evaluating chotchki's work. The landing page orients them fast and routes them to proof.
 - **Thesis:** Much of chotchki's depth comes from work that isn't publicly visible, so it can't be shown directly. The GitHub + 3D **side projects are the tangible, clickable proof of range** that compensates: public deliverables anyone can actually verify. The site's job is to make the two reinforce each other — depth from the background, evidence from the projects. The site itself is just one of those side projects: a decent artifact, not the headline.
@@ -88,3 +88,24 @@ Each pillar is a PLAN phase (14–16), fronted by a landing page (Phase 13). The
 - Drafts / scheduled posts — revisit if cadence demands.
 - Tags / categories beyond the existing (unused) `page_category` — punt until a real need shows up.
 - Heavier PWA (service worker, offline compose, queued attachment upload, push, install prompts) — likely revisited as part of slice (b). The editor is the probable forcing function, not connectivity: a mobile compose flow that wants background save / queued uploads / native-feeling install is what pushes past a static manifest.
+
+## Diagrams (Phase A)
+
+Diagrams are first-class content: they carry relations faster + denser than prose. Authored INLINE in page markdown as a fenced ` ```d2 ` block — the source stays in the markdown (diffable, LLM-parsable, edited from the same editor).
+
+### Renderer: D2 (`brew install d2`)
+D2 over Graphviz DOT — chris compared both and D2's output is clearly nicer, which matters for a portfolio showcase. A pure-Rust DOT crate (`layout-rs`) was built + working first, but D2 won on looks; chris is fine owning the `d2` install on dev + mini + CI. d2 is shelled out to (`d2 - -`, stdin→stdout), resolved via `$D2_BIN` → `/opt/homebrew/bin` → `/usr/local/bin` → PATH (the mini's LaunchAgent PATH excludes homebrew). Not self-contained, but the app already needs the network to boot, and diagrams **degrade gracefully** to a visible error block if d2 is absent.
+
+### Delivery: source-in-HTML + HTMX swap (more LLM-friendly than baking)
+The served page carries the **d2 source**, not an opaque image — friendlier to LLMs / crawlers / no-JS readers, and pure progressive enhancement.
+- At page-render the fence becomes a one-line placeholder: the source in a `<pre>` + `hx-get="/diagram/<hash>" hx-trigger="load" hx-swap="outerHTML"`. (One line + source newlines as `&#10;` so it survives the markdown AST round-trip.)
+- On load HTMX GETs `/diagram/{hash}`; the server renders the SVG and returns it for the swap. No JS → the reader just sees the source.
+- The endpoint renders **only sources the server itself emitted** (registered by hash at page-render), so it is NOT an open "compile arbitrary d2" surface (no DoS/abuse). Uses the HTMX already shipped site-wide.
+
+### Hashing (a page may have many diagrams)
+The id is a **content hash of the source bytes only** (SHA-256, 128-bit hex) — content-addressed. Two different diagrams can't collide; two identical ones dedupe harmlessly. Nothing page- or position-specific goes into the hash.
+
+### Behavior
+- The swapped SVG is embedded as a base64 `data:` URI `<img class="max-w-full h-auto">` — isolated (no id/font collisions across diagrams) + responsive on a 390px phone.
+- Render output cached in-memory by hash (rebuilt after a restart; mirrors the on-the-fly AVIF precedent).
+- A bad source or a stale/unknown hash returns a visible error block at HTTP 200 (so HTMX still swaps), never a 500 — surface the failure, don't swallow it.

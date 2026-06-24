@@ -129,3 +129,13 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
     - `post_page_path` / `post_top_level_page_path` reject non-URI-safe `page_name` (spaces, etc) with a 400 — but htmx swallows non-2xx responses, so submissions silently no-op. The blog "+ New post" form now slugifies on input as a local fix, but the top-nav admin "Create New Page" form and the editor's child-create form (`templates/pages/get_page.html`) still have the silent-fail. Whole-site fix: either slugify server-side in the handlers (any `page_name` → lowercase/hyphenated), or apply the same client-side slugify everywhere, or render an inline error message on 400.
     - Page minimum width exceeds an iPhone portrait viewport (~390px) — `templates/base.html` has the jumbotron as `flex flex-row` (image `size-40` = 160px + name/tagline text alongside) which never wraps, and the un-wrapped nav `<ul>` from the first finding contributes too. User has to rotate to landscape. Likely fix: jumbotron becomes `flex-col sm:flex-row` (or similar) so it stacks on narrow screens; nav fix from finding #1 helps here too.
     - On the phone, can't reach the editor — user reports "not logged in to the website to edit." Need to confirm symptom precisely (no editor chrome / 403 / redirect to login / save fails / something else) and whether (a) PWA cookie scope is separate from Safari, (b) session expired silently (1-day inactivity), or (c) the login passkey ceremony itself doesn't complete on iOS in some path.
+## Phase A - Diagram rendering (D2, source-in-HTML + HTMX swap)
+- [ ] A.0 - Phase exit: pages+blog embed ```d2; served HTML carries source (LLM/no-JS), HTMX swaps in the D2-rendered SVG; degrades gracefully; mobile
+- [x] A.1 - Decide rendering point (RESOLVED: request-time from inline markdown fence)
+- [x] A.2 - Diagram backend: D2 via brew-installed binary (shell out)
+- [x] A.3 - Transformer: fenced d2 -> source placeholder + HTMX swap target
+- [x] A.4 - Cache compiled SVG by source hash
+- [x] A.5 - Broken d2 source fails visibly, never a 500
+- [x] A.6 - Mobile: SVG scales within the column at 390px
+- [x] A.7 - e2e + CLAUDE.md/SPEC update
+- [x] A.8 - HTMX swap-by-hash delivery: source in HTML + GET /diagram/{hash}

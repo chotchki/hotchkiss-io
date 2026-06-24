@@ -101,6 +101,10 @@ openssl = { version = "0.10", features = ["vendored"] }
 #Editor work
 markdown = "1.0.0-alpha.22"
 mdast_util_to_markdown = "0.0.1"
+#Inline diagrams: D2 source (fenced ```d2) compiled to SVG at request time by
+#shelling to a brew-installed `d2` binary; the SVG is embedded as a base64
+#data-URI <img> so it survives the markdown round-trip + renders isolated.
+base64 = "0.22"
 
 #Add macos tray icon to anchor running
 tray-wrapper = "0.4.1"

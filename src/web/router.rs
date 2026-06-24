@@ -50,7 +50,13 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
         .nest("/pages", pages_router())
         .nest("/projects", projects_router())
         .nest("/blog", blog_router())
-        .nest("/admin", admin_router());
+        .nest("/admin", admin_router())
+        // HTMX swap target for inline diagrams (public; renders only
+        // server-registered sources — see web/features/diagram.rs).
+        .route(
+            "/diagram/{hash}",
+            get(crate::web::features::diagram::render_registered_diagram),
+        );
 
     // Debug-only test-login seam (absent from release builds = prod).
     #[cfg(debug_assertions)]
