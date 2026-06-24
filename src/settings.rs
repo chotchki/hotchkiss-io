@@ -19,6 +19,9 @@ pub struct Settings {
     pub log_path: PathBuf,
     #[allow(dead_code)]
     pub cache_path: PathBuf,
+    /// Directory the daily SQLite snapshots (`database-YYYY-MM-DD.sqlite`) are
+    /// written to. Defaults under Application Support; created if missing.
+    pub backup_path: PathBuf,
     pub http_port: u16,
     pub https_port: u16,
     pub static_ip: Option<IpAddr>,
@@ -32,6 +35,7 @@ struct RawSettings {
     database_path: Option<String>,
     log_path: Option<String>,
     cache_path: Option<String>,
+    backup_path: Option<String>,
     http_port: Option<u16>,
     https_port: Option<u16>,
     static_ip: Option<IpAddr>,
@@ -79,11 +83,14 @@ impl Settings {
                 .log_path
                 .map(PathBuf::from)
                 .unwrap_or_else(|| home.join("Library").join("Logs").join("io.hotchkiss.web")),
-            cache_path: raw.cache_path.map(PathBuf::from).unwrap_or_else(|| {
-                home.join("Library")
-                    .join("Caches")
-                    .join("io.hotchkiss.web")
-            }),
+            cache_path: raw
+                .cache_path
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join("Library").join("Caches").join("io.hotchkiss.web")),
+            backup_path: raw
+                .backup_path
+                .map(PathBuf::from)
+                .unwrap_or_else(|| app_support.join("backups")),
             http_port: raw.http_port.unwrap_or(80),
             https_port: raw.https_port.unwrap_or(443),
             static_ip: raw.static_ip,
@@ -141,7 +148,8 @@ mod test {
                 "database_path": "dp",
                 "domain": "do",
                 "log_path": "t",
-                "cache_path": "tc"
+                "cache_path": "tc",
+                "backup_path": "bp"
             }}
             "#
         )?;
@@ -154,6 +162,7 @@ mod test {
         assert_eq!(s.domain, "do");
         assert_eq!(s.log_path, PathBuf::from("t"));
         assert_eq!(s.cache_path, PathBuf::from("tc"));
+        assert_eq!(s.backup_path, PathBuf::from("bp"));
         assert_eq!(s.http_port, 80);
         assert_eq!(s.https_port, 443);
 
@@ -197,6 +206,7 @@ mod test {
             database_path: None,
             log_path: None,
             cache_path: None,
+            backup_path: None,
             http_port: None,
             https_port: None,
             static_ip: None,
@@ -219,6 +229,10 @@ mod test {
         assert_eq!(
             s.cache_path,
             PathBuf::from("/Users/test/Library/Caches/io.hotchkiss.web"),
+        );
+        assert_eq!(
+            s.backup_path,
+            PathBuf::from("/Users/test/Library/Application Support/io.hotchkiss.web/backups"),
         );
         assert_eq!(s.http_port, 80);
         assert_eq!(s.https_port, 443);

@@ -33,7 +33,7 @@ Each pillar is a PLAN phase (14–16), fronted by a landing page (Phase 13). The
 ### Supporting content (lower priority)
 - **Mini Blog** — v1 shipped (Phase 10); proof-of-life. No editor facelift now (slice (b) parked) unless cadence demands it.
 - **Analytics** — v1 shipped 2026-05 (`/admin/analytics`, admin-only). See PLAN_ARCHIVE Phase 7.
-- **Backups** — more content → more worth protecting. (Backlog.)
+- **Backups** — more content → more worth protecting. v1 shipped: daily on-disk DB snapshots, 7-day rolling window (see "Database backups" below).
 - **Family / approved-people-only features** — I run non-public services; gated content is a later want. (Backlog.)
 
 ## Current site's pain
@@ -110,3 +110,15 @@ The id is a **content hash of the source bytes only** (SHA-256, 128-bit hex) —
 - **Sizing:** the natural SVG size is injected so the `<img>` has intrinsic dimensions, then `max-width:100%` + a `max-height` cap keep it from dominating the page (responsive on a 390px phone). The full diagram is reachable via **click-to-zoom**: a zero-dependency pan/zoom lightbox (`assets/scripts/diagram-zoom.js`, pattern borrowed from recon-gen's `qs-lightbox`), bound by event delegation so it catches HTMX-swapped-in diagrams.
 - Render output cached in-memory by hash (rebuilt after a restart; mirrors the on-the-fly AVIF precedent).
 - A bad source or a stale/unknown hash returns a visible error block at HTTP 200 (so HTMX still swaps), never a 500 — surface the failure, don't swallow it.
+
+## Database backups
+
+All site content lives in one SQLite DB, so a daily local snapshot is the cheapest meaningful protection against accidental deletion / corruption.
+
+- **Mechanism:** `VACUUM INTO` run in-process through the existing sqlx pool — a consistent point-in-time copy that doesn't block writers and needs no external `sqlite3` binary. (The mini's beta-snapshot path still shells out to `sqlite3 .backup`; this is the in-app equivalent.)
+- **Schedule:** a long-lived task in `EndpointsProviderService` (alongside session GC + request_log prune) fires daily, first tick at startup.
+- **Files:** `database-YYYY-MM-DD.sqlite` (UTC date) under `Settings::backup_path` (default `~/Library/Application Support/io.hotchkiss.web/backups`, created if missing). VACUUM INTO won't overwrite, so a same-day re-run refreshes the file.
+- **Retention:** rolling **7 days** — after each snapshot, dated backups beyond the newest 7 are deleted.
+- **Off-site:** the whole server is backed up by **Backblaze**, so these on-disk snapshots are the local recovery tier; no upload logic lives in the app.
+- **Failure isolation:** the backup loop matches + logs every fallible step and never returns, so a backup failure logs an error and is retried next tick — it can't crash the coordinator (whose `try_join!` would otherwise take the whole app down).
+- **Testable units:** `coordinator/backup.rs` exposes `run_backup(pool, dir)` and `prune_old_backups(dir, keep)` so the snapshot + rotation are unit-tested without the full coordinator.

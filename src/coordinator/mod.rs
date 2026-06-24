@@ -1,5 +1,6 @@
 mod acme;
 mod acme_provider_service;
+mod backup;
 pub mod dns;
 mod dns_provider_service;
 mod endpoints_provider_service;

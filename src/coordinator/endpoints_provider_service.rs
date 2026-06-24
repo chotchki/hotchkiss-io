@@ -1,3 +1,4 @@
+use crate::coordinator::backup;
 use crate::db::dao::request_log::RequestLogDao;
 use crate::settings::Settings;
 use crate::web::{app_state::AppState, router::create_router};
@@ -14,6 +15,7 @@ use reqwest::StatusCode;
 use sqlx::SqlitePool;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    path::PathBuf,
     sync::Arc,
 };
 use tokio::{sync::broadcast::Receiver, task::JoinSet};
@@ -29,6 +31,7 @@ pub struct EndpointsProviderService {
     webauthn: Webauthn,
     http_port: u16,
     https_port: u16,
+    backup_path: PathBuf,
 }
 
 impl EndpointsProviderService {
@@ -57,6 +60,7 @@ impl EndpointsProviderService {
             webauthn,
             http_port: settings.http_port,
             https_port: settings.https_port,
+            backup_path: settings.backup_path.clone(),
         })
     }
 
@@ -106,6 +110,32 @@ impl EndpointsProviderService {
                     }
                     Ok(_) => {}
                     Err(e) => tracing::warn!("request_log prune failed: {e}"),
+                }
+            }
+        });
+
+        // Take a dated VACUUM INTO snapshot of the DB daily (first tick fires
+        // immediately at startup), then prune to a rolling window. CRITICAL:
+        // this loop never returns and every fallible step is matched + logged,
+        // so a backup failure can't bubble out and fail the coordinator's
+        // `try_join!` (which would take the whole app down). The interval simply
+        // ticks again next day; a single bad day self-heals on the next run.
+        let backup_pool = self.pool.clone();
+        let backup_dir = self.backup_path.clone();
+        set.spawn(async move {
+            let mut tick = tokio::time::interval(tokio::time::Duration::from_secs(60 * 60 * 24));
+            loop {
+                tick.tick().await;
+                match backup::run_backup(&backup_pool, &backup_dir).await {
+                    Ok(dest) => {
+                        tracing::info!("Wrote database backup to {}", dest.display());
+                        if let Err(e) =
+                            backup::prune_old_backups(&backup_dir, backup::RETAIN_BACKUPS)
+                        {
+                            tracing::warn!("backup prune failed: {e:#}");
+                        }
+                    }
+                    Err(e) => tracing::error!("database backup failed: {e:#}"),
                 }
             }
         });
