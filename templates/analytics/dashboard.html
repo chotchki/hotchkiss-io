@@ -5,32 +5,42 @@
 {% block head %}{% endblock %}
 
 {% block content %}
+<div class="max-w-5xl mx-auto">
 <h2 class="font-display text-lg text-navy uppercase mb-1">Analytics</h2>
 <p class="text-sm text-navy mb-4">Last {{ since_days }} days</p>
 
-<div class="flex flex-row gap-2 mb-6 text-sm">
-    <a class="px-2 py-1 bg-navy text-div-grey rounded-sm uppercase" href="/admin/analytics?since=1">1d</a>
-    <a class="px-2 py-1 bg-navy text-div-grey rounded-sm uppercase" href="/admin/analytics?since=7">7d</a>
-    <a class="px-2 py-1 bg-navy text-div-grey rounded-sm uppercase" href="/admin/analytics?since=30">30d</a>
-    <a class="px-2 py-1 bg-navy text-div-grey rounded-sm uppercase" href="/admin/analytics?since=90">90d</a>
+<!-- Range selector -->
+<div class="flex flex-row items-center gap-2 mb-3 text-sm">
+    <span class="text-navy uppercase text-xs mr-1">Range</span>
+    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 7 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since=7&metric={{ metric }}">7d</a>
+    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 30 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since=30&metric={{ metric }}">30d</a>
+    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 90 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since=90&metric={{ metric }}">90d</a>
 </div>
 
-<div class="flex flex-row gap-12 mb-8">
-    <div><span class="text-3xl text-navy">{{ total_requests }}</span><br/><span class="text-sm">requests</span></div>
-    <div><span class="text-3xl text-navy">{{ distinct_ips }}</span><br/><span class="text-sm">distinct IPs</span></div>
+<!-- Metric toggle -->
+<div class="flex flex-row items-center gap-2 mb-4 text-sm">
+    <span class="text-navy uppercase text-xs mr-1">Show</span>
+    <a class="px-2 py-1 rounded-sm {% if metric == "total" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric=total">Total views</a>
+    <a class="px-2 py-1 rounded-sm {% if metric == "unique" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric=unique">Unique visitors</a>
 </div>
 
-<h3 class="font-display text-navy uppercase mt-6 mb-1">Requests per day</h3>
-<table class="text-sm mb-2">
-    {% for row in by_day %}
-    <tr><td class="pr-6">{{ row.day }}</td><td>{{ row.count }}</td></tr>
-    {% endfor %}
-</table>
+<div class="flex flex-row gap-12 mb-6">
+    <div><span class="text-3xl text-navy">{{ total_requests }}</span><br/><span class="text-sm">total views</span></div>
+    <div><span class="text-3xl text-navy">{{ distinct_ips }}</span><br/><span class="text-sm">unique visitors</span></div>
+</div>
 
-<h3 class="font-display text-navy uppercase mt-6 mb-1">Top paths</h3>
+<h3 class="font-display text-navy uppercase mt-6 mb-2">
+    {% if metric == "unique" %}Unique visitors per day{% else %}Views per day{% endif %}
+</h3>
+<div class="mb-8 border border-div-grey rounded-md p-2 bg-white">
+    {{ chart_svg|safe }}
+</div>
+
+<h3 class="font-display text-navy uppercase mt-6 mb-1">Top pages</h3>
+<p class="text-xs text-navy/60 mb-1">Static assets (styles, scripts, images, attachments, diagrams) excluded.</p>
 <table class="text-sm mb-2">
     {% for row in by_path %}
-    <tr><td class="pr-4 text-right">{{ row.count }}</td><td>{{ row.path }}</td></tr>
+    <tr><td class="pr-4 text-right">{{ row.count }}</td><td><a class="underline" href="{{ row.path }}">{{ row.path }}</a></td></tr>
     {% endfor %}
 </table>
 
@@ -45,6 +55,7 @@
 </table>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Recent requests</h3>
+<div class="overflow-x-auto">
 <table class="text-sm">
     <tr class="text-left">
         <th class="pr-6">When (UTC)</th><th class="pr-4">Method</th><th class="pr-4">Status</th><th class="pr-6">Path</th><th class="pr-6">IP</th><th>User agent</th>
@@ -60,4 +71,6 @@
     </tr>
     {% endfor %}
 </table>
+</div>
+</div>
 {% endblock %}

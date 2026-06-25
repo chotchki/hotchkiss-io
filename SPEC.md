@@ -32,7 +32,7 @@ Each pillar is a PLAN phase (14–16), fronted by a landing page (Phase 13). The
 
 ### Supporting content (lower priority)
 - **Mini Blog** — v1 shipped (Phase 10); proof-of-life. No editor facelift now (slice (b) parked) unless cadence demands it.
-- **Analytics** — v1 shipped 2026-05 (`/admin/analytics`, admin-only). See PLAN_ARCHIVE Phase 7.
+- **Analytics** — v1 shipped 2026-05 (`/admin/analytics`, admin-only). See PLAN_ARCHIVE Phase 7. **v2 (Phase C):** views-over-time — date-range chips (7/30/90, default 30), a server-rendered inline-SVG views/day chart with a total↔unique-visitors toggle, and top *content* pages (static assets excluded). On-the-fly aggregation over `request_log` (90-day window, no rollup). A richer interactive (d3) dashboard is backlogged — it's an internal tool, basic is fine.
 - **Backups** — more content → more worth protecting. v1 shipped: daily on-disk DB snapshots, 7-day rolling window (see "Database backups" below).
 - **Family / approved-people-only features** — I run non-public services; gated content is a later want. (Backlog.)
 

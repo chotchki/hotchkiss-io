@@ -318,3 +318,42 @@ async fn broken_d2_endpoint_is_error_block() {
         );
     }
 }
+
+#[tokio::test]
+async fn analytics_renders_chart_and_content_pages() {
+    let server = spawn_test_server().await.expect("spawn");
+
+    // Seed traffic: a content page (hit twice from one IP) + a static asset.
+    for (path, ip) in [
+        ("/pages/test-page", "1.1.1.1"),
+        ("/pages/test-page", "1.1.1.1"),
+        ("/styles/main.css", "1.1.1.1"),
+    ] {
+        sqlx::query("INSERT INTO request_log (method, path, status, ip) VALUES ('GET', ?, 200, ?)")
+            .bind(path)
+            .bind(ip)
+            .execute(&server.pool)
+            .await
+            .unwrap();
+    }
+
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+    let resp = admin
+        .get(server.url("/admin/analytics?since=30"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("<svg"), "expected the views-per-day chart");
+    assert!(body.contains("Unique visitors"), "expected the total/unique toggle");
+    assert!(
+        body.contains("/pages/test-page"),
+        "the content page should appear in top pages"
+    );
+}
