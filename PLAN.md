@@ -128,6 +128,23 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
     - `post_page_path` / `post_top_level_page_path` reject non-URI-safe `page_name` (spaces, etc) with a 400 — but htmx swallows non-2xx responses, so submissions silently no-op. The blog "+ New post" form now slugifies on input as a local fix, but the top-nav admin "Create New Page" form and the editor's child-create form (`templates/pages/get_page.html`) still have the silent-fail. Whole-site fix: either slugify server-side in the handlers (any `page_name` → lowercase/hyphenated), or apply the same client-side slugify everywhere, or render an inline error message on 400.
     - Page minimum width exceeds an iPhone portrait viewport (~390px) — `templates/base.html` has the jumbotron as `flex flex-row` (image `size-40` = 160px + name/tagline text alongside) which never wraps, and the un-wrapped nav `<ul>` from the first finding contributes too. User has to rotate to landscape. Likely fix: jumbotron becomes `flex-col sm:flex-row` (or similar) so it stacks on narrow screens; nav fix from finding #1 helps here too.
     - On the phone, can't reach the editor — user reports "not logged in to the website to edit." Need to confirm symptom precisely (no editor chrome / 403 / redirect to login / save fails / something else) and whether (a) PWA cookie scope is separate from Safari, (b) session expired silently (1-day inactivity), or (c) the login passkey ceremony itself doesn't complete on iOS in some path.
+## Phase F - Admin / authoring UX
+- [ ] F.0 - Phase exit: site is pleasant + usable logged-in as admin — clean reader view, login state visible, sane authoring flow, human titles (not slugs) shown publicly
+- [x] F.1 - Title↔slug separation: add page_title, create-by-title with auto-slug, display title everywhere (fix the public hyphenated headline)
+- [x] F.2 - Logged-in reader view: default to the clean page, an Edit toggle reveals the editor
+- [x] F.3 - New-page creation redirects to the new page's editor (not htmx_refresh on the list)
+- [x] F.4 - Login-state indicator + logout in the nav
+- [ ] F.5 - Restyle the page editor (raw textarea + unstyled form -> clean)
+- [ ] F.6 - Nav / admin-chrome cleanup: move the +/new-page box out of the nav, fix admin overflow
+- [ ] F.7 - F e2e + docs (content-model: page_title; admin-UX flows)
+## Phase G - Reliability hardening (launchd respawns, so crash-loop/correctness focus)
+- [ ] G.0 - Phase exit: coordinator + cert/DNS path self-heal; no single transient error or panic can wedge/kill the live site; AVIF + session-unwrap correctness bugs fixed
+- [ ] G.1 - Coordinator loops self-heal (ACME/DNS/session-GC: match-log-continue like backup.rs)
+- [ ] G.2 - Replace the todo!() LE-authz panic with bail! + cap the unbounded order_cert loop
+- [ ] G.3 - Timeouts on the cert/DNS path (reqwest timeouts + re-enable DnsValidator deadline)
+- [ ] G.4 - Fix the AVIF resize integer-division bug (blank landscape thumbnails) + test
+- [ ] G.5 - SQLite busy_timeout + remove the session-read unwrap()
+- [ ] G.6 - Reliability tail: TLS-config reload, build.rs migrations rerun-path, CertificateDao tests, WARN-log hygiene
 
 ## Backlog (not yet phased)
 
