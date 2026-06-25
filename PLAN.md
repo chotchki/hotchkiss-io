@@ -132,12 +132,12 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [ ] BT.1 - Tab redesign (chris's wife to opine on look + behavior)
 ## Phase G - Reliability hardening (launchd respawns, so crash-loop/correctness focus)
 - [ ] G.0 - Phase exit: coordinator + cert/DNS path self-heal; no single transient error or panic can wedge/kill the live site; AVIF + session-unwrap correctness bugs fixed
-- [ ] G.1 - Coordinator loops self-heal (ACME/DNS/session-GC: match-log-continue like backup.rs)
-- [ ] G.2 - Replace the todo!() LE-authz panic with bail! + cap the unbounded order_cert loop
-- [ ] G.3 - Timeouts on the cert/DNS path (reqwest timeouts + re-enable DnsValidator deadline)
-- [ ] G.4 - Fix the AVIF resize integer-division bug (blank landscape thumbnails) + test
-- [ ] G.5 - SQLite busy_timeout + remove the session-read unwrap()
-- [ ] G.6 - Reliability tail: TLS-config reload, build.rs migrations rerun-path, CertificateDao tests, WARN-log hygiene
+- [x] G.1 - Coordinator loops self-heal (ACME/DNS/session-GC: match-log-continue like backup.rs)
+- [x] G.2 - Replace the todo!() LE-authz panic with bail! + cap the unbounded order_cert loop
+- [x] G.3 - Timeouts on the cert/DNS path (reqwest timeouts + re-enable DnsValidator deadline)
+- [x] G.4 - Fix the AVIF resize integer-division bug (blank landscape thumbnails) + test
+- [x] G.5 - SQLite busy_timeout + remove the session-read unwrap()
+- [x] G.6 - Reliability tail: TLS-config reload, build.rs migrations rerun-path, CertificateDao tests, WARN-log hygiene
 
 ## Backlog (not yet phased)
 
