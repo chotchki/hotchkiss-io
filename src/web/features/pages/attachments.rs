@@ -4,7 +4,7 @@ use crate::{
     db::dao::{attachments::AttachmentDao, content_pages::ContentPageDao},
     web::{
         app_error::AppError, app_state::AppState, html_template::HtmlTemplate,
-        htmx_responses::htmx_refresh, session::SessionData,
+        htmx_responses::htmx_refresh,
     },
 };
 use anyhow::anyhow;
@@ -46,13 +46,11 @@ pub struct ListAttachmentsTemplate {
 
 pub async fn list_page_attachments(
     State(state): State<AppState>,
-    session_data: SessionData,
     Path(page_id): Path<i64>,
 ) -> Result<Response, AppError> {
-    if !session_data.auth_state.is_admin() {
-        return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
-    }
-
+    // Public read: a GET listing of a page's attachment names. The attachment
+    // CONTENT is already unauthenticated (load_attachment), so the list leaks
+    // nothing new — consistent with the GET-is-public policy (Phase F).
     let attachments = AttachmentDao::find_attachments_by_page_id(&state.pool, page_id).await?;
 
     Ok(HtmlTemplate(ListAttachmentsTemplate {
