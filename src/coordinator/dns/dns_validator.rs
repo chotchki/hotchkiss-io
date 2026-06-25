@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use hickory_resolver::{
     error::{ResolveError, ResolveErrorKind},
     proto::rr::{RData, RecordType},
@@ -11,6 +11,10 @@ use tracing::debug;
 
 const TIMEOUT: Duration = Duration::from_secs(300);
 const BACKOFF: Duration = Duration::from_millis(250);
+/// Cap the linear backoff so the loop keeps polling (and re-checking the
+/// deadline) instead of sleeping for minutes — the unbounded growth was why the
+/// original timeout "failed awfully".
+const MAX_BACKOFF: Duration = Duration::from_secs(5);
 
 /// What a single DNS lookup attempt told us, normalized so the decision
 /// logic can be tested without a resolver. (A non-`NoRecordsFound` error is
@@ -94,8 +98,7 @@ impl DnsValidator {
         record_type: RecordType,
         values: Vec<RData>,
     ) -> Result<()> {
-        //TODO: The timeout loop fails in an awful way and I don't know why
-        let _timeout = Instant::now()
+        let timeout = Instant::now()
             .checked_add(TIMEOUT)
             .ok_or_else(|| anyhow!("Duration too long"))?;
 
@@ -112,20 +115,21 @@ impl DnsValidator {
                 WaitStep::KeepWaiting => {}
             }
 
+            // Bounded: a stuck validation now fails cleanly (the ACME loop
+            // self-heals + retries) rather than wedging forever.
+            if Instant::now() > timeout {
+                bail!("DNS record for {domain} did not appear within {TIMEOUT:?}");
+            }
+
             debug!("Sleeping for {} secs", backoff.as_secs());
             sleep(backoff).await;
             count += 1;
-            backoff = BACKOFF.saturating_mul(count);
-
-            //if Instant::now() > timeout {
-            //    bail!("The domain {} doesn't exist past timeout", domain);
-            //}
+            backoff = BACKOFF.saturating_mul(count).min(MAX_BACKOFF);
         }
     }
 
     pub async fn ensure_not_existing(&self, domain: &str, record_type: RecordType) -> Result<()> {
-        //TODO: The timeout loop fails in an awful way and I don't know why
-        let _timeout = Instant::now()
+        let timeout = Instant::now()
             .checked_add(TIMEOUT)
             .ok_or_else(|| anyhow!("Duration too long"))?;
 
@@ -139,14 +143,14 @@ impl DnsValidator {
                 WaitStep::KeepWaiting => {}
             }
 
+            if Instant::now() > timeout {
+                bail!("DNS record for {domain} still present after {TIMEOUT:?}");
+            }
+
             debug!("Sleeping for {} secs", backoff.as_secs());
             sleep(backoff).await;
             count += 1;
-            backoff = BACKOFF.saturating_mul(count);
-
-            //if Instant::now() > timeout {
-            //    bail!("The domain {} still exists past the timeout", domain);
-            //}
+            backoff = BACKOFF.saturating_mul(count).min(MAX_BACKOFF);
         }
     }
 }

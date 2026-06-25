@@ -8,6 +8,7 @@ use sqlx::{
     SqlitePool,
 };
 use std::path::Path;
+use std::time::Duration;
 use tracing::debug;
 use tracing::log::LevelFilter;
 
@@ -27,6 +28,10 @@ impl DatabaseHandle {
             .foreign_keys(true)
             .journal_mode(Wal)
             .locking_mode(Normal)
+            // Wait out single-writer contention (e.g. the daily VACUUM INTO
+            // backup holding a lock) instead of failing immediately with
+            // SQLITE_BUSY, which would surface as a request 500.
+            .busy_timeout(Duration::from_secs(5))
             .synchronous(SqliteSynchronous::Normal);
 
         if cfg!(debug_assertions) {

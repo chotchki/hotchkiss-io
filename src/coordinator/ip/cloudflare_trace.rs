@@ -8,6 +8,7 @@
 use anyhow::{Context, Result};
 use reqwest::{Client, ClientBuilder};
 use std::net::Ipv4Addr;
+use std::time::Duration;
 use tracing::debug;
 
 #[derive(Debug)]
@@ -17,7 +18,10 @@ pub struct CloudflareTrace {
 
 impl CloudflareTrace {
     pub fn new() -> Result<Self> {
-        let builder = ClientBuilder::new().use_rustls_tls();
+        let builder = ClientBuilder::new()
+            .use_rustls_tls()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30));
 
         Ok(Self {
             client: builder.build()?,

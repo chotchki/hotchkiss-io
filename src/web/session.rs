@@ -35,11 +35,17 @@ where
 
         debug!("Found session! {:?}", session.id());
 
-        let session_data: SessionData = session
-            .get(Self::SESSION_DATA_KEY)
-            .await
-            .unwrap() //Unsure how to do this without an unwrap
-            .unwrap_or_default();
+        // A session-store read error (e.g. transient SQLITE_BUSY, or a stale
+        // deserialize) must NOT panic the request — fall back to Anonymous
+        // (fail-closed) and log it. The session layer is INNER to the authz
+        // layer, so an Anonymous fallback simply 403s a mutation, never 500s.
+        let session_data: SessionData = match session.get(Self::SESSION_DATA_KEY).await {
+            Ok(opt) => opt.unwrap_or_default(),
+            Err(e) => {
+                tracing::warn!("session read failed, treating as anonymous: {e}");
+                SessionData::default()
+            }
+        };
 
         debug!("Session auth state {}", session_data.auth_state);
 

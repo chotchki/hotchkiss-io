@@ -7,6 +7,7 @@ use serde_json::json;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::time::Duration;
 use tracing::error;
 use url::Url;
 
@@ -23,7 +24,12 @@ pub struct CloudflareApi {
 
 impl CloudflareApi {
     pub fn new(settings: Arc<Settings>) -> Result<CloudflareApi> {
-        let builder = ClientBuilder::new().use_rustls_tls();
+        // Bound every Cloudflare call so a half-open connection can't hang the
+        // DNS/ACME coordinator tasks indefinitely (no upper bound otherwise).
+        let builder = ClientBuilder::new()
+            .use_rustls_tls()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30));
 
         Ok(CloudflareApi {
             settings,
