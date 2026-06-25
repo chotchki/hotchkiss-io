@@ -12,10 +12,11 @@ use tokio::{sync::broadcast::Sender, time::sleep};
 use tracing::{debug, error, info};
 
 const CERT_REFRESH: Duration = Duration::new(6 * 60 * 60, 0);
-/// Conservative retry on failure. Stays under Let's Encrypt's failed-validation
-/// rate limit (~5/hour per account+host) so a stuck order can't crash-loop the
-/// app into a rate-limit ban (the failure mode the old `?`-propagation risked).
-const RETRY_BACKOFF: Duration = Duration::new(15 * 60, 0);
+/// Conservative retry on failure: 20 min ≈ 3 attempts/hour, comfortably under
+/// Let's Encrypt's failed-validation rate limit (~5/hour per account+host) with
+/// headroom for the occasional restart-triggered immediate retry — so a stuck
+/// order can't crash-loop the app into a rate-limit ban.
+const RETRY_BACKOFF: Duration = Duration::new(20 * 60, 0);
 
 #[derive(Debug)]
 pub struct AcmeProviderService {

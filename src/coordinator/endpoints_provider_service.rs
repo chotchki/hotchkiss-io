@@ -69,7 +69,16 @@ impl EndpointsProviderService {
     }
 
     pub async fn start(&self, mut tls_config_reciever: Receiver<Arc<ServerConfig>>) -> Result<()> {
-        let server_config = tls_config_reciever.recv().await?;
+        // Wait for the first cert config. Handle a startup Lagged (don't `?`-crash
+        // the app on a transient broadcast lag); a closed channel before the first
+        // cert is genuinely fatal (no cert -> no server).
+        let server_config = loop {
+            match tls_config_reciever.recv().await {
+                Ok(c) => break c,
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => bail!("TLS config channel closed before the first cert"),
+            }
+        };
         let rustls_config = RustlsConfig::from_config(server_config);
 
         let app_state = AppState {
@@ -174,17 +183,20 @@ impl EndpointsProviderService {
             }
         });
 
-        let output = set.join_all().await;
-        for o in output {
-            match o {
-                Ok(_) => (),
-                Err(e) => {
-                    bail!(e)
-                }
-            }
+        // None of these tasks should ever return under normal operation: the two
+        // servers serve forever and the four housekeeping loops are infinite. So
+        // the FIRST task to complete — for ANY reason — is fatal: bail so start()
+        // returns Err, the coordinator's try_join! trips, and launchd restarts us.
+        // (join_all() would instead block forever on the never-returning
+        // housekeeping loops, swallowing a clean Err from a dying server — the
+        // process would stay up serving nothing.)
+        match set.join_next().await {
+            Some(Ok(Ok(()))) => bail!("an endpoints task exited unexpectedly"),
+            Some(Ok(Err(e))) => bail!(e),
+            Some(Err(je)) if je.is_panic() => std::panic::resume_unwind(je.into_panic()),
+            Some(Err(je)) => bail!("endpoints task join error: {je}"),
+            None => bail!("endpoints JoinSet was empty"),
         }
-
-        Ok(())
     }
 
     async fn http_server(addr: SocketAddr, https_port: u16) -> Result<()> {
