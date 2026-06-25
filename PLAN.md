@@ -130,14 +130,6 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
     - On the phone, can't reach the editor — user reports "not logged in to the website to edit." Need to confirm symptom precisely (no editor chrome / 403 / redirect to login / save fails / something else) and whether (a) PWA cookie scope is separate from Safari, (b) session expired silently (1-day inactivity), or (c) the login passkey ceremony itself doesn't complete on iOS in some path.
 ## Phase BT - Deferred polish
 - [ ] BT.1 - Tab redesign (chris's wife to opine on look + behavior)
-## Phase G - Reliability hardening (launchd respawns, so crash-loop/correctness focus)
-- [ ] G.0 - Phase exit: coordinator + cert/DNS path self-heal; no single transient error or panic can wedge/kill the live site; AVIF + session-unwrap correctness bugs fixed
-- [x] G.1 - Coordinator loops self-heal (ACME/DNS/session-GC: match-log-continue like backup.rs)
-- [x] G.2 - Replace the todo!() LE-authz panic with bail! + cap the unbounded order_cert loop
-- [x] G.3 - Timeouts on the cert/DNS path (reqwest timeouts + re-enable DnsValidator deadline)
-- [x] G.4 - Fix the AVIF resize integer-division bug (blank landscape thumbnails) + test
-- [x] G.5 - SQLite busy_timeout + remove the session-read unwrap()
-- [x] G.6 - Reliability tail: TLS-config reload, build.rs migrations rerun-path, CertificateDao tests, WARN-log hygiene
 
 ## Backlog (not yet phased)
 
