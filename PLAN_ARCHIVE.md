@@ -250,3 +250,11 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] G.5 - SQLite busy_timeout + remove the session-read unwrap()
 - [x] G.6 - Reliability tail: TLS-config reload, build.rs migrations rerun-path, CertificateDao tests, WARN-log hygiene
 
+---
+
+## 2026-06-25
+
+## Phase BT - Deferred polish
+- [x] BT.1 - Tab redesign (chris's wife to opine on look + behavior)
+- [x] BT.2 - Dedicated /admin/pages editor + nav rework (+ icon, fold admin into hamburger, fix tab styling)
+
