@@ -1,4 +1,8 @@
-use axum::{middleware::from_fn, routing::get, Router};
+use axum::{
+    middleware::from_fn,
+    routing::{get, post},
+    Router,
+};
 
 use crate::web::{app_state::AppState, middleware::require_admin::require_admin};
 
@@ -11,5 +15,6 @@ pub fn admin_router() -> Router<AppState> {
     Router::new()
         .route("/analytics", get(analytics::show_analytics))
         .route("/pages", get(pages::show_admin_pages))
+        .route("/pages/reorder", post(pages::reorder_pages))
         .layer(from_fn(require_admin))
 }

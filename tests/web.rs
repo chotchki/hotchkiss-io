@@ -87,6 +87,44 @@ async fn admin_pages_editor_requires_admin() {
 }
 
 #[tokio::test]
+async fn reorder_pages_requires_admin() {
+    let server = spawn_test_server().await.expect("spawn");
+
+    // anonymous POST → 403 (non-GET requires admin; reorder is not in the allowlist)
+    let resp = client()
+        .post(server.url("/admin/pages/reorder"))
+        .form(&[("page_id", "1")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    // Admin → 200; the seeded special pages (ids 1,2) reorder cleanly
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+    let resp = admin
+        .post(server.url("/admin/pages/reorder"))
+        .form(&[("page_id", "2"), ("page_id", "1")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // an id that isn't a current top-level page → 400 (the write is scoped)
+    let resp = admin
+        .post(server.url("/admin/pages/reorder"))
+        .form(&[("page_id", "999999")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn request_log_middleware_records_requests() {
     let server = spawn_test_server().await.expect("spawn");
     server

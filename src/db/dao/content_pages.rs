@@ -125,6 +125,24 @@ impl ContentPageDao {
         Ok(())
     }
 
+    /// Set just the ordering for one page — used by drag-to-reorder, which sets
+    /// `page_order` to the page's position in the dragged list. `page_order`
+    /// drives both the nav tab order and the Manage Pages list.
+    pub async fn set_order(
+        executor: impl SqliteExecutor<'_>,
+        page_id: i64,
+        page_order: i64,
+    ) -> Result<()> {
+        query!(
+            "UPDATE content_pages SET page_order = ?1 WHERE page_id = ?2",
+            page_order,
+            page_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    }
+
     pub async fn find_by_parent(
         executor: impl SqliteExecutor<'_>,
         parent_page_id: Option<i64>,
@@ -513,6 +531,54 @@ mod tests {
                 .await?
                 .len()
         );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn set_order_drives_find_by_parent(pool: SqlitePool) -> Result<()> {
+        let parent =
+            ContentPageDao::create(&pool, None, "parent".to_string(), None, "".to_string(), None)
+                .await?;
+        let a = ContentPageDao::create(
+            &pool,
+            Some(parent.page_id),
+            "a".to_string(),
+            None,
+            "".to_string(),
+            None,
+        )
+        .await?;
+        let b = ContentPageDao::create(
+            &pool,
+            Some(parent.page_id),
+            "b".to_string(),
+            None,
+            "".to_string(),
+            None,
+        )
+        .await?;
+        let c = ContentPageDao::create(
+            &pool,
+            Some(parent.page_id),
+            "c".to_string(),
+            None,
+            "".to_string(),
+            None,
+        )
+        .await?;
+
+        // Reverse the visual order via set_order; find_by_parent reflects it.
+        ContentPageDao::set_order(&pool, c.page_id, 0).await?;
+        ContentPageDao::set_order(&pool, b.page_id, 1).await?;
+        ContentPageDao::set_order(&pool, a.page_id, 2).await?;
+
+        let ordered: Vec<i64> = ContentPageDao::find_by_parent(&pool, Some(parent.page_id))
+            .await?
+            .into_iter()
+            .map(|p| p.page_id)
+            .collect();
+        assert_eq!(vec![c.page_id, b.page_id, a.page_id], ordered);
 
         Ok(())
     }

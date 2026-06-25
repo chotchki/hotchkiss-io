@@ -37,35 +37,33 @@
         <div class="p-2 min-w-full">
             <!-- Navigation -->
             <div class="max-w-screen-md pl-2">
-                <!-- Desktop (lg+): horizontal tabs -->
-                <ul class="hidden lg:flex list-none flex-row flex-wrap">
-                    {% for item in top_bar.0 %}
-                    {% if item.0 == "login" && auth_state.display_name().is_some() %}
-                    {# Logged in: the LOGIN tab is redundant (admin bar shows name + Logout) #}
-                    {% else if item.1 == true %}
-                    <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-yellow">
-                        <a class="text-sm text-yellow uppercase" href="/pages/{{item.0}}">{{item.0}}</a>
-                    </li>
-                    {% else %}
-                    <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center">
-                        <a class="text-sm text-div-grey uppercase" href="/pages/{{item.0}}">{{item.0}}</a>
-                    </li>
-                    {% endif %}
-                    {% endfor %}
-                </ul>
-
-                {% if let Some(name) = auth_state.display_name() %}
-                <!-- Desktop (lg+) admin bar; folds into the hamburger below lg -->
-                <div class="hidden lg:flex flex-row flex-wrap items-center gap-x-4 gap-y-2 bg-navy px-3 py-2 rounded-b text-div-grey text-sm">
-                    {% if auth_state.is_admin() %}<span class="text-yellow uppercase font-display">&bull; Admin</span>{% endif %}
-                    <span>{{name}}</span>
-                    <a class="uppercase hover:text-yellow" href="/login/logout">Logout</a>
-                    {% if auth_state.is_admin() %}
-                    <a class="uppercase hover:text-yellow" href="/admin/analytics">Analytics</a>
-                    <a class="ml-auto hover:text-yellow" href="/admin/pages" title="Manage pages" aria-label="Manage pages"><i class="fa-solid fa-plus"></i></a>
+                <!-- Desktop (lg+): single-row nav — tabs left, slim admin cluster right -->
+                <div class="hidden lg:flex flex-row items-end gap-2">
+                    <ul class="flex flex-row flex-wrap list-none">
+                        {% for item in top_bar.0 %}
+                        {% if item.0 == "login" && auth_state.display_name().is_some() %}
+                        {# Logged in: the LOGIN tab is redundant (admin cluster has Logout) #}
+                        {% else if item.1 == true %}
+                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-yellow">
+                            <a class="text-sm text-yellow uppercase" href="/pages/{{item.0}}">{{item.0}}</a>
+                        </li>
+                        {% else %}
+                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center">
+                            <a class="text-sm text-div-grey uppercase" href="/pages/{{item.0}}">{{item.0}}</a>
+                        </li>
+                        {% endif %}
+                        {% endfor %}
+                    </ul>
+                    {% if auth_state.display_name().is_some() %}
+                    <div class="ml-auto flex flex-row items-center gap-4 bg-navy rounded-t px-4 py-2 text-div-grey text-sm">
+                        {% if auth_state.is_admin() %}<span class="text-yellow uppercase font-display">&bull; Admin</span>{% endif %}
+                        <a class="uppercase hover:text-yellow" href="/login/logout">Logout</a>
+                        {% if auth_state.is_admin() %}
+                        <a class="hover:text-yellow text-base leading-none" href="/admin/pages" title="Manage pages" aria-label="Manage pages"><i class="fa-solid fa-plus"></i></a>
+                        {% endif %}
+                    </div>
                     {% endif %}
                 </div>
-                {% endif %}
 
                 <!-- Tablet + mobile (below lg): a hamburger — native <details>, no JS -->
                 <details class="lg:hidden">
@@ -87,12 +85,11 @@
                             {% endif %}
                             {% endfor %}
                         </ul>
-                        {% if let Some(name) = auth_state.display_name() %}
+                        {% if auth_state.display_name().is_some() %}
                         <div class="flex flex-col border-t border-white/15 text-div-grey">
-                            <span class="px-4 py-2 text-xs uppercase font-display text-div-grey/70">{% if auth_state.is_admin() %}&bull; Admin &middot; {% endif %}{{name}}</span>
+                            {% if auth_state.is_admin() %}<span class="px-4 py-2 text-xs uppercase font-display text-yellow">&bull; Admin</span>{% endif %}
                             <a class="block px-4 py-2 text-sm uppercase font-display hover:bg-white/10" href="/login/logout">Logout</a>
                             {% if auth_state.is_admin() %}
-                            <a class="block px-4 py-2 text-sm uppercase font-display hover:bg-white/10" href="/admin/analytics">Analytics</a>
                             <a class="block px-4 py-2 text-sm uppercase font-display hover:bg-white/10" href="/admin/pages"><i class="fa-solid fa-plus"></i> New page</a>
                             {% endif %}
                         </div>

@@ -18,8 +18,10 @@ htmx.onLoad(function (content) {
             }
         });
 
-        // Re-enable sorting on the `htmx:afterSwap` event
-        sortable.addEventListener("htmx:afterSwap", function () {
+        // Re-enable sorting once the request finishes. Use `afterRequest` (not
+        // `afterSwap`) so it also fires for hx-swap="none" reorder posts that
+        // return no body.
+        sortable.addEventListener("htmx:afterRequest", function () {
             sortableInstance.option("disabled", false);
         });
     }
