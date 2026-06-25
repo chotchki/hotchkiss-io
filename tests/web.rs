@@ -518,3 +518,74 @@ async fn mutation_layer_gates_all_nests_and_allows_auth_ceremony() {
         "the login ceremony must not be gated by the admin layer"
     );
 }
+
+/// Phase F authoring flow: create-by-title auto-slugs the URL; an admin lands on
+/// the clean reader view with an Edit toggle; ?edit reveals the editor; anon sees
+/// neither.
+#[tokio::test]
+async fn admin_authoring_flow_title_slug_and_edit_toggle() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    // Create by TITLE — the server auto-slugs the URL from it.
+    let resp = admin
+        .post(server.url("/pages"))
+        .form(&[("page_title", "Hello World Post")])
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        resp.status().as_u16() < 400,
+        "create should succeed, got {}",
+        resp.status()
+    );
+
+    // The auto-slugged page exists; display_title renders as the page H1; and the
+    // admin sees the clean reader view (Edit toggle), NOT the editor.
+    let resp = admin
+        .get(server.url("/pages/hello-world-post"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "auto-slugged page should exist");
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("Hello World Post"), "title should render");
+    assert!(body.contains("Edit this page"), "admin sees the edit toggle");
+    assert!(
+        !body.contains("Page Editor"),
+        "editor must be hidden in the reader view"
+    );
+
+    // ?edit reveals the editor.
+    let body = admin
+        .get(server.url("/pages/hello-world-post?edit=1"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("Page Editor"), "?edit reveals the editor");
+    assert!(
+        body.contains("name=\"page_markdown\""),
+        "editor has the markdown field"
+    );
+
+    // Anonymous sees the title but neither the editor nor the toggle.
+    let body = reqwest::get(server.url("/pages/hello-world-post"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("Hello World Post"), "anon sees the title");
+    assert!(
+        !body.contains("Edit this page"),
+        "anon must not see the edit toggle"
+    );
+}
