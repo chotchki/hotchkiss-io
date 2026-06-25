@@ -37,12 +37,12 @@
         <div class="p-2 min-w-full">
             <!-- Navigation -->
             <div class="max-w-screen-md pl-2">
-                <!-- Desktop (lg+): single-row nav — tabs + admin controls in one row -->
-                <div class="hidden lg:flex flex-row items-end gap-2">
+                <!-- Desktop (lg+): single-row nav — content tabs + admin tabs (own group) -->
+                <div class="hidden lg:flex flex-row items-end gap-4">
                     <ul class="flex flex-row flex-wrap list-none gap-px">
                         {% for item in top_bar.0 %}
                         {% if item.0 == "login" && auth_state.display_name().is_some() %}
-                        {# Logged in: the LOGIN tab is redundant (admin cluster has Logout) #}
+                        {# Logged in: the LOGIN tab is redundant (the admin group has Logout) #}
                         {% else if item.1 == true %}
                         <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-yellow">
                             <a class="text-sm text-yellow uppercase" href="/pages/{{item.0}}">{{item.0}}</a>
@@ -55,13 +55,22 @@
                         {% endfor %}
                     </ul>
                     {% if auth_state.display_name().is_some() %}
-                    <div class="flex flex-row items-center gap-4 bg-navy rounded-t px-4 py-2 font-display uppercase text-sm text-div-grey">
-                        {% if auth_state.is_admin() %}<a class="text-yellow hover:text-yellow/80" href="/admin/pages">&bull; Admin</a>{% endif %}
-                        <a class="hover:text-yellow" href="/login/logout">Logout</a>
+                    {# Admin controls as their own tab group — same pill style, never marked active #}
+                    <ul class="flex flex-row list-none gap-px">
                         {% if auth_state.is_admin() %}
-                        <a class="hover:text-yellow text-base leading-none" href="/admin/pages" title="New page" aria-label="New page"><i class="fa-solid fa-plus"></i></a>
+                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center">
+                            <a class="text-sm text-div-grey uppercase hover:text-yellow" href="/admin/pages">Admin</a>
+                        </li>
                         {% endif %}
-                    </div>
+                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center">
+                            <a class="text-sm text-div-grey uppercase hover:text-yellow" href="/login/logout">Logout</a>
+                        </li>
+                        {% if auth_state.is_admin() %}
+                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center">
+                            <a class="text-sm text-div-grey uppercase hover:text-yellow" href="/admin/pages" title="New page" aria-label="New page"><i class="fa-solid fa-plus"></i></a>
+                        </li>
+                        {% endif %}
+                    </ul>
                     {% endif %}
                 </div>
 
