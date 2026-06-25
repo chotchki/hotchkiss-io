@@ -1,7 +1,7 @@
 use crate::web::htmx_responses::htmx_redirect;
 use crate::web::util::deserialize::empty_string_as_none;
 use crate::{
-    db::dao::{content_pages::ContentPageDao, roles::Role},
+    db::dao::content_pages::ContentPageDao,
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
         html_template::HtmlTemplate, htmx_responses::htmx_refresh,
@@ -107,9 +107,7 @@ pub async fn delete_page_path(
     session_data: SessionData,
     Path(page_path): Path<String>,
 ) -> Result<Response, AppError> {
-    if let AuthenticationState::Authenticated(user) = session_data.auth_state
-        && user.role != Role::Admin
-    {
+    if !session_data.auth_state.is_admin() {
         return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
     }
 
@@ -157,9 +155,7 @@ pub async fn put_page_path(
     Path(page_path): Path<String>,
     Form(put_page_form): Form<PutPageForm>,
 ) -> Result<Response, AppError> {
-    if let AuthenticationState::Authenticated(user) = session_data.auth_state
-        && user.role != Role::Admin
-    {
+    if !session_data.auth_state.is_admin() {
         return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
     }
 
@@ -196,9 +192,7 @@ pub async fn post_top_level_page_path(
     session_data: SessionData,
     Form(post_page_form): Form<PostPageForm>,
 ) -> Result<Response, AppError> {
-    if let AuthenticationState::Authenticated(user) = session_data.auth_state
-        && user.role != Role::Admin
-    {
+    if !session_data.auth_state.is_admin() {
         return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
     }
 
@@ -225,9 +219,7 @@ pub async fn post_page_path(
     Path(page_path): Path<String>,
     Form(post_page_form): Form<PostPageForm>,
 ) -> Result<Response, AppError> {
-    if let AuthenticationState::Authenticated(user) = session_data.auth_state
-        && user.role != Role::Admin
-    {
+    if !session_data.auth_state.is_admin() {
         return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
     }
 

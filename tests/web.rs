@@ -359,3 +359,111 @@ async fn analytics_renders_chart_and_content_pages() {
     assert!(body.contains("Top referrers"), "expected the referrers panel");
     assert!(body.contains("paths=all"), "expected the Content/All toggle");
 }
+
+/// Regression guard for the anonymous content-mutation bypass: the `/pages`
+/// mutating handlers must reject anyone who isn't Admin. The old `if let
+/// Authenticated(user) && role != Admin` idiom let Anonymous fall straight
+/// through (an unauthenticated stranger could overwrite/create/delete pages).
+#[tokio::test]
+async fn only_admin_can_mutate_pages() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("Victim", "# original content")
+        .await
+        .expect("seed");
+
+    let put_form = [
+        ("page_category", ""),
+        ("page_markdown", "DEFACED"),
+        ("page_cover_attachment_id", ""),
+        ("page_order", "0"),
+    ];
+
+    // --- Anonymous: every mutation is FORBIDDEN ---
+    let anon = client();
+    let resp = anon
+        .post(server.url("/pages"))
+        .form(&[("page_name", "hax")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "anon must not create top-level pages"
+    );
+    let resp = anon
+        .put(server.url("/pages/Victim"))
+        .form(&put_form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "anon must not overwrite pages"
+    );
+    let resp = anon
+        .delete(server.url("/pages/Victim"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "anon must not delete pages"
+    );
+
+    // --- Registered (logged in, not Admin): still FORBIDDEN ---
+    let registered = client();
+    registered
+        .post(server.url("/test/login?role=Registered"))
+        .send()
+        .await
+        .unwrap();
+    let resp = registered
+        .put(server.url("/pages/Victim"))
+        .form(&put_form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "registered must not overwrite pages"
+    );
+
+    // --- The page survived all of that, untouched ---
+    let body = reqwest::get(server.url("/pages/Victim"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("original content"), "page must be unchanged");
+    assert!(!body.contains("DEFACED"), "the defacement must NOT have landed");
+
+    // --- Admin CAN mutate (the fix must not over-restrict) ---
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+    let resp = admin
+        .put(server.url("/pages/Victim"))
+        .form(&[
+            ("page_category", ""),
+            ("page_markdown", "# edited by admin"),
+            ("page_cover_attachment_id", ""),
+            ("page_order", "0"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        resp.status().is_success(),
+        "admin PUT should succeed, got {}",
+        resp.status()
+    );
+}
