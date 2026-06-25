@@ -141,14 +141,9 @@ pub async fn load_attachment_by_id(
 
 pub async fn save_attachments(
     State(state): State<AppState>,
-    session_data: SessionData,
     Path(page_id): Path<i64>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
-    if !session_data.auth_state.is_admin() {
-        return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
-    }
-
     let cp = ContentPageDao::find_by_id(&state.pool, page_id)
         .await?
         .ok_or_else(|| anyhow!("Can't attach to a non existent page"))?;
@@ -178,13 +173,8 @@ pub async fn save_attachments(
 
 pub async fn delete_attachment(
     State(state): State<AppState>,
-    session_data: SessionData,
     Path((page_id, attachment_name)): Path<(i64, String)>,
 ) -> Result<Response, AppError> {
-    if !session_data.auth_state.is_admin() {
-        return Ok((StatusCode::FORBIDDEN, "Invalid Permission").into_response());
-    }
-
     let attachment =
         AttachmentDao::find_attachment_by_name(&state.pool, page_id, &attachment_name).await?;
 

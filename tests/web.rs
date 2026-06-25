@@ -467,3 +467,54 @@ async fn only_admin_can_mutate_pages() {
         resp.status()
     );
 }
+
+/// Phase E: the fail-closed layer gates non-GET site-wide — not just /pages —
+/// now that the per-handler is_admin checks are gone; and it lets the anonymous
+/// WebAuthn ceremony POSTs through (the exact-tuple allowlist).
+#[tokio::test]
+async fn mutation_layer_gates_all_nests_and_allows_auth_ceremony() {
+    let server = spawn_test_server().await.expect("spawn");
+    let anon = client();
+
+    // A different nest (attachments) with no per-handler check anymore.
+    let resp = anon
+        .delete(server.url("/attachments/1/whatever.png"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "anon attachment delete must be blocked by the layer"
+    );
+
+    // An exotic verb (PATCH) — proves default-DENY (allow safe methods), not a
+    // deny-list of {POST,PUT,DELETE} that would let PATCH slip.
+    let resp = anon
+        .patch(server.url("/pages/preview"))
+        .form(&[("page_markdown", "# x")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "anon PATCH preview must be blocked by the layer"
+    );
+
+    // The WebAuthn ceremony POST is allowlisted: the layer must NOT block it. It
+    // reaches its handler (which then fails for lack of ceremony state) — the
+    // point is it is not the layer's 'Admin only' 403.
+    let resp = anon
+        .post(server.url("/login/finish_authentication"))
+        .body("{}")
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .unwrap();
+    assert_ne!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "the login ceremony must not be gated by the admin layer"
+    );
+}

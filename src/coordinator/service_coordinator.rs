@@ -9,7 +9,7 @@ use crate::settings::Settings;
 use crate::{
     coordinator::ip_provider_service::IpProviderService, db::database_handle::DatabaseHandle,
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use hickory_resolver::TokioAsyncResolver;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;

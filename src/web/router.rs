@@ -10,7 +10,10 @@ use crate::{
                 redirect_to_first_page,
             },
         },
-        middleware::request_log::log_requests,
+        middleware::{
+            request_log::log_requests,
+            require_admin_for_mutations::require_admin_for_mutations,
+        },
     },
 };
 use axum::{http::Uri, routing::get, Router};
@@ -87,6 +90,10 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
                     .on_response(()),
             )
             .layer(session_layer)
+            // Fail-closed authz (Phase E): GET/HEAD/OPTIONS public; every other
+            // method requires admin by default (except the anonymous auth
+            // ceremony). INNER to session_layer so SessionData is populated.
+            .layer(axum::middleware::from_fn(require_admin_for_mutations))
             .layer(CompressionLayer::new()),
     );
 
