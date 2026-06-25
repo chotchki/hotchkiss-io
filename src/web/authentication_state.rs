@@ -19,6 +19,15 @@ impl AuthenticationState {
             _ => false,
         }
     }
+
+    /// The logged-in user's display name, if authenticated — drives the nav's
+    /// login-state indicator (`Some` ⇒ show the name + a logout link).
+    pub fn display_name(&self) -> Option<&str> {
+        match self {
+            AuthenticationState::Authenticated(user) => Some(&user.display_name),
+            _ => None,
+        }
+    }
 }
 
 impl Display for AuthenticationState {

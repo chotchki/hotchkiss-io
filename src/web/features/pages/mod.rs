@@ -12,7 +12,7 @@ use crate::{
 use askama::Template;
 use axum::{
     Form, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::{IntoResponse, Redirect, Response},
     routing::get,
 };
@@ -67,12 +67,23 @@ pub struct GetPageTemplate {
     pub pages_path: Vec<ContentPageDao>,
     pub children_pages: Vec<ContentPageDao>,
     pub rendered_markdown: String,
+    /// Admin editor visible? Driven by `?edit` so admin defaults to the clean
+    /// reader view and opts into the editor.
+    pub edit: bool,
+}
+
+/// `?edit` (any value) toggles the admin editor on a page view; absent = the
+/// clean reader view.
+#[derive(Debug, Deserialize)]
+pub struct EditQuery {
+    pub edit: Option<String>,
 }
 
 pub async fn get_page_path(
     State(state): State<AppState>,
     session_data: SessionData,
     Path(page_path): Path<String>,
+    Query(edit_q): Query<EditQuery>,
 ) -> Result<Response, AppError> {
     let page_names: Vec<&str> = page_path.split("/").collect();
     warn!("Found the following pages names {:?}", page_names);
@@ -96,6 +107,7 @@ pub async fn get_page_path(
                 children_pages: ContentPageDao::find_by_parent(&state.pool, Some(lp.page_id))
                     .await?,
                 rendered_markdown: transform(&lp.page_markdown)?,
+                edit: edit_q.edit.is_some(),
             };
 
             Ok(HtmlTemplate(gpt).into_response())
@@ -200,8 +212,8 @@ pub async fn post_top_level_page_path(
     cp.page_title = Some(title);
     cp.update(&state.pool).await?;
 
-    // Land the author on the new page (in the editor), not back on the list.
-    Ok(htmx_redirect(&format!("/pages/{slug}"))?)
+    // Land the author on the new page in edit mode, not back on the list.
+    Ok(htmx_redirect(&format!("/pages/{slug}?edit=1"))?)
 }
 
 pub async fn post_page_path(
@@ -234,7 +246,7 @@ pub async fn post_page_path(
             cp.page_title = Some(title);
             cp.update(&state.pool).await?;
 
-            Ok(htmx_redirect(&format!("/pages/{page_path}/{slug}"))?)
+            Ok(htmx_redirect(&format!("/pages/{page_path}/{slug}?edit=1"))?)
         }
         None => Ok((StatusCode::NOT_FOUND, "No such parent page").into_response()),
     }

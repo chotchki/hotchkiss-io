@@ -2,7 +2,10 @@ use crate::{
     db::dao::content_pages::ContentPageDao,
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
-        features::{pages::GetPageTemplate, top_bar::TopBar},
+        features::{
+            pages::{EditQuery, GetPageTemplate},
+            top_bar::TopBar,
+        },
         html_template::HtmlTemplate, markdown::{excerpt::excerpt, transformer::transform},
         session::SessionData,
     },
@@ -10,7 +13,7 @@ use crate::{
 use anyhow::anyhow;
 use askama::Template;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
@@ -176,6 +179,7 @@ pub async fn show_post(
     State(state): State<AppState>,
     session_data: SessionData,
     Path(slug): Path<String>,
+    Query(edit_q): Query<EditQuery>,
 ) -> Result<Response, AppError> {
     let pages_path = ContentPageDao::find_by_path(&state.pool, &["blog", &slug]).await?;
 
@@ -191,6 +195,7 @@ pub async fn show_post(
         pages_path: pages_path.clone(),
         children_pages: ContentPageDao::find_by_parent(&state.pool, Some(lp.page_id)).await?,
         rendered_markdown: transform(&lp.page_markdown)?,
+        edit: edit_q.edit.is_some(),
     };
     Ok(HtmlTemplate(gpt).into_response())
 }

@@ -63,6 +63,12 @@
                         </form>
                     </li>
                     {% endif %}
+                    {% if let Some(name) = auth_state.display_name() %}
+                    <li class="bg-navy py-2 px-6 rounded-t font-display text-center">
+                        <span class="text-sm text-div-grey">{{name}}</span>
+                        <a class="text-sm text-yellow uppercase ml-2" href="/login/logout">Logout</a>
+                    </li>
+                    {% endif %}
                 </ul>
             </div>
 
