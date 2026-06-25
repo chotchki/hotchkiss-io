@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
     // TailwindCSS and Sqlx Migrations Change Tracking
     println!("cargo::rerun-if-changed=assets/scripts");
     println!("cargo::rerun-if-changed=templates");
-    println!("cargo::rerun-if-changed=migrations");
+    println!("cargo::rerun-if-changed=src/db/migrations");
 
     let out_dir = env::var("OUT_DIR").context("No OUT_DIR, cargo must be broken")?;
 

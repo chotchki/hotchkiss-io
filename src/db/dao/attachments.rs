@@ -70,28 +70,6 @@ impl AttachmentDao {
         Ok(())
     }
 
-    pub async fn update(&self, executor: impl SqliteExecutor<'_>) -> Result<()> {
-        query!(
-            r#"
-        UPDATE attachments
-        SET 
-            attachment_name = ?1,
-            mime_type = ?2,
-            attachment_content = ?3
-        WHERE
-            attachment_id = ?4
-        "#,
-            self.attachment_name,
-            self.mime_type,
-            self.attachment_content,
-            self.attachment_id
-        )
-        .execute(executor)
-        .await?;
-
-        Ok(())
-    }
-
     pub async fn find_attachments_by_page_id(
         executor: impl SqliteExecutor<'_>,
         page_id: i64,
@@ -186,7 +164,7 @@ mod tests {
             ContentPageDao::create(&pool, None, "test".to_string(), None, "".to_string(), None)
                 .await?;
 
-        let mut attach = AttachmentDao::create(
+        let attach = AttachmentDao::create(
             &pool,
             cp.page_id,
             "image.jpg".to_string(),
@@ -194,9 +172,6 @@ mod tests {
             "test string".as_bytes().to_vec(),
         )
         .await?;
-
-        attach.mime_type = "fake".to_string();
-        attach.update(&pool).await?;
 
         let found_attach =
             AttachmentDao::find_attachment_by_name(&pool, cp.page_id, &attach.attachment_name)

@@ -52,24 +52,6 @@ impl AcmeAccountDao {
 
         Ok(iad)
     }
-
-    pub async fn update(&self, pool: &SqlitePool) -> Result<()> {
-        query!(
-            r#"
-        update instant_acme_domains
-        set
-            domain = ?1,
-            account_credentials = ?2
-        where domain = ?1
-        "#,
-            self.domain,
-            self.account_credentials
-        )
-        .execute(pool)
-        .await?;
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]

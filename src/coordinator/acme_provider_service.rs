@@ -5,7 +5,6 @@ use crate::{
     db::dao::certificate::CertificateDao,
 };
 use anyhow::Result;
-use axum_server::tls_rustls::RustlsConfig;
 use rustls::ServerConfig;
 use sqlx::SqlitePool;
 use std::{sync::Arc, time::Duration};
@@ -38,7 +37,7 @@ impl AcmeProviderService {
         })
     }
 
-    pub async fn start(&self, tls_config_sender: Sender<RustlsConfig>) -> Result<()> {
+    pub async fn start(&self, tls_config_sender: Sender<Arc<ServerConfig>>) -> Result<()> {
         let mut current_certificate: Option<CertificateLoader> = None;
         loop {
             if let Err(e) = self
@@ -61,7 +60,7 @@ impl AcmeProviderService {
     async fn refresh_once(
         &self,
         current_certificate: &mut Option<CertificateLoader>,
-        tls_config_sender: &Sender<RustlsConfig>,
+        tls_config_sender: &Sender<Arc<ServerConfig>>,
     ) -> Result<()> {
         info!("Loading certificates");
         let new_cert =
@@ -79,10 +78,12 @@ impl AcmeProviderService {
                     .with_no_client_auth()
                     .with_single_cert(cl.certificate_chain.clone(), cl.private_key.clone_key())?,
             );
-            let rusttls_cfg = RustlsConfig::from_config(server_config);
 
-            info!("Sending Rustls config");
-            tls_config_sender.send(rusttls_cfg.clone())?;
+            // Broadcast the renewable ServerConfig; the endpoints service owns
+            // the live RustlsConfig handle and reloads it (so a renewed cert is
+            // applied to the running server without a restart).
+            info!("Broadcasting refreshed TLS server config");
+            tls_config_sender.send(server_config)?;
 
             //Sleeping to await the next refresh
             sleep(CERT_REFRESH).await;

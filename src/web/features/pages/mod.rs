@@ -20,7 +20,7 @@ use axum::{
 use http::StatusCode;
 use preview::preview_router;
 use serde::Deserialize;
-use tracing::warn;
+use tracing::debug;
 
 use super::top_bar::TopBar;
 
@@ -87,10 +87,9 @@ pub async fn get_page_path(
     Query(edit_q): Query<EditQuery>,
 ) -> Result<Response, AppError> {
     let page_names: Vec<&str> = page_path.split("/").collect();
-    warn!("Found the following pages names {:?}", page_names);
+    debug!("Resolving page path {:?}", page_names);
 
     let pages_path = ContentPageDao::find_by_path(&state.pool, &page_names).await?;
-    warn!("Found the following pages path {:?}", pages_path);
 
     match pages_path.last() {
         None => Ok((StatusCode::NOT_FOUND, "No such page").into_response()),

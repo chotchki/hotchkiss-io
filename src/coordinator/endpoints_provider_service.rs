@@ -12,13 +12,17 @@ use axum::{
 use axum_extra::extract::Host;
 use axum_server::tls_rustls::RustlsConfig;
 use reqwest::StatusCode;
+use rustls::ServerConfig;
 use sqlx::SqlitePool;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
     sync::Arc,
 };
-use tokio::{sync::broadcast::Receiver, task::JoinSet};
+use tokio::{
+    sync::broadcast::{error::RecvError, Receiver},
+    task::JoinSet,
+};
 use tower_sessions::ExpiredDeletion;
 use tower_sessions_sqlx_store::SqliteStore;
 use tracing::debug;
@@ -64,8 +68,9 @@ impl EndpointsProviderService {
         })
     }
 
-    pub async fn start(&self, mut tls_config_reciever: Receiver<RustlsConfig>) -> Result<()> {
-        let config = tls_config_reciever.recv().await?;
+    pub async fn start(&self, mut tls_config_reciever: Receiver<Arc<ServerConfig>>) -> Result<()> {
+        let server_config = tls_config_reciever.recv().await?;
+        let rustls_config = RustlsConfig::from_config(server_config);
 
         let app_state = AppState {
             session_store: self.session_store.clone(),
@@ -86,8 +91,30 @@ impl EndpointsProviderService {
         //);
 
         let mut set = JoinSet::new();
-        set.spawn(Self::https_server(https_addr, app_state, config));
+        set.spawn(Self::https_server(https_addr, app_state, rustls_config.clone()));
         set.spawn(Self::http_server(http_addr, self.https_port));
+
+        // Apply renewed certs to the RUNNING server. ACME broadcasts a fresh
+        // ServerConfig on each refresh; reload_from_config swaps it into the
+        // Arc-backed RustlsConfig the https server above is serving from, so a
+        // renewal takes effect without a restart. (Previously the first config
+        // was used forever — a long-running instance would serve an expired cert.)
+        let reload_config = rustls_config.clone();
+        set.spawn(async move {
+            loop {
+                match tls_config_reciever.recv().await {
+                    Ok(new_config) => {
+                        tracing::info!("Reloading TLS certificate from refreshed config");
+                        reload_config.reload_from_config(new_config);
+                    }
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => {
+                        tracing::warn!("TLS config channel closed; cert reloads stopped");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(60 * 60)).await;
+                    }
+                }
+            }
+        });
 
         // Session GC: prune expired sessions hourly. Self-healing — a transient
         // SQLite error is logged, not propagated, so it can't fail the JoinSet

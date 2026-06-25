@@ -68,3 +68,54 @@ impl FromRow<'_, SqliteRow> for CertificateDao {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn save_find_and_upsert(pool: SqlitePool) -> Result<()> {
+        assert!(
+            CertificateDao::find_by_domain(&pool, "hotchkiss.io")
+                .await?
+                .is_none(),
+            "no cert before save"
+        );
+
+        let cert = CertificateDao {
+            domain: "hotchkiss.io".to_string(),
+            certificate_chain: "CHAIN-PEM".to_string(),
+            private_key: "KEY-PEM".to_string(),
+        };
+        cert.save(&pool).await?;
+
+        let found = CertificateDao::find_by_domain(&pool, "hotchkiss.io")
+            .await?
+            .unwrap();
+        assert_eq!(found.certificate_chain, "CHAIN-PEM");
+        assert_eq!(found.private_key, "KEY-PEM");
+
+        // Saving the same domain upserts (ON CONFLICT) — renewal replaces in place.
+        CertificateDao {
+            domain: "hotchkiss.io".to_string(),
+            certificate_chain: "CHAIN-2".to_string(),
+            private_key: "KEY-2".to_string(),
+        }
+        .save(&pool)
+        .await?;
+        let found = CertificateDao::find_by_domain(&pool, "hotchkiss.io")
+            .await?
+            .unwrap();
+        assert_eq!(found.certificate_chain, "CHAIN-2");
+        assert_eq!(found.private_key, "KEY-2");
+
+        // A different domain is independent.
+        assert!(
+            CertificateDao::find_by_domain(&pool, "other.io")
+                .await?
+                .is_none()
+        );
+
+        Ok(())
+    }
+}

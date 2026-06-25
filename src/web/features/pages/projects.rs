@@ -23,7 +23,6 @@ pub fn projects_router() -> Router<AppState> {
 pub struct ListProjectsTemplate {
     pub top_bar: TopBar,
     pub auth_state: AuthenticationState,
-    pub page_path: String,
     pub projects: Vec<ContentPageDao>,
 }
 
@@ -43,7 +42,6 @@ pub async fn show_all_projects(
     let lpt = ListProjectsTemplate {
         top_bar: TopBar::create(&state.pool, "projects").await?,
         auth_state: session_data.auth_state,
-        page_path: "/projects".to_string(),
         projects,
     };
     Ok(HtmlTemplate(lpt).into_response())

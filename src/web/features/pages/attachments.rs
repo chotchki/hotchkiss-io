@@ -18,7 +18,6 @@ use axum::{
 use http::{header, StatusCode};
 use image::{ImageFormat, ImageReader};
 use serde::Deserialize;
-use tracing::debug;
 
 const MAX_WIDTH: u32 = 8000; //No reason to resize above this width
 
@@ -126,8 +125,6 @@ pub async fn load_attachment(
     Path((page_id, attachment_name)): Path<(i64, String)>,
     Query(size_params): Query<AttachmentSizeParams>,
 ) -> Result<Response, AppError> {
-    debug!("We got here");
-
     let attachment =
         AttachmentDao::find_attachment_by_name(&state.pool, page_id, &attachment_name).await?;
 
@@ -139,8 +136,6 @@ pub async fn load_attachment_by_id(
     Path(attachment_id): Path<i64>,
     Query(size_params): Query<AttachmentSizeParams>,
 ) -> Result<Response, AppError> {
-    debug!("We got here");
-
     let attachment = AttachmentDao::find_attachment_by_id(&state.pool, attachment_id).await?;
 
     maybe_resize_attachment(attachment, size_params)
