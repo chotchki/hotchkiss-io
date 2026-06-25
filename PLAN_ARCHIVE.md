@@ -210,3 +210,15 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] D.0 - Phase exit: analytics shows top external referrers + a Top-Pages Content/All toggle; live on prod
 - [x] D.1 - Implement: referrers (count_by_referer) + Top-Pages content/all status toggle + tests/docs
 
+---
+
+## 2026-06-25
+
+## Phase E - Fail-closed authz middleware layer
+- [x] E.0 - Phase exit: one fail-closed authz layer (GET public; non-GET=admin by default; login/logout override); per-handler checks removed; live on prod
+- [x] E.1 - Audit every route + finalize the anonymous-mutation allowlist
+- [x] E.2 - Build the central fail-closed authz middleware (method-aware + allowlist override)
+- [x] E.3 - Remove the now-redundant per-handler is_admin checks (audited)
+- [x] E.4 - Tests: site-wide non-GET blocked for anon/registered; login ceremony + logout still work; admin works
+- [x] E.5 - Docs: flip CLAUDE.md authz note + SPEC to the fail-closed layer
+
