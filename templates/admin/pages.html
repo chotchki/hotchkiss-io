@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Pages{% endblock %}
+
+{% block head %}{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-display text-navy mb-4">Manage Pages</h1>
+
+<form hx-post="/pages" class="flex flex-row gap-2 mb-6">
+    <input class="border border-navy/30 rounded px-3 py-2 grow" name="page_title" type="text"
+        placeholder="New page title" required />
+    <button class="px-3 py-2 bg-navy hover:bg-navy/90 rounded text-div-grey text-sm whitespace-nowrap" type="submit">
+        <i class="fa-solid fa-plus"></i> Create page</button>
+</form>
+
+{% if pages.is_empty() %}
+<p class="text-navy/60 italic">No pages yet.</p>
+{% else %}
+<ul class="flex flex-col gap-1 list-none p-0">
+    {% for page in pages %}
+    <li class="flex flex-row items-center gap-3 border border-navy/15 rounded px-3 py-2">
+        <span class="font-display text-navy grow">{{page.display_title()}}</span>
+        {% if page.special_page %}<span class="text-xs text-navy/50 uppercase">special</span>{% endif %}
+        <a class="text-sm text-navy underline" href="/pages/{{page.page_name}}">View</a>
+        <a class="text-sm text-navy underline" href="/pages/{{page.page_name}}?edit=1">Edit</a>
+    </li>
+    {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

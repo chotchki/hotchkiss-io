@@ -58,6 +58,35 @@ async fn analytics_requires_admin() {
 }
 
 #[tokio::test]
+async fn admin_pages_editor_requires_admin() {
+    let server = spawn_test_server().await.expect("spawn");
+
+    // anonymous → 403 (GET is public site-wide, but /admin is require_admin-gated)
+    let resp = client()
+        .get(server.url("/admin/pages"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    // Admin → 200, the dedicated page-management view renders
+    let admin = client();
+    let resp = admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let resp = admin
+        .get(server.url("/admin/pages"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(resp.text().await.unwrap().contains("Manage Pages"));
+}
+
+#[tokio::test]
 async fn request_log_middleware_records_requests() {
     let server = spawn_test_server().await.expect("spawn");
     server
