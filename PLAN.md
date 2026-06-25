@@ -134,9 +134,10 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] F.2 - Logged-in reader view: default to the clean page, an Edit toggle reveals the editor
 - [x] F.3 - New-page creation redirects to the new page's editor (not htmx_refresh on the list)
 - [x] F.4 - Login-state indicator + logout in the nav
-- [ ] F.5 - Restyle the page editor (raw textarea + unstyled form -> clean)
-- [ ] F.6 - Nav / admin-chrome cleanup: move the +/new-page box out of the nav, fix admin overflow
-- [ ] F.7 - F e2e + docs (content-model: page_title; admin-UX flows)
+- [x] F.5 - Restyle the page editor (raw textarea + unstyled form -> clean)
+- [x] F.6 - Nav / admin-chrome cleanup: move the +/new-page box out of the nav, fix admin overflow
+- [x] F.7 - F e2e + docs (content-model: page_title; admin-UX flows)
+- [x] F.8 - Title rendering: one weighted H1 (display_title), strip the leading markdown H1, breadcrumb = ancestors only
 ## Phase G - Reliability hardening (launchd respawns, so crash-loop/correctness focus)
 - [ ] G.0 - Phase exit: coordinator + cert/DNS path self-heal; no single transient error or panic can wedge/kill the live site; AVIF + session-unwrap correctness bugs fixed
 - [ ] G.1 - Coordinator loops self-heal (ACME/DNS/session-GC: match-log-continue like backup.rs)
