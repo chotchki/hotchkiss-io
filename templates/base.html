@@ -37,9 +37,9 @@
         <div class="p-2 min-w-full">
             <!-- Navigation -->
             <div class="max-w-screen-md pl-2">
-                <!-- Desktop (lg+): single-row nav — tabs left, slim admin cluster right -->
+                <!-- Desktop (lg+): single-row nav — tabs + admin controls in one row -->
                 <div class="hidden lg:flex flex-row items-end gap-2">
-                    <ul class="flex flex-row flex-wrap list-none">
+                    <ul class="flex flex-row flex-wrap list-none gap-px">
                         {% for item in top_bar.0 %}
                         {% if item.0 == "login" && auth_state.display_name().is_some() %}
                         {# Logged in: the LOGIN tab is redundant (admin cluster has Logout) #}
@@ -55,11 +55,11 @@
                         {% endfor %}
                     </ul>
                     {% if auth_state.display_name().is_some() %}
-                    <div class="ml-auto flex flex-row items-center gap-4 bg-navy rounded-t px-4 py-2 text-div-grey text-sm">
-                        {% if auth_state.is_admin() %}<span class="text-yellow uppercase font-display">&bull; Admin</span>{% endif %}
-                        <a class="uppercase hover:text-yellow" href="/login/logout">Logout</a>
+                    <div class="flex flex-row items-center gap-4 bg-navy rounded-t px-4 py-2 font-display uppercase text-sm text-div-grey">
+                        {% if auth_state.is_admin() %}<a class="text-yellow hover:text-yellow/80" href="/admin/pages">&bull; Admin</a>{% endif %}
+                        <a class="hover:text-yellow" href="/login/logout">Logout</a>
                         {% if auth_state.is_admin() %}
-                        <a class="hover:text-yellow text-base leading-none" href="/admin/pages" title="Manage pages" aria-label="Manage pages"><i class="fa-solid fa-plus"></i></a>
+                        <a class="hover:text-yellow text-base leading-none" href="/admin/pages" title="New page" aria-label="New page"><i class="fa-solid fa-plus"></i></a>
                         {% endif %}
                     </div>
                     {% endif %}
