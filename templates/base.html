@@ -37,7 +37,8 @@
         <div class="p-2 min-w-full">
             <!-- Navigation -->
             <div class="max-w-screen-md pl-2">
-                <ul class="list-none flex flex-row flex-wrap">
+                <!-- Desktop (lg+): horizontal tabs -->
+                <ul class="hidden lg:flex list-none flex-row flex-wrap">
                     {% for item in top_bar.0 %}
                     {% if item.0 == "login" && auth_state.display_name().is_some() %}
                     {# Logged in: the LOGIN tab is redundant (admin bar shows name + Logout) #}
@@ -52,6 +53,27 @@
                     {% endif %}
                     {% endfor %}
                 </ul>
+
+                <!-- Tablet + mobile (below lg): a hamburger menu — native <details>, no JS -->
+                <details class="lg:hidden">
+                    <summary class="list-none [&::-webkit-details-marker]:hidden cursor-pointer inline-flex items-center gap-2 bg-navy text-div-grey px-4 py-3 rounded font-display uppercase text-sm">
+                        <i class="fa-solid fa-bars"></i> Menu
+                    </summary>
+                    <ul class="list-none flex flex-col bg-navy rounded-b mt-1 overflow-hidden">
+                        {% for item in top_bar.0 %}
+                        {% if item.0 == "login" && auth_state.display_name().is_some() %}
+                        {% else if item.1 == true %}
+                        <li class="border-l-4 border-yellow">
+                            <a class="block px-4 py-2 text-sm text-yellow uppercase font-display" href="/pages/{{item.0}}">{{item.0}}</a>
+                        </li>
+                        {% else %}
+                        <li>
+                            <a class="block px-4 py-2 text-sm text-div-grey uppercase font-display hover:bg-white/10" href="/pages/{{item.0}}">{{item.0}}</a>
+                        </li>
+                        {% endif %}
+                        {% endfor %}
+                    </ul>
+                </details>
                 {% if let Some(name) = auth_state.display_name() %}
                 <!-- Admin bar: only when logged in; keeps admin controls out of the content tabs -->
                 <div class="flex flex-row flex-wrap items-center gap-x-4 gap-y-2 bg-navy px-3 py-2 rounded-b text-div-grey text-sm">
