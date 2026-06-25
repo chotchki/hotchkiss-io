@@ -34,7 +34,7 @@ pub async fn show_admin_pages(
     let pages = ContentPageDao::find_by_parent(&state.pool, None).await?;
 
     let template = AdminPagesTemplate {
-        top_bar: TopBar::create(&state.pool, "").await?,
+        top_bar: TopBar::create(&state.pool, "admin").await?,
         auth_state: session_data.auth_state,
         pages,
     };

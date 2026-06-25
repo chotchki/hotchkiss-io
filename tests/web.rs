@@ -83,7 +83,11 @@ async fn admin_pages_editor_requires_admin() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert!(resp.text().await.unwrap().contains("Manage Pages"));
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("Manage Pages"));
+    // On the admin page the Admin nav tab renders active (no content tab is named
+    // "admin", so the only active-yellow indicator is the Admin tab itself).
+    assert!(body.contains("border-b-yellow"));
 }
 
 #[tokio::test]

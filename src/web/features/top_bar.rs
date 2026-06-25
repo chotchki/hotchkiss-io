@@ -2,12 +2,18 @@ use crate::db::dao::content_pages::ContentPageDao;
 use anyhow::Result;
 use sqlx::SqliteExecutor;
 
-/// A wrapper type used to pass the navigation tabs and which one is active
-pub struct TopBar(pub Vec<(String, bool)>);
+/// Navigation tabs plus the active nav key. `tabs` is the content pages as
+/// `(name, is_active)`; `active` is the raw active key so the hardcoded admin
+/// tabs (e.g. `"admin"`) can mark themselves active by the same mechanism — the
+/// page being rendered decides what's active, not a per-tab hardcode.
+pub struct TopBar {
+    pub tabs: Vec<(String, bool)>,
+    pub active: String,
+}
 
 impl TopBar {
     pub async fn create(executor: impl SqliteExecutor<'_>, active_page: &str) -> Result<Self> {
-        let pages = ContentPageDao::find_by_parent(executor, None)
+        let tabs = ContentPageDao::find_by_parent(executor, None)
             .await?
             .into_iter()
             .map(|cpd| cpd.page_name)
@@ -16,7 +22,10 @@ impl TopBar {
                 (name, m)
             })
             .collect();
-        Ok(TopBar(pages))
+        Ok(TopBar {
+            tabs,
+            active: active_page.to_string(),
+        })
     }
 }
 
@@ -48,20 +57,20 @@ mod tests {
         .await?;
 
         let tb = TopBar::create(&pool, "first").await?;
-        for (title, active) in &tb.0 {
+        for (title, active) in &tb.tabs {
             if title == "first" {
                 assert!(*active);
             } else {
                 assert!(!*active);
             }
         }
-        assert!(!tb.0.is_empty());
+        assert!(!tb.tabs.is_empty());
 
         let tb = TopBar::create(&pool, "not here").await?;
-        for (_, active) in &tb.0 {
+        for (_, active) in &tb.tabs {
             assert!(!*active);
         }
-        assert!(!tb.0.is_empty());
+        assert!(!tb.tabs.is_empty());
 
         Ok(())
     }

@@ -80,7 +80,7 @@ pub async fn show_analytics(
     let recent = RequestLogDao::recent(&state.pool, 50).await?;
 
     let tmpl = AnalyticsTemplate {
-        top_bar: TopBar::create(&state.pool, "").await?,
+        top_bar: TopBar::create(&state.pool, "admin").await?,
         auth_state: session_data.auth_state,
         since_days,
         metric: metric.to_string(),

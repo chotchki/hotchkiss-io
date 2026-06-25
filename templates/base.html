@@ -40,7 +40,7 @@
                 <!-- Desktop (lg+): single-row nav — content tabs + admin tabs (own group) -->
                 <div class="hidden lg:flex flex-row items-end gap-4">
                     <ul class="flex flex-row flex-wrap list-none gap-px">
-                        {% for item in top_bar.0 %}
+                        {% for item in top_bar.tabs %}
                         {% if item.0 == "login" && auth_state.display_name().is_some() %}
                         {# Logged in: the LOGIN tab is redundant (the admin group has Logout) #}
                         {% else if item.1 == true %}
@@ -58,8 +58,8 @@
                     {# Admin controls as their own tab group — same pill style, never marked active #}
                     <ul class="flex flex-row list-none gap-px">
                         {% if auth_state.is_admin() %}
-                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-transparent">
-                            <a class="text-sm text-div-grey uppercase hover:text-yellow" href="/admin/pages">Admin</a>
+                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 {% if top_bar.active == "admin" %}border-b-yellow{% else %}border-b-transparent{% endif %}">
+                            <a class="text-sm uppercase {% if top_bar.active == "admin" %}text-yellow{% else %}text-div-grey hover:text-yellow{% endif %}" href="/admin/pages">Admin</a>
                         </li>
                         {% endif %}
                         <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-transparent">
@@ -81,7 +81,7 @@
                     </summary>
                     <div class="bg-navy rounded-b overflow-hidden">
                         <ul class="list-none flex flex-col">
-                            {% for item in top_bar.0 %}
+                            {% for item in top_bar.tabs %}
                             {% if item.0 == "login" && auth_state.display_name().is_some() %}
                             {% else if item.1 == true %}
                             <li class="border-l-4 border-yellow">
@@ -96,7 +96,9 @@
                         </ul>
                         {% if auth_state.display_name().is_some() %}
                         <div class="flex flex-col border-t border-white/15 text-div-grey">
-                            {% if auth_state.is_admin() %}<span class="block border-l-4 border-transparent px-4 py-2 text-xs uppercase font-display text-yellow">&bull; Admin</span>{% endif %}
+                            {% if auth_state.is_admin() %}
+                            <a class="block border-l-4 px-4 py-2 text-sm uppercase font-display {% if top_bar.active == "admin" %}border-yellow text-yellow{% else %}border-transparent hover:bg-white/10{% endif %}" href="/admin/pages">Admin</a>
+                            {% endif %}
                             <a class="block border-l-4 border-transparent px-4 py-2 text-sm uppercase font-display hover:bg-white/10" href="/login/logout">Logout</a>
                             {% if auth_state.is_admin() %}
                             <a class="block border-l-4 border-transparent px-4 py-2 text-sm uppercase font-display hover:bg-white/10" href="/admin/pages"><i class="fa-solid fa-plus"></i> New page</a>
