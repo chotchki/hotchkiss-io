@@ -48,7 +48,7 @@
                             <a class="text-sm text-yellow uppercase" href="/pages/{{item.0}}">{{item.0}}</a>
                         </li>
                         {% else %}
-                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center">
+                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-transparent">
                             <a class="text-sm text-div-grey uppercase" href="/pages/{{item.0}}">{{item.0}}</a>
                         </li>
                         {% endif %}
@@ -58,15 +58,15 @@
                     {# Admin controls as their own tab group — same pill style, never marked active #}
                     <ul class="flex flex-row list-none gap-px">
                         {% if auth_state.is_admin() %}
-                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center">
+                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-transparent">
                             <a class="text-sm text-div-grey uppercase hover:text-yellow" href="/admin/pages">Admin</a>
                         </li>
                         {% endif %}
-                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center">
+                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-transparent">
                             <a class="text-sm text-div-grey uppercase hover:text-yellow" href="/login/logout">Logout</a>
                         </li>
                         {% if auth_state.is_admin() %}
-                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center">
+                        <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-transparent">
                             <a class="text-sm text-div-grey uppercase hover:text-yellow" href="/admin/pages" title="New page" aria-label="New page"><i class="fa-solid fa-plus"></i></a>
                         </li>
                         {% endif %}
@@ -88,7 +88,7 @@
                                 <a class="block px-4 py-2 text-sm text-yellow uppercase font-display" href="/pages/{{item.0}}">{{item.0}}</a>
                             </li>
                             {% else %}
-                            <li>
+                            <li class="border-l-4 border-transparent">
                                 <a class="block px-4 py-2 text-sm text-div-grey uppercase font-display hover:bg-white/10" href="/pages/{{item.0}}">{{item.0}}</a>
                             </li>
                             {% endif %}
@@ -96,10 +96,10 @@
                         </ul>
                         {% if auth_state.display_name().is_some() %}
                         <div class="flex flex-col border-t border-white/15 text-div-grey">
-                            {% if auth_state.is_admin() %}<span class="px-4 py-2 text-xs uppercase font-display text-yellow">&bull; Admin</span>{% endif %}
-                            <a class="block px-4 py-2 text-sm uppercase font-display hover:bg-white/10" href="/login/logout">Logout</a>
+                            {% if auth_state.is_admin() %}<span class="block border-l-4 border-transparent px-4 py-2 text-xs uppercase font-display text-yellow">&bull; Admin</span>{% endif %}
+                            <a class="block border-l-4 border-transparent px-4 py-2 text-sm uppercase font-display hover:bg-white/10" href="/login/logout">Logout</a>
                             {% if auth_state.is_admin() %}
-                            <a class="block px-4 py-2 text-sm uppercase font-display hover:bg-white/10" href="/admin/pages"><i class="fa-solid fa-plus"></i> New page</a>
+                            <a class="block border-l-4 border-transparent px-4 py-2 text-sm uppercase font-display hover:bg-white/10" href="/admin/pages"><i class="fa-solid fa-plus"></i> New page</a>
                             {% endif %}
                         </div>
                         {% endif %}
