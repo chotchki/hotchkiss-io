@@ -356,4 +356,6 @@ async fn analytics_renders_chart_and_content_pages() {
         body.contains("/pages/test-page"),
         "the content page should appear in top pages"
     );
+    assert!(body.contains("Top referrers"), "expected the referrers panel");
+    assert!(body.contains("paths=all"), "expected the Content/All toggle");
 }

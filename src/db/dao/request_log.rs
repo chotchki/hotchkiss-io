@@ -49,6 +49,12 @@ pub struct UserAgentCount {
     pub count: i64,
 }
 
+#[derive(Clone, Debug)]
+pub struct RefererCount {
+    pub referer: String,
+    pub count: i64,
+}
+
 fn window(days: i64) -> String {
     // SQLite datetime modifier — `datetime('now', '-7 days')`.
     format!("-{} days", days.max(0))
@@ -149,6 +155,34 @@ impl RequestLogDao {
         .await?)
     }
 
+    /// Top *external* referrers over the window: non-null, and excluding our own
+    /// host (internal navigation). Referrers are spoofable / often stripped, so
+    /// treat this as directional, not authoritative.
+    pub async fn count_by_referer(
+        executor: impl SqliteExecutor<'_>,
+        since_days: i64,
+        limit: i64,
+    ) -> Result<Vec<RefererCount>> {
+        let w = window(since_days);
+        Ok(query_as!(
+            RefererCount,
+            r#"
+            SELECT referer as "referer!: String", COUNT(*) as "count!: i64"
+            FROM request_log
+            WHERE ts >= datetime('now', ?1)
+              AND referer IS NOT NULL
+              AND referer NOT LIKE '%hotchkiss.io%'
+            GROUP BY referer
+            ORDER BY COUNT(*) DESC, referer ASC
+            LIMIT ?2
+            "#,
+            w,
+            limit
+        )
+        .fetch_all(executor)
+        .await?)
+    }
+
     pub async fn count_by_day(
         executor: impl SqliteExecutor<'_>,
         since_days: i64,
@@ -191,12 +225,15 @@ impl RequestLogDao {
         .await?)
     }
 
-    /// Top *content* paths over the window, excluding static assets + well-known
-    /// files so real pages rank. The exclusion is a plain prefix/exact set —
-    /// amend it here if a new static prefix shows up.
+    /// Top paths over the window, excluding static assets + well-known files so
+    /// real routes rank. `max_status` is an exclusive ceiling on the HTTP status:
+    /// pass 400 for successful-only ("Content"), or a high value (e.g. 10000) to
+    /// include 4xx/5xx — the bot/scanner probes ("All"). The static exclusion is
+    /// a plain prefix/exact set — amend it here if a new static prefix shows up.
     pub async fn count_by_content_path(
         executor: impl SqliteExecutor<'_>,
         since_days: i64,
+        max_status: i64,
         limit: i64,
     ) -> Result<Vec<PathCount>> {
         let w = window(since_days);
@@ -206,6 +243,7 @@ impl RequestLogDao {
             SELECT path, COUNT(*) as "count!: i64"
             FROM request_log
             WHERE ts >= datetime('now', ?1)
+              AND status < ?2
               AND path NOT LIKE '/styles%'
               AND path NOT LIKE '/vendor%'
               AND path NOT LIKE '/scripts%'
@@ -215,9 +253,10 @@ impl RequestLogDao {
               AND path NOT IN ('/favicon.ico', '/manifest.webmanifest', '/robots.txt', '/apple-touch-icon.png')
             GROUP BY path
             ORDER BY COUNT(*) DESC, path ASC
-            LIMIT ?2
+            LIMIT ?3
             "#,
             w,
+            max_status,
             limit
         )
         .fetch_all(executor)
@@ -285,7 +324,7 @@ mod tests {
         assert_eq!(RequestLogDao::count_since(&pool, 1).await?, 5);
         assert_eq!(RequestLogDao::distinct_ip_count(&pool, 1).await?, 2);
 
-        let by_path = RequestLogDao::count_by_content_path(&pool, 1, 10).await?;
+        let by_path = RequestLogDao::count_by_content_path(&pool, 1, 400, 10).await?;
         assert_eq!(by_path[0].path, "/pages/Resume");
         assert_eq!(by_path[0].count, 3);
 
@@ -328,11 +367,12 @@ mod tests {
             entry("/vendor/htmx/htmx.js", 200, Some("1.1.1.1"), None),
             entry("/diagram/abc123", 200, Some("1.1.1.1"), None),
             entry("/favicon.ico", 200, Some("1.1.1.1"), None),
+            entry("/cgi-bin/luci", 404, Some("9.9.9.9"), None), // bot probe, 404
         ] {
             RequestLogDao::insert(&pool, &e).await?;
         }
 
-        let top = RequestLogDao::count_by_content_path(&pool, 1, 25).await?;
+        let top = RequestLogDao::count_by_content_path(&pool, 1, 400, 25).await?;
         let paths: Vec<&str> = top.iter().map(|p| p.path.as_str()).collect();
 
         assert!(paths.contains(&"/pages/Resume"), "content page must rank: {paths:?}");
@@ -345,6 +385,23 @@ mod tests {
                     || *p == "/favicon.ico"
             }),
             "static assets must be excluded: {paths:?}"
+        );
+        assert!(
+            !paths.contains(&"/cgi-bin/luci"),
+            "404 scanner probes must not rank as top pages: {paths:?}"
+        );
+
+        // "All" mode (high status ceiling) surfaces the 404 probe but still
+        // drops static assets.
+        let all = RequestLogDao::count_by_content_path(&pool, 1, 10_000, 25).await?;
+        let all_paths: Vec<&str> = all.iter().map(|p| p.path.as_str()).collect();
+        assert!(
+            all_paths.contains(&"/cgi-bin/luci"),
+            "All mode should surface probes: {all_paths:?}"
+        );
+        assert!(
+            !all_paths.iter().any(|p| p.starts_with("/styles")),
+            "All mode still excludes static: {all_paths:?}"
         );
         Ok(())
     }
@@ -364,6 +421,32 @@ mod tests {
         let unique = RequestLogDao::distinct_ip_by_day(&pool, 1).await?;
         assert_eq!(total[0].count, 4, "4 total views");
         assert_eq!(unique[0].count, 2, "2 distinct IPs (null excluded)");
+        Ok(())
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn referer_external_only(pool: SqlitePool) -> Result<()> {
+        let r = |referer: Option<&str>| NewRequestLog {
+            method: "GET".to_string(),
+            path: "/".to_string(),
+            status: 200,
+            ip: None,
+            user_agent: None,
+            referer: referer.map(String::from),
+        };
+        for e in [
+            r(Some("https://news.ycombinator.com/")),
+            r(Some("https://news.ycombinator.com/")),
+            r(Some("https://hotchkiss.io/blog")), // self -> excluded
+            r(None),                              // direct -> excluded
+        ] {
+            RequestLogDao::insert(&pool, &e).await?;
+        }
+
+        let refs = RequestLogDao::count_by_referer(&pool, 1, 10).await?;
+        assert_eq!(refs.len(), 1, "only the external referrer remains: {refs:?}");
+        assert_eq!(refs[0].referer, "https://news.ycombinator.com/");
+        assert_eq!(refs[0].count, 2);
         Ok(())
     }
 }

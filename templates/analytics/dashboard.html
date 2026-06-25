@@ -12,16 +12,16 @@
 <!-- Range selector -->
 <div class="flex flex-row items-center gap-2 mb-3 text-sm">
     <span class="text-navy uppercase text-xs mr-1">Range</span>
-    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 7 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since=7&metric={{ metric }}">7d</a>
-    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 30 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since=30&metric={{ metric }}">30d</a>
-    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 90 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since=90&metric={{ metric }}">90d</a>
+    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 7 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since=7&metric={{ metric }}&paths={{ paths_mode }}">7d</a>
+    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 30 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since=30&metric={{ metric }}&paths={{ paths_mode }}">30d</a>
+    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 90 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since=90&metric={{ metric }}&paths={{ paths_mode }}">90d</a>
 </div>
 
 <!-- Metric toggle -->
 <div class="flex flex-row items-center gap-2 mb-4 text-sm">
     <span class="text-navy uppercase text-xs mr-1">Show</span>
-    <a class="px-2 py-1 rounded-sm {% if metric == "total" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric=total">Total views</a>
-    <a class="px-2 py-1 rounded-sm {% if metric == "unique" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric=unique">Unique visitors</a>
+    <a class="px-2 py-1 rounded-sm {% if metric == "total" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric=total&paths={{ paths_mode }}">Total views</a>
+    <a class="px-2 py-1 rounded-sm {% if metric == "unique" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric=unique&paths={{ paths_mode }}">Unique visitors</a>
 </div>
 
 <div class="flex flex-row gap-12 mb-6">
@@ -37,10 +37,14 @@
 </div>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Top pages</h3>
-<p class="text-xs text-navy/60 mb-1">Static assets (styles, scripts, images, attachments, diagrams) excluded.</p>
+<div class="flex flex-row items-center gap-2 mb-1 text-sm">
+    <a class="px-2 py-0.5 rounded-sm {% if paths_mode == "content" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric={{ metric }}&paths=content">Content</a>
+    <a class="px-2 py-0.5 rounded-sm {% if paths_mode == "all" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric={{ metric }}&paths=all">All (incl. probes)</a>
+</div>
+<p class="text-xs text-navy/60 mb-1">Static assets excluded. {% if paths_mode == "all" %}Showing ALL requests including 4xx/5xx — the bot/scanner probes.{% else %}Successful loads only (status &lt; 400).{% endif %}</p>
 <table class="text-sm mb-2">
     {% for row in by_path %}
-    <tr><td class="pr-4 text-right">{{ row.count }}</td><td><a class="underline" href="{{ row.path }}">{{ row.path }}</a></td></tr>
+    <tr><td class="pr-4 text-right">{{ row.count }}</td><td><span class="break-all">{{ row.path }}</span></td></tr>
     {% endfor %}
 </table>
 
@@ -52,6 +56,15 @@
         <td>{% if let Some(ua) = row.user_agent.as_ref() %}{{ ua }}{% else %}(none){% endif %}</td>
     </tr>
     {% endfor %}
+</table>
+
+<h3 class="font-display text-navy uppercase mt-6 mb-1">Top referrers (external)</h3>
+<p class="text-xs text-navy/60 mb-1">Excludes direct hits + our own domain. Directional only — referrers are spoofable and often stripped.</p>
+<table class="text-sm mb-2">
+    {% for row in by_referer %}
+    <tr><td class="pr-4 text-right">{{ row.count }}</td><td class="break-all">{{ row.referer }}</td></tr>
+    {% endfor %}
+    {% if by_referer.is_empty() %}<tr><td></td><td class="text-navy/60">(none yet)</td></tr>{% endif %}
 </table>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Recent requests</h3>

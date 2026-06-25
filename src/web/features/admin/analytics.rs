@@ -6,7 +6,7 @@ use axum::{
 use serde::Deserialize;
 
 use crate::{
-    db::dao::request_log::{DayCount, PathCount, RequestLogDao, UserAgentCount},
+    db::dao::request_log::{DayCount, PathCount, RefererCount, RequestLogDao, UserAgentCount},
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
         features::top_bar::TopBar, html_template::HtmlTemplate, session::SessionData,
@@ -17,6 +17,7 @@ use crate::{
 pub struct AnalyticsQuery {
     pub since: Option<i64>,
     pub metric: Option<String>,
+    pub paths: Option<String>,
 }
 
 #[derive(Template)]
@@ -28,12 +29,17 @@ pub struct AnalyticsTemplate {
     /// "total" (page views) or "unique" (distinct-IP visitors) — drives the
     /// chart series + which toggle chip is active.
     pub metric: String,
+    /// "content" (status < 400) or "all" (incl. 4xx/5xx scanner probes) — drives
+    /// the Top Pages list + which toggle chip is active.
+    pub paths_mode: String,
     pub total_requests: i64,
     pub distinct_ips: i64,
     /// Server-rendered inline SVG bar chart of the selected metric per day.
     pub chart_svg: String,
     pub by_path: Vec<PathCount>,
     pub by_user_agent: Vec<UserAgentCount>,
+    /// Top external referrers — directional only (spoofable / often stripped).
+    pub by_referer: Vec<RefererCount>,
     pub recent: Vec<RequestLogDao>,
 }
 
@@ -51,6 +57,15 @@ pub async fn show_analytics(
     } else {
         "total"
     };
+    // Top-pages filter: "content" (successful loads only) hides the 404 scanner
+    // probes; "all" surfaces them (status ceiling raised) so chris can see what's
+    // attacking the site. Static assets are excluded either way.
+    let paths_mode = if q.paths.as_deref() == Some("all") {
+        "all"
+    } else {
+        "content"
+    };
+    let max_status = if paths_mode == "all" { 10_000 } else { 400 };
 
     let total_requests = RequestLogDao::count_since(&state.pool, since_days).await?;
     let distinct_ips = RequestLogDao::distinct_ip_count(&state.pool, since_days).await?;
@@ -59,8 +74,9 @@ pub async fn show_analytics(
     } else {
         RequestLogDao::count_by_day(&state.pool, since_days).await?
     };
-    let by_path = RequestLogDao::count_by_content_path(&state.pool, since_days, 25).await?;
+    let by_path = RequestLogDao::count_by_content_path(&state.pool, since_days, max_status, 25).await?;
     let by_user_agent = RequestLogDao::count_by_user_agent(&state.pool, since_days, 25).await?;
+    let by_referer = RequestLogDao::count_by_referer(&state.pool, since_days, 25).await?;
     let recent = RequestLogDao::recent(&state.pool, 50).await?;
 
     let tmpl = AnalyticsTemplate {
@@ -68,11 +84,13 @@ pub async fn show_analytics(
         auth_state: session_data.auth_state,
         since_days,
         metric: metric.to_string(),
+        paths_mode: paths_mode.to_string(),
         total_requests,
         distinct_ips,
         chart_svg: bar_chart_svg(&by_day),
         by_path,
         by_user_agent,
+        by_referer,
         recent,
     };
     Ok(HtmlTemplate(tmpl).into_response())
