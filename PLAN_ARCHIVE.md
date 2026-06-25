@@ -202,3 +202,11 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] C.3 - Implement the over-time summary + chart on /admin/analytics
 - [x] C.4 - Tests + CLAUDE.md/SPEC docs (analytics)
 
+---
+
+## 2026-06-25
+
+## Phase D - Analytics: referrers + attack-probe visibility
+- [x] D.0 - Phase exit: analytics shows top external referrers + a Top-Pages Content/All toggle; live on prod
+- [x] D.1 - Implement: referrers (count_by_referer) + Top-Pages content/all status toggle + tests/docs
+
