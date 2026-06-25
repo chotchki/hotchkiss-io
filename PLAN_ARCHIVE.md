@@ -178,3 +178,16 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] A.8 - HTMX swap-by-hash delivery: source in HTML + GET /diagram/{hash}
 - [x] A.9 - Diagram sizing: max-height cap + click-to-zoom lightbox
 
+---
+
+## 2026-06-25
+
+## Phase B - Database backups (rolling daily)
+- [x] B.0 - Phase exit: live DB backed up daily (consistent VACUUM INTO), 7-day rolling retention, into a Backblaze-synced dir; verified by tests
+- [x] B.1 - Decide mechanism + location (VACUUM INTO in-process; Settings.backup_path)
+- [x] B.2 - Daily backup task (mirror the request_log prune task)
+- [x] B.3 - 7-day rolling retention (prune older backups)
+- [x] B.4 - Fail-safe: a backup error logs + never crashes the coordinator
+- [x] B.5 - Settings.backup_path config + default (Settings::resolve)
+- [x] B.6 - Tests + CLAUDE.md/SPEC docs
+
