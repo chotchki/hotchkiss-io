@@ -222,3 +222,18 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] E.4 - Tests: site-wide non-GET blocked for anon/registered; login ceremony + logout still work; admin works
 - [x] E.5 - Docs: flip CLAUDE.md authz note + SPEC to the fail-closed layer
 
+---
+
+## 2026-06-25
+
+## Phase F - Admin / authoring UX
+- [x] F.0 - Phase exit: site is pleasant + usable logged-in as admin — clean reader view, login state visible, sane authoring flow, human titles (not slugs) shown publicly
+- [x] F.1 - Title↔slug separation: add page_title, create-by-title with auto-slug, display title everywhere (fix the public hyphenated headline)
+- [x] F.2 - Logged-in reader view: default to the clean page, an Edit toggle reveals the editor
+- [x] F.3 - New-page creation redirects to the new page's editor (not htmx_refresh on the list)
+- [x] F.4 - Login-state indicator + logout in the nav
+- [x] F.5 - Restyle the page editor (raw textarea + unstyled form -> clean)
+- [x] F.6 - Nav / admin-chrome cleanup: move the +/new-page box out of the nav, fix admin overflow
+- [x] F.7 - F e2e + docs (content-model: page_title; admin-UX flows)
+- [x] F.8 - Title rendering: one weighted H1 (display_title), strip the leading markdown H1, breadcrumb = ancestors only
+
