@@ -1,5 +1,6 @@
 use crate::web::htmx_responses::htmx_redirect;
 use crate::web::util::deserialize::empty_string_as_none;
+use crate::web::util::slug::slugify;
 use crate::{
     db::dao::content_pages::ContentPageDao,
     web::{
@@ -15,7 +16,7 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
     routing::get,
 };
-use http::{StatusCode, uri::PathAndQuery};
+use http::StatusCode;
 use preview::preview_router;
 use serde::Deserialize;
 use tracing::warn;
@@ -136,6 +137,8 @@ pub async fn delete_page_path(
 
 #[derive(Debug, Deserialize)]
 pub struct PutPageForm {
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub page_title: Option<String>,
     #[serde(deserialize_with = "empty_string_as_none")]
     pub page_category: Option<String>,
     pub page_markdown: String,
@@ -160,6 +163,7 @@ pub async fn put_page_path(
     match pages_path.to_owned().last() {
         Some(lp) => {
             let mut lp = lp.to_owned();
+            lp.page_title = put_page_form.page_title;
             lp.page_category = put_page_form.page_category;
             lp.page_markdown = put_page_form.page_markdown;
             lp.page_cover_attachment_id = page_cover_attachment_id;
@@ -174,28 +178,30 @@ pub async fn put_page_path(
 
 #[derive(Debug, Deserialize)]
 pub struct PostPageForm {
-    pub page_name: String,
+    /// The human title typed by the author; the URL slug (page_name) is derived
+    /// from it server-side via `slugify`.
+    pub page_title: String,
 }
 
 pub async fn post_top_level_page_path(
     State(state): State<AppState>,
     Form(post_page_form): Form<PostPageForm>,
 ) -> Result<Response, AppError> {
-    if PathAndQuery::try_from(post_page_form.page_name.clone()).is_err() {
-        return Ok((StatusCode::BAD_REQUEST, "Page Name must be URI safe").into_response());
+    let title = post_page_form.page_title.trim().to_string();
+    let slug = slugify(&title);
+    if slug.is_empty() {
+        return Ok(
+            (StatusCode::BAD_REQUEST, "Title must contain letters or numbers").into_response(),
+        );
     }
 
-    ContentPageDao::create(
-        &state.pool,
-        None,
-        post_page_form.page_name,
-        None,
-        "".to_string(),
-        None,
-    )
-    .await?;
+    let mut cp =
+        ContentPageDao::create(&state.pool, None, slug.clone(), None, String::new(), None).await?;
+    cp.page_title = Some(title);
+    cp.update(&state.pool).await?;
 
-    Ok(htmx_refresh())
+    // Land the author on the new page (in the editor), not back on the list.
+    Ok(htmx_redirect(&format!("/pages/{slug}"))?)
 }
 
 pub async fn post_page_path(
@@ -205,24 +211,30 @@ pub async fn post_page_path(
 ) -> Result<Response, AppError> {
     let page_names: Vec<&str> = page_path.split("/").collect();
 
-    if PathAndQuery::try_from(post_page_form.page_name.clone()).is_err() {
-        return Ok((StatusCode::BAD_REQUEST, "Page Name must be URI safe").into_response());
+    let title = post_page_form.page_title.trim().to_string();
+    let slug = slugify(&title);
+    if slug.is_empty() {
+        return Ok(
+            (StatusCode::BAD_REQUEST, "Title must contain letters or numbers").into_response(),
+        );
     }
 
     let parent_pages = ContentPageDao::find_by_path(&state.pool, &page_names).await?;
     match parent_pages.last() {
         Some(lp) => {
-            ContentPageDao::create(
+            let mut cp = ContentPageDao::create(
                 &state.pool,
                 Some(lp.page_id),
-                post_page_form.page_name,
+                slug.clone(),
                 None,
-                "".to_string(),
+                String::new(),
                 None,
             )
             .await?;
+            cp.page_title = Some(title);
+            cp.update(&state.pool).await?;
 
-            Ok(htmx_refresh())
+            Ok(htmx_redirect(&format!("/pages/{page_path}/{slug}"))?)
         }
         None => Ok((StatusCode::NOT_FOUND, "No such parent page").into_response()),
     }

@@ -11,6 +11,7 @@ pub struct ContentPageDao {
     pub page_id: i64,
     pub parent_page_id: Option<i64>,
     pub page_name: String,
+    pub page_title: Option<String>,
     pub page_category: Option<String>,
     pub page_markdown: String,
     pub page_cover_attachment_id: Option<i64>,
@@ -63,6 +64,7 @@ impl ContentPageDao {
             page_id: result.page_id,
             parent_page_id,
             page_name,
+            page_title: None,
             page_category,
             page_markdown,
             page_cover_attachment_id,
@@ -92,21 +94,23 @@ impl ContentPageDao {
         let result = query!(
             r#"
         UPDATE content_pages
-        SET 
+        SET
             parent_page_id = ?1,
             page_name = ?2,
-            page_category = ?3,
-            page_markdown = ?4,
-            page_cover_attachment_id = ?5,
-            page_order = ?6,
+            page_title = ?3,
+            page_category = ?4,
+            page_markdown = ?5,
+            page_cover_attachment_id = ?6,
+            page_order = ?7,
             page_modified_date = datetime('now', 'utc')
         WHERE
-            page_id = ?7
+            page_id = ?8
         RETURNING
             page_modified_date as "page_modified_date: DateTime<Utc>"
         "#,
             self.parent_page_id,
             self.page_name,
+            self.page_title,
             self.page_category,
             self.page_markdown,
             self.page_cover_attachment_id,
@@ -132,6 +136,7 @@ impl ContentPageDao {
                     page_id as "page_id!",
                     parent_page_id,
                     page_name,
+                    page_title,
                     page_category,
                     page_markdown,
                     page_cover_attachment_id as "page_cover_attachment_id?",
@@ -164,6 +169,7 @@ impl ContentPageDao {
                     page_id,
                     parent_page_id,
                     page_name,
+                    page_title,
                     page_category,
                     page_markdown,
                     page_cover_attachment_id,
@@ -197,6 +203,7 @@ impl ContentPageDao {
                     page_id as "page_id!",
                     parent_page_id,
                     page_name,
+                    page_title,
                     page_category,
                     page_markdown,
                     page_cover_attachment_id,
@@ -233,6 +240,7 @@ impl ContentPageDao {
                     page_id as "page_id!",
                     parent_page_id,
                     page_name,
+                    page_title,
                     page_category,
                     page_markdown,
                     page_cover_attachment_id as "page_cover_attachment_id?",
@@ -278,6 +286,26 @@ impl ContentPageDao {
         }
 
         Ok(nodes)
+    }
+
+    /// The human title for listings / breadcrumbs / feeds: an explicit
+    /// `page_title`, else the first markdown `# H1`, else the URL slug.
+    pub fn display_title(&self) -> String {
+        self.page_title
+            .clone()
+            .filter(|t| !t.trim().is_empty())
+            .or_else(|| Self::first_h1(&self.page_markdown))
+            .unwrap_or_else(|| self.page_name.clone())
+    }
+
+    /// First level-1 ATX heading (`# Title`) in the markdown, if any.
+    fn first_h1(markdown: &str) -> Option<String> {
+        markdown
+            .lines()
+            .map(str::trim)
+            .find_map(|l| l.strip_prefix("# "))
+            .map(|t| t.trim().to_string())
+            .filter(|s| !s.is_empty())
     }
 }
 
@@ -400,6 +428,45 @@ mod tests {
         let still_three =
             ContentPageDao::find_by_parent_newest_first(&pool, Some(parent.page_id), None).await?;
         assert_eq!(3, still_three.len());
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn page_title_and_display_title(pool: SqlitePool) -> Result<()> {
+        let mut pg = ContentPageDao::create(
+            &pool,
+            None,
+            "my-slug".to_string(),
+            None,
+            "# Heading From Markdown\n\nbody".to_string(),
+            None,
+        )
+        .await?;
+        // No explicit title -> falls back to the markdown H1.
+        assert_eq!(pg.page_title, None);
+        assert_eq!(pg.display_title(), "Heading From Markdown");
+
+        // Explicit title wins, and round-trips through the DB.
+        pg.page_title = Some("Explicit Title".to_string());
+        pg.update(&pool).await?;
+        let found = ContentPageDao::find_by_name(&pool, None, "my-slug")
+            .await?
+            .unwrap();
+        assert_eq!(found.page_title.as_deref(), Some("Explicit Title"));
+        assert_eq!(found.display_title(), "Explicit Title");
+
+        // No title + no H1 -> falls back to the slug.
+        let plain = ContentPageDao::create(
+            &pool,
+            None,
+            "plain".to_string(),
+            None,
+            "no heading here".to_string(),
+            None,
+        )
+        .await?;
+        assert_eq!(plain.display_title(), "plain");
 
         Ok(())
     }

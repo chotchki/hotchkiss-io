@@ -27,6 +27,7 @@ pub fn blog_router() -> Router<AppState> {
 
 pub struct BlogPostCard {
     pub page_name: String,
+    pub title: String,
     pub page_creation_date: String,
     pub page_cover_attachment_id: Option<i64>,
     pub excerpt: String,
@@ -58,6 +59,7 @@ pub async fn show_index(
     let posts: Vec<BlogPostCard> = raw_posts
         .into_iter()
         .map(|p| BlogPostCard {
+            title: p.display_title(),
             page_name: p.page_name,
             page_creation_date: p.page_creation_date.format("%B %-d, %Y").to_string(),
             page_cover_attachment_id: p.page_cover_attachment_id,
@@ -132,7 +134,7 @@ fn render_atom(
         out.push_str("  <entry>\n");
         out.push_str(&format!(
             "    <title>{}</title>\n",
-            escape_xml(&p.page_name)
+            escape_xml(&p.display_title())
         ));
         out.push_str(&format!("    <link href=\"{base}/blog/{}\"/>\n", p.page_name));
         out.push_str(&format!("    <id>{base}/blog/{}</id>\n", p.page_name));

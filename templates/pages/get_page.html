@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{page.page_name}}{% endblock %}
+{% block title %}{{page.display_title()}}{% endblock %}
 
 {% block head %}
 <script type="importmap">
@@ -30,6 +30,13 @@
 
 <form id="update-page" hx-put="/pages/{{page_path}}">
   <div class="m-2 flex flex-col">
+    <label class="m-2">Title
+      {% if let Some(title) = page.page_title %}
+      <input class="outline px-2" name="page_title" value="{{title}}" />
+      {% else %}
+      <input class="outline px-2" name="page_title" placeholder="{{page.display_title()}}" />
+      {% endif %}
+    </label>
     <div>
       Markdown:
       <button onclick="addLink()"><i class="fa-solid fa-link"></i></button>
@@ -80,14 +87,14 @@
   <ul class="m-2 list-disc">
     {% for child_page in children_pages %}
     <li>
-      <a href="/pages/{{page_path}}/{{child_page.page_name}}">{{child_page.page_name}}</a>
+      <a href="/pages/{{page_path}}/{{child_page.page_name}}">{{child_page.display_title()}}</a>
     </li>
     {% endfor %}
   </ul>
   {% endif %}
   <div class="p-2">
     <form hx-post="/pages/{{page_path}}">
-      <input class="border border-navy" name="page_name" id="page_name" type="text" placeholder="Page Name" required />
+      <input class="border border-navy" name="page_title" id="page_title" type="text" placeholder="Page title" required />
       <button class="px-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">Create New Page</button>
     </form>
   </div>
@@ -100,7 +107,7 @@
 <ul class="flex">
   {% for path_node in pages_path.iter().skip(1) %}
   <li class="p-2">
-    {{path_node.page_name}}
+    {{path_node.display_title()}}
   </li>
   {% if ! loop.last %}
   <li class="p-2">&gt;</li>

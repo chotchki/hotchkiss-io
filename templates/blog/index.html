@@ -10,9 +10,8 @@
 
 {% if auth_state.is_admin() %}
 <form hx-post="/pages/blog" class="mb-4 flex flex-row gap-2">
-    <input class="border border-navy px-2 grow min-w-0" name="page_name" type="text"
-        placeholder="post slug (e.g. my-first-post)" required
-        oninput="this.value = this.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+/, '')" />
+    <input class="border border-navy px-2 grow min-w-0" name="page_title" type="text"
+        placeholder="Post title" required />
     <button class="px-3 bg-navy border-navy rounded-sm text-div-grey" type="submit"><i class="fa-solid fa-plus"></i> New post</button>
 </form>
 {% endif %}
@@ -35,7 +34,7 @@
             {% endif %}
             <div class="p-4">
                 <p class="text-sm text-navy/70">{{post.page_creation_date}}</p>
-                <h2 class="text-lg font-display text-navy underline">{{post.page_name}}</h2>
+                <h2 class="text-lg font-display text-navy underline">{{post.title}}</h2>
                 {% if !post.excerpt.is_empty() %}
                 <p class="mt-2 text-navy">{{post.excerpt}}</p>
                 {% endif %}
