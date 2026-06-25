@@ -39,7 +39,9 @@
             <div class="max-w-screen-md pl-2">
                 <ul class="list-none flex flex-row">
                     {% for item in top_bar.0 %}
-                    {% if item.1 == true %}
+                    {% if item.0 == "login" && auth_state.display_name().is_some() %}
+                    {# Logged in: the LOGIN tab is redundant (name + Logout shown) #}
+                    {% else if item.1 == true %}
                     <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-yellow">
                         <a class="text-sm text-yellow uppercase" href="/pages/{{item.0}}">{{item.0}}</a>
                     </li>

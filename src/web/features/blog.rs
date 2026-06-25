@@ -6,7 +6,8 @@ use crate::{
             pages::{EditQuery, GetPageTemplate},
             top_bar::TopBar,
         },
-        html_template::HtmlTemplate, markdown::{excerpt::excerpt, transformer::transform},
+        html_template::HtmlTemplate,
+        markdown::{excerpt::excerpt, title::strip_leading_h1, transformer::transform},
         session::SessionData,
     },
 };
@@ -156,7 +157,7 @@ fn render_atom(
                 escape_xml(&summary)
             ));
         }
-        let html = transform(&p.page_markdown).unwrap_or_default();
+        let html = transform(&strip_leading_h1(&p.page_markdown)).unwrap_or_default();
         out.push_str(&format!(
             "    <content type=\"html\">{}</content>\n",
             escape_xml(&html)
@@ -194,7 +195,7 @@ pub async fn show_post(
         page: lp.clone(),
         pages_path: pages_path.clone(),
         children_pages: ContentPageDao::find_by_parent(&state.pool, Some(lp.page_id)).await?,
-        rendered_markdown: transform(&lp.page_markdown)?,
+        rendered_markdown: transform(&strip_leading_h1(&lp.page_markdown))?,
         edit: edit_q.edit.is_some(),
     };
     Ok(HtmlTemplate(gpt).into_response())

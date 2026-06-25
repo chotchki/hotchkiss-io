@@ -6,7 +6,8 @@ use crate::{
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
         html_template::HtmlTemplate, htmx_responses::htmx_refresh,
-        markdown::transformer::transform, session::SessionData,
+        markdown::{title::strip_leading_h1, transformer::transform},
+        session::SessionData,
     },
 };
 use askama::Template;
@@ -106,7 +107,7 @@ pub async fn get_page_path(
                 pages_path: pages_path.clone(),
                 children_pages: ContentPageDao::find_by_parent(&state.pool, Some(lp.page_id))
                     .await?,
-                rendered_markdown: transform(&lp.page_markdown)?,
+                rendered_markdown: transform(&strip_leading_h1(&lp.page_markdown))?,
                 edit: edit_q.edit.is_some(),
             };
 

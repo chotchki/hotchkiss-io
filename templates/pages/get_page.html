@@ -107,18 +107,16 @@
   <a href="?edit=1" class="px-2 py-1 bg-navy rounded-sm text-div-grey text-sm">Edit this page <i class="fa-solid fa-pen"></i></a>
 </div>
 {% endif %}
-{% if pages_path.len() > 1 %}
-<ul class="flex">
+{% if pages_path.len() > 2 %}
+<ul class="flex text-sm text-navy/60 mb-1">
   {% for path_node in pages_path.iter().skip(1) %}
-  <li class="p-2">
-    {{path_node.display_title()}}
-  </li>
   {% if ! loop.last %}
-  <li class="p-2">&gt;</li>
+  <li class="pr-2">{{path_node.display_title()}} &gt;</li>
   {% endif %}
   {% endfor %}
 </ul>
 {% endif %}
+<h1 class="font-display text-3xl md:text-4xl font-bold text-navy leading-tight mt-2 mb-4">{{page.display_title()}}</h1>
 <div class="prose max-w-none" id="rendered">
   {{rendered_markdown|safe}}
 </div>
