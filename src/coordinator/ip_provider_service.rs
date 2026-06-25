@@ -33,7 +33,17 @@ impl IpProviderService {
         duration.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         debug!("Getting initial ip");
-        let mut current_ips = self.server_ips().await?;
+        // Retry the initial fetch rather than `?`-crashing the coordinator on a
+        // transient startup failure (the steady-state loop below already self-heals).
+        let mut current_ips = loop {
+            match self.server_ips().await {
+                Ok(ips) => break ips,
+                Err(e) => {
+                    tracing::error!("Initial IP fetch failed, retrying in 30s: {e}");
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                }
+            }
+        };
 
         //Always send the starting IPs
         debug!("Sending Initial IP addresses {:?}", current_ips);

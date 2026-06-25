@@ -2,9 +2,14 @@ use super::dns::cloudflare_client::CloudflareClient;
 use crate::settings::Settings;
 use anyhow::Result;
 use hickory_resolver::TokioAsyncResolver;
-use std::{collections::HashSet, net::IpAddr, sync::Arc};
-use tokio::sync::broadcast::Receiver;
-use tracing::{debug, info};
+use std::{collections::HashSet, net::IpAddr, sync::Arc, time::Duration};
+use tokio::sync::broadcast::{Receiver, error::RecvError};
+use tokio::time::{MissedTickBehavior, interval, sleep};
+use tracing::{debug, error, info};
+
+/// Re-reconcile DNS on this cadence even without an IP change, so a failed
+/// Cloudflare update retries itself (we no longer crash-restart to recover).
+const RECONCILE_EVERY: Duration = Duration::new(15 * 60, 0);
 
 /// A service component that updates the dns setup whenever the underlying public ip changes.
 pub struct DnsProviderService {
@@ -27,23 +32,48 @@ impl DnsProviderService {
         }
     }
 
-    /// This starts the provider running and will not return except on errors
+    /// Runs forever, reconciling Cloudflare DNS with the current public IP. Self-
+    /// heals: a transient Cloudflare/lookup error is logged and retried (on the
+    /// next IP change or the reconcile tick) rather than `?`-propagated into the
+    /// coordinator's `try_join!`, which would take the whole app down.
     pub async fn start(&self, mut ip_changed: Receiver<HashSet<IpAddr>>) -> Result<()> {
-        let mut current_ips = ip_changed.recv().await?;
+        debug!("Waiting for the initial public IP");
+        let mut current_ips = loop {
+            match ip_changed.recv().await {
+                Ok(ips) => break ips,
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => {
+                    error!("IP channel closed; DNS provider waiting for recovery");
+                    sleep(RECONCILE_EVERY).await;
+                }
+            }
+        };
 
-        debug!("Got ip address, checking dns");
-        let mut dns_ips = self.lookup_dns().await?;
+        let mut reconcile = interval(RECONCILE_EVERY);
+        reconcile.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        reconcile.tick().await; // consume the immediate first tick
 
         loop {
+            let dns_ips = self.lookup_dns().await?;
             if current_ips != dns_ips {
-                //Need to update the dns
-                info!("Updating DNS old {:?} new {:?}", current_ips, dns_ips);
-                self.client.update_dns(current_ips).await?;
+                info!("Updating DNS: have {:?}, want {:?}", dns_ips, current_ips);
+                if let Err(e) = self.client.update_dns(current_ips.clone()).await {
+                    error!("DNS update failed (will retry): {e:?}");
+                }
             }
 
-            //Wait for changes
-            current_ips = ip_changed.recv().await?;
-            dns_ips = self.lookup_dns().await?;
+            // Wake on the next IP change OR the periodic reconcile.
+            tokio::select! {
+                r = ip_changed.recv() => match r {
+                    Ok(ips) => current_ips = ips,
+                    Err(RecvError::Lagged(_)) => {} // missed some; re-reconcile
+                    Err(RecvError::Closed) => {
+                        error!("IP channel closed; DNS provider waiting for recovery");
+                        sleep(RECONCILE_EVERY).await;
+                    }
+                },
+                _ = reconcile.tick() => {}
+            }
         }
     }
 

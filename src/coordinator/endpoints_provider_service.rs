@@ -2,7 +2,7 @@ use crate::coordinator::backup;
 use crate::db::dao::request_log::RequestLogDao;
 use crate::settings::Settings;
 use crate::web::{app_state::AppState, router::create_router};
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use axum::{
     BoxError,
     handler::HandlerWithoutStateExt,
@@ -89,12 +89,19 @@ impl EndpointsProviderService {
         set.spawn(Self::https_server(https_addr, app_state, config));
         set.spawn(Self::http_server(http_addr, self.https_port));
 
+        // Session GC: prune expired sessions hourly. Self-healing — a transient
+        // SQLite error is logged, not propagated, so it can't fail the JoinSet
+        // (and take the live HTTP servers down) over housekeeping. Mirrors the
+        // prune + backup loops below.
         let session_store = self.session_store.clone();
         set.spawn(async move {
-            session_store
-                .continuously_delete_expired(tokio::time::Duration::from_secs(60 * 60))
-                .await
-                .map_err(|e| anyhow!(e))
+            let mut tick = tokio::time::interval(tokio::time::Duration::from_secs(60 * 60));
+            loop {
+                tick.tick().await;
+                if let Err(e) = session_store.delete_expired().await {
+                    tracing::warn!("session GC failed: {e}");
+                }
+            }
         });
 
         // Prune request_log rows older than the retention window, daily.

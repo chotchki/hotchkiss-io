@@ -99,7 +99,7 @@ impl InstantAcmeDomain {
             match authz.status {
                 AuthorizationStatus::Pending => {}
                 AuthorizationStatus::Valid => continue,
-                _ => todo!(),
+                status => bail!("unexpected ACME authorization status: {status:?}"),
             }
 
             let challenge = authz
@@ -160,10 +160,17 @@ impl InstantAcmeDomain {
         let csr = params.serialize_request(&private_key)?;
 
         order.finalize(csr.der()).await?;
+        let mut cert_polls = 0u32;
         let cert_chain_pem = loop {
             match order.certificate().await? {
                 Some(cert_chain_pem) => break cert_chain_pem,
-                None => sleep(Duration::from_secs(1)).await,
+                None => {
+                    cert_polls += 1;
+                    if cert_polls > 30 {
+                        bail!("certificate not available after {cert_polls} polls");
+                    }
+                    sleep(Duration::from_secs(1)).await;
+                }
             }
         };
 
