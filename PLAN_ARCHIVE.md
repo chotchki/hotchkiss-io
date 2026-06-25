@@ -191,3 +191,14 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] B.5 - Settings.backup_path config + default (Settings::resolve)
 - [x] B.6 - Tests + CLAUDE.md/SPEC docs
 
+---
+
+## 2026-06-25
+
+## Phase C - Analytics: views over time
+- [x] C.0 - Phase exit: /admin/analytics summarizes views over time (design-approved by chris, then implemented)
+- [x] C.1 - DESIGN (with chris): what to summarize
+- [x] C.2 - DESIGN: data approach (aggregate query vs rollup)
+- [x] C.3 - Implement the over-time summary + chart on /admin/analytics
+- [x] C.4 - Tests + CLAUDE.md/SPEC docs (analytics)
+
