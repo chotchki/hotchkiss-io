@@ -5,7 +5,9 @@ use markdown::mdast::Node;
 use markdown::to_html_with_options;
 use markdown::to_mdast;
 use markdown::CompileOptions;
+use markdown::Constructs;
 use markdown::Options;
+use markdown::ParseOptions;
 use mdast_util_to_markdown::to_markdown;
 use std::collections::VecDeque;
 
@@ -17,7 +19,20 @@ use crate::web::markdown::diagram;
 /// Technique from https://github.com/wooorm/markdown-rs/discussions/161
 /// This is doing double the work until this is fixed: https://github.com/wooorm/markdown-rs/issues/27
 pub fn transform(markdown: &str) -> Result<String> {
-    let mut ast = to_mdast(markdown, &Default::default())
+    // Enable math, but ONLY with `$$…$$` delimiters (single-dollar OFF) so prose
+    // prices like "$200 … $250/month" don't get parsed as inline math. The math
+    // nodes become source-carrying `.math` spans below; KaTeX (katex-render.js)
+    // typesets them client-side.
+    let parse_options = ParseOptions {
+        constructs: Constructs {
+            math_text: true,
+            math_flow: true,
+            ..Constructs::default()
+        },
+        math_text_single_dollar: false,
+        ..ParseOptions::default()
+    };
+    let mut ast = to_mdast(markdown, &parse_options)
         .map_err(|m: markdown::message::Message| anyhow!("Failed to parse markdown {}", m))?;
 
     let mut queue = VecDeque::from([&mut ast]);
@@ -63,6 +78,26 @@ role=\"button\" aria-label=\"Zoom image\" src=\"{}\" alt=\"{}\" />",
                         position: None,
                     });
                 }
+            }
+            Node::InlineMath(m) => {
+                // Carry the TeX verbatim (no-JS / crawler / LLM reads the source);
+                // KaTeX (katex-render.js) typesets `.math` elements client-side.
+                *node = Node::Html(Html {
+                    value: format!(
+                        "<span class=\"math math-inline\">{}</span>",
+                        attr_escape(&m.value)
+                    ),
+                    position: None,
+                });
+            }
+            Node::Math(m) => {
+                *node = Node::Html(Html {
+                    value: format!(
+                        "<div class=\"math math-display\">{}</div>",
+                        attr_escape(&m.value)
+                    ),
+                    position: None,
+                });
             }
             Node::Root(root) => queue.extend(root.children.iter_mut()),
             Node::Paragraph(p) => queue.extend(p.children.iter_mut()),
@@ -176,6 +211,42 @@ mod tests {
 
         assert!(rendered.contains("<code"), "normal code stays a code block");
         assert!(!rendered.contains("hx-get=\"/diagram/"), "must not become a diagram");
+        Ok(())
+    }
+
+    #[test]
+    fn dollar_dollar_math_becomes_katex_spans() -> Result<()> {
+        let input = "drift is $$d = b - c$$ inline.\n\n$$\n\\sum x\n$$";
+
+        let rendered = transform(input)?;
+
+        assert!(
+            rendered.contains("class=\"math math-inline\""),
+            "inline math should be a .math span: {rendered}"
+        );
+        assert!(
+            rendered.contains("d = b - c"),
+            "the inline TeX source must survive into the HTML: {rendered}"
+        );
+        assert!(
+            rendered.contains("class=\"math math-display\""),
+            "display math should be a .math-display div: {rendered}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn single_dollar_prices_are_not_math() -> Result<()> {
+        // single `$` must stay literal so prose prices don't parse as math
+        let input = "it cost $200 and then $250 a month";
+
+        let rendered = transform(input)?;
+
+        assert!(
+            !rendered.contains("class=\"math"),
+            "prose prices must NOT become math: {rendered}"
+        );
+        assert!(rendered.contains("$200"), "the price text must survive: {rendered}");
         Ok(())
     }
 }

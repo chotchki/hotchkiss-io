@@ -229,6 +229,60 @@ async fn projects_index_lists_seeded_project() {
     );
 }
 
+/// BV: a content page carries math + code SOURCE in the served HTML (no-JS /
+/// crawler / LLM readable) and loads the KaTeX + highlight.js assets that
+/// typeset/highlight them client-side.
+#[tokio::test]
+async fn content_page_carries_math_and_code_source_plus_assets() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page(
+            "MathPage",
+            "Drift is $$d = b - c$$ inline.\n\n```rust\nlet x = 1;\n```\n",
+        )
+        .await
+        .expect("seed");
+
+    let body = reqwest::get(server.url("/pages/MathPage"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    // math source-in-HTML
+    assert!(
+        body.contains("class=\"math math-inline\""),
+        "math span missing: {body}"
+    );
+    assert!(
+        body.contains("d = b - c"),
+        "the TeX source must be in the served HTML: {body}"
+    );
+    // fenced code keeps its language class for highlight.js
+    assert!(
+        body.contains("language-rust"),
+        "code language class missing: {body}"
+    );
+    // the typeset + highlight assets load
+    assert!(
+        body.contains("/vendor/katex/katex.min.css"),
+        "katex css not loaded: {body}"
+    );
+    assert!(
+        body.contains("/scripts/katex-render.js"),
+        "katex init not loaded: {body}"
+    );
+    assert!(
+        body.contains("/vendor/highlightjs/highlight.min.js"),
+        "highlight.js not loaded: {body}"
+    );
+    assert!(
+        body.contains("/scripts/code-highlight.js"),
+        "code-highlight init not loaded: {body}"
+    );
+}
+
 #[tokio::test]
 async fn blog_post_200_and_404() {
     let server = spawn_test_server().await.expect("spawn");

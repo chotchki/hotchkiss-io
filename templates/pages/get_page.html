@@ -12,6 +12,12 @@
 </script>
 <script src="/scripts/htmx-stl-view.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" type="module"></script>
 <script src="/scripts/diagram-zoom.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<link rel="stylesheet" href="/vendor/katex/katex.min.css?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" />
+<script defer src="/vendor/katex/katex.min.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<script defer src="/scripts/katex-render.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<link rel="stylesheet" href="/vendor/highlightjs/github.min.css?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" />
+<script defer src="/vendor/highlightjs/highlight.min.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<script defer src="/scripts/code-highlight.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 {% if auth_state.is_admin() && edit %}
 <script src="/scripts/editor-support.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 {% endif %}

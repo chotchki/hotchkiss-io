@@ -118,6 +118,13 @@ Dogfooded out of the first image blog post.
 - **Images render capped + click-to-zoom.** Every non-`.stl` markdown image (`![]()`) becomes a height-capped (480px) `<img class="content-image … cursor-zoom-in" data-zoomable>` in `transformer.rs` — the same treatment as a diagram, so a tall screenshot doesn't dominate the page. It reuses the diagram lightbox: `diagram-zoom.js` now binds **any** `img[data-zoomable]` (diagrams + content images), and the full-resolution `src` loads in-flow (CSS-capped), so the zoom shows it at full size.
 - **Same-site links go relative on save.** `web/markdown/links.rs::rewrite_site_links` runs in `put_page_path`: absolute links + image `src`s pointing at the site's own **registrable** host (`webauthn_rp_id` — `hotchkiss.io` on both prod and beta, via `AppState.site_host`; the rp-id and not the served `domain`, so beta's `beta.hotchkiss.io` still relativizes the canonical `hotchkiss.io` links in its snapshot — plus `www.`, any scheme/port) are rewritten to root-relative, preserving query + fragment. **Why on save, not render:** the stored markdown becomes the canonical portable form — it works on prod, beta, and any future host, and the Atom feed inherits it. It edits only the matched URL substrings (longest-first, so a bare-domain match can't corrupt a longer path URL), leaving the author's formatting otherwise byte-for-byte intact — not a full AST reflow.
 
+## Typeset math + code highlighting (Phase BV)
+
+The lecture-style content (the recon-gen deep-dive) wants real math + readable code.
+
+- **Math** is authored as `$$…$$` — single `$` stays literal so prose prices ("$200") don't parse as math. The transformer enables markdown-rs's math constructs and emits each math node as a source-carrying `.math` element (the TeX stays in the served HTML — no-JS / crawler / LLM reads it); **KaTeX** (vendored, client-side) typesets them on load + after HTMX swaps. Same source-in-HTML philosophy as the d2 diagrams.
+- **Code** keeps its fenced `language-*` class; **highlight.js** (vendored, client-side) highlights it, excluding the d2 diagram source. Authoring convention: **deep-link the real code to GitHub at exact lines AND show the important snippet inline** in a highlighted block — the permalink keeps it honest (the canonical source), the inline snippet saves a click for the bit under discussion. The snippet is copied from the real code, never invented; large code is not reproduced wholesale.
+
 ## Database backups
 
 All site content lives in one SQLite DB, so a daily local snapshot is the cheapest meaningful protection against accidental deletion / corruption.
