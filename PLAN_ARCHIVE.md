@@ -270,3 +270,14 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] BU.4 - Tests (unit + web) green + CLAUDE.md/SPEC docs update
 - [x] BU.5 - Deploy: push main (beta) → verify on beta → tag vX.Y.Z (prod)
 
+---
+
+## 2026-06-26
+
+## Phase BV - Content rendering — typeset math (KaTeX) + code syntax highlighting
+- [x] BV.0 - Phase exit: content pages render typeset math (KaTeX) + syntax-highlighted code; TeX/code source stays in the served HTML (no-JS/LLM-readable); live on prod
+- [x] BV.1 - Typeset math: enable markdown-rs math_text/math_flow + emit TeX-carrying spans in transformer; vendor KaTeX (CSS/JS + autorender) on content+blog pages; render client-side incl HTMX-swapped; tests
+- [x] BV.2 - Code syntax highlighting: vendor highlight.js (CSS/JS), auto-highlight <pre><code class=language-*> on load + HTMX swap; site-matching theme
+- [x] BV.3 - Tests (web: math + highlighted code render, source-in-HTML) + CLAUDE.md/SPEC docs
+- [x] BV.4 - Deploy: push main (beta) → verify → tag vX.Y.Z (prod)
+
