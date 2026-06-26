@@ -258,3 +258,15 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] BT.1 - Tab redesign (chris's wife to opine on look + behavior)
 - [x] BT.2 - Dedicated /admin/pages editor + nav rework (+ icon, fold admin into hamburger, fix tab styling)
 
+---
+
+## 2026-06-26
+
+## Phase BU - Blog image UX + relative-link rewrite (dogfooding the first image post)
+- [x] BU.0 - Phase exit: page/blog images render capped + click-to-zoom (diagram lightbox); site-absolute links + image srcs rewritten relative on save; live on prod
+- [x] BU.1 - rewrite_site_links(markdown, domain): Link + Image URLs matching the site host → relative (preserve path/query/fragment); unit tests
+- [x] BU.2 - Add domain to AppState (from Settings); wire the link rewrite into the page-save path (put_page_path) on save
+- [x] BU.3 - Images capped + zoomable: transformer non-.stl image → sized+zoomable <img> (mirror diagram wrap); broaden diagram-zoom.js selector; update image_link test
+- [x] BU.4 - Tests (unit + web) green + CLAUDE.md/SPEC docs update
+- [x] BU.5 - Deploy: push main (beta) → verify on beta → tag vX.Y.Z (prod)
+
