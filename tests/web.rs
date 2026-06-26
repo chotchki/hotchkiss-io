@@ -196,6 +196,39 @@ async fn blog_index_lists_seeded_post() {
     );
 }
 
+/// 14.6: the /projects index renders project cards (mirroring the blog index) —
+/// display title + excerpt, linking to the project page.
+#[tokio::test]
+async fn projects_index_lists_seeded_project() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_project(
+            "recon-gen",
+            "# Recon Gen\n\nAn open-source financial-validation platform.",
+        )
+        .await
+        .expect("seed");
+
+    let body = reqwest::get(server.url("/projects"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        body.contains("href=\"/pages/projects/recon-gen\""),
+        "card must link the project page: {body}"
+    );
+    assert!(
+        body.contains("Recon Gen"),
+        "card must show the display title (not the slug): {body}"
+    );
+    assert!(
+        body.contains("An open-source financial-validation platform."),
+        "card must show the excerpt: {body}"
+    );
+}
+
 #[tokio::test]
 async fn blog_post_200_and_404() {
     let server = spawn_test_server().await.expect("spawn");

@@ -77,6 +77,23 @@ impl TestServer {
         .await?;
         Ok(())
     }
+
+    /// Seed a child of the `projects` special_page (seeded by migration 0007).
+    pub async fn seed_project(&self, slug: &str, markdown: &str) -> Result<()> {
+        let projects = ContentPageDao::find_by_name(&self.pool, None, "projects")
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("projects special_page missing — migration 0007?"))?;
+        ContentPageDao::create(
+            &self.pool,
+            Some(projects.page_id),
+            slug.to_string(),
+            None,
+            markdown.to_string(),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 impl Drop for TestServer {
