@@ -539,6 +539,66 @@ async fn only_admin_can_mutate_pages() {
     );
 }
 
+/// Phase BU: saving a page rewrites absolute same-site links to root-relative
+/// (the seam that hid the beta bug — `AppState.site_host` wiring), while leaving
+/// external links untouched. The test server's `site_host` is "hotchkiss.io".
+#[tokio::test]
+async fn save_relativizes_same_site_links() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("RelTest", "# placeholder")
+        .await
+        .expect("seed");
+
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+    let resp = admin
+        .put(server.url("/pages/RelTest"))
+        .form(&[
+            ("page_category", ""),
+            (
+                "page_markdown",
+                "[post](https://hotchkiss.io/blog/foo) and [ext](https://github.com/chotchki/recon-gen)",
+            ),
+            ("page_cover_attachment_id", ""),
+            ("page_order", "0"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        resp.status().is_success(),
+        "admin PUT should succeed, got {}",
+        resp.status()
+    );
+
+    let body = reqwest::get(server.url("/pages/RelTest"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    // The same-site link was relativized on save...
+    assert!(
+        body.contains("href=\"/blog/foo\""),
+        "same-site link should be root-relative: {body}"
+    );
+    assert!(
+        !body.contains("https://hotchkiss.io/blog/foo"),
+        "the absolute same-site URL must be gone: {body}"
+    );
+    // ...and the external link was left untouched.
+    assert!(
+        body.contains("href=\"https://github.com/chotchki/recon-gen\""),
+        "external link must stay absolute: {body}"
+    );
+}
+
 /// Phase E: the fail-closed layer gates non-GET site-wide — not just /pages —
 /// now that the per-handler is_admin checks are gone; and it lets the anonymous
 /// WebAuthn ceremony POSTs through (the exact-tuple allowlist).

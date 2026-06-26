@@ -119,7 +119,7 @@ pub async fn spawn_test_server() -> Result<TestServer> {
         pool: pool.clone(),
         session_store,
         webauthn,
-        domain: "hotchkiss.io".to_string(),
+        site_host: "hotchkiss.io".to_string(),
     };
     let router = create_router(app_state).await?;
 

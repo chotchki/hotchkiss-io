@@ -177,7 +177,7 @@ pub async fn put_page_path(
             let mut lp = lp.to_owned();
             lp.page_title = put_page_form.page_title;
             lp.page_category = put_page_form.page_category;
-            lp.page_markdown = rewrite_site_links(&put_page_form.page_markdown, &state.domain)?;
+            lp.page_markdown = rewrite_site_links(&put_page_form.page_markdown, &state.site_host)?;
             lp.page_cover_attachment_id = page_cover_attachment_id;
             lp.page_order = put_page_form.page_order;
             lp.update(&state.pool).await?;

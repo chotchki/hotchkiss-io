@@ -36,7 +36,7 @@ pub struct EndpointsProviderService {
     http_port: u16,
     https_port: u16,
     backup_path: PathBuf,
-    domain: String,
+    site_host: String,
 }
 
 impl EndpointsProviderService {
@@ -66,7 +66,9 @@ impl EndpointsProviderService {
             http_port: settings.http_port,
             https_port: settings.https_port,
             backup_path: settings.backup_path.clone(),
-            domain: settings.domain.clone(),
+            // The registrable parent (prod: hotchkiss.io; beta also hotchkiss.io,
+            // not the served beta.hotchkiss.io) so canonical links relativize on both.
+            site_host: settings.webauthn_rp_id.clone(),
         })
     }
 
@@ -87,7 +89,7 @@ impl EndpointsProviderService {
             session_store: self.session_store.clone(),
             pool: self.pool.clone(),
             webauthn: self.webauthn.clone(),
-            domain: self.domain.clone(),
+            site_host: self.site_host.clone(),
         };
 
         let http_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.http_port);
