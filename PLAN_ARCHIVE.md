@@ -281,3 +281,13 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] BV.3 - Tests (web: math + highlighted code render, source-in-HTML) + CLAUDE.md/SPEC docs
 - [x] BV.4 - Deploy: push main (beta) → verify → tag vX.Y.Z (prod)
 
+---
+
+## 2026-06-26
+
+## Phase BW - GFM tables + fix nested-element rendering (BV walk-depth regression)
+- [x] BW.0 - Phase exit: content pages render GFM tables + math/images/diagrams nested in lists/headings/blockquotes (BV walk-depth regression fixed); live on prod
+- [x] BW.1 - Fix transformer walk to descend into ALL containers (lists/headings/blockquotes/emphasis/links), not just Root/Paragraph — math/images/diagrams nested anywhere now convert; test
+- [x] BW.2 - GFM tables: enable gfm_table in to_mdast + the to_html re-parse so | a | b | renders as a table; test
+- [x] BW.3 - Docs (CLAUDE.md/SPEC) + deploy beta → verify → tag vX.Y.Z (prod)
+
