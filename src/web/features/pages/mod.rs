@@ -6,7 +6,7 @@ use crate::{
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
         html_template::HtmlTemplate, htmx_responses::htmx_refresh,
-        markdown::{title::strip_leading_h1, transformer::transform},
+        markdown::{links::rewrite_site_links, title::strip_leading_h1, transformer::transform},
         session::SessionData,
     },
 };
@@ -177,7 +177,7 @@ pub async fn put_page_path(
             let mut lp = lp.to_owned();
             lp.page_title = put_page_form.page_title;
             lp.page_category = put_page_form.page_category;
-            lp.page_markdown = put_page_form.page_markdown;
+            lp.page_markdown = rewrite_site_links(&put_page_form.page_markdown, &state.domain)?;
             lp.page_cover_attachment_id = page_cover_attachment_id;
             lp.page_order = put_page_form.page_order;
             lp.update(&state.pool).await?;

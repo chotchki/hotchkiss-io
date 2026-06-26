@@ -198,9 +198,10 @@
     else if (e.key === "0") fit();
   }
 
-  // Delegated triggers — work for diagrams swapped in by HTMX after load.
+  // Delegated triggers — work for diagrams swapped in by HTMX after load AND for
+  // content images (markdown `![]()`), which carry the same `data-zoomable` hook.
   function zoomableFrom(target) {
-    const t = target.closest ? target.closest(".diagram img[data-zoomable]") : null;
+    const t = target.closest ? target.closest("img[data-zoomable]") : null;
     return t;
   }
 

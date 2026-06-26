@@ -32,6 +32,21 @@ pub fn transform(markdown: &str) -> Result<String> {
                         ),
                         position: None,
                     })
+                } else {
+                    // Cap a content image's in-flow height and make it click-to-zoom,
+                    // reusing the diagram lightbox (diagram-zoom.js binds any
+                    // `img[data-zoomable]`). The full src loads in-flow, CSS-capped, so
+                    // the zoom clone shows it at full resolution.
+                    *node = Node::Html(Html {
+                        value: format!(
+                            "<img class=\"content-image mx-auto my-4 block cursor-zoom-in\" \
+style=\"max-width:100%;max-height:{MAX_IMAGE_HEIGHT_PX}px\" data-zoomable=\"true\" tabindex=\"0\" \
+role=\"button\" aria-label=\"Zoom image\" src=\"{}\" alt=\"{}\" />",
+                            attr_escape(&image.url),
+                            attr_escape(&image.alt),
+                        ),
+                        position: None,
+                    })
                 }
             }
             Node::Code(code) => {
@@ -70,6 +85,18 @@ pub fn transform(markdown: &str) -> Result<String> {
         .map_err(|m: markdown::message::Message| anyhow!("Failed to stringify markdown {}", m))
 }
 
+/// In-flow cap for content images — matches the diagram cap so the two read
+/// consistently; click-to-zoom (diagram-zoom.js) reveals the full image.
+const MAX_IMAGE_HEIGHT_PX: u32 = 480;
+
+/// Minimal HTML-attribute escaping for values interpolated into an emitted tag.
+fn attr_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,9 +107,24 @@ mod tests {
 
         let rendered = transform(input)?;
 
-        assert_eq!(
-            rendered,
-            "<p><img src=\"https://beta.hotchkiss.io/image.jpg\" alt=\"test\" /></p>\n"
+        // A content image renders capped + click-to-zoom (reusing the diagram
+        // lightbox), not a bare passthrough <img>.
+        assert!(
+            rendered.contains("src=\"https://beta.hotchkiss.io/image.jpg\""),
+            "src kept: {rendered}"
+        );
+        assert!(rendered.contains("alt=\"test\""), "alt kept: {rendered}");
+        assert!(
+            rendered.contains("data-zoomable=\"true\""),
+            "click-to-zoom hook: {rendered}"
+        );
+        assert!(
+            rendered.contains("max-height:480px"),
+            "in-flow height cap: {rendered}"
+        );
+        assert!(
+            rendered.contains("cursor-zoom-in"),
+            "zoom affordance: {rendered}"
         );
 
         Ok(())

@@ -36,6 +36,7 @@ pub struct EndpointsProviderService {
     http_port: u16,
     https_port: u16,
     backup_path: PathBuf,
+    domain: String,
 }
 
 impl EndpointsProviderService {
@@ -65,6 +66,7 @@ impl EndpointsProviderService {
             http_port: settings.http_port,
             https_port: settings.https_port,
             backup_path: settings.backup_path.clone(),
+            domain: settings.domain.clone(),
         })
     }
 
@@ -85,6 +87,7 @@ impl EndpointsProviderService {
             session_store: self.session_store.clone(),
             pool: self.pool.clone(),
             webauthn: self.webauthn.clone(),
+            domain: self.domain.clone(),
         };
 
         let http_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.http_port);
