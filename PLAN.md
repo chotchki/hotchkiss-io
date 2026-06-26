@@ -128,6 +128,11 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
     - `post_page_path` / `post_top_level_page_path` reject non-URI-safe `page_name` (spaces, etc) with a 400 — but htmx swallows non-2xx responses, so submissions silently no-op. The blog "+ New post" form now slugifies on input as a local fix, but the top-nav admin "Create New Page" form and the editor's child-create form (`templates/pages/get_page.html`) still have the silent-fail. Whole-site fix: either slugify server-side in the handlers (any `page_name` → lowercase/hyphenated), or apply the same client-side slugify everywhere, or render an inline error message on 400.
     - Page minimum width exceeds an iPhone portrait viewport (~390px) — `templates/base.html` has the jumbotron as `flex flex-row` (image `size-40` = 160px + name/tagline text alongside) which never wraps, and the un-wrapped nav `<ul>` from the first finding contributes too. User has to rotate to landscape. Likely fix: jumbotron becomes `flex-col sm:flex-row` (or similar) so it stacks on narrow screens; nav fix from finding #1 helps here too.
     - On the phone, can't reach the editor — user reports "not logged in to the website to edit." Need to confirm symptom precisely (no editor chrome / 403 / redirect to login / save fails / something else) and whether (a) PWA cookie scope is separate from Safari, (b) session expired silently (1-day inactivity), or (c) the login passkey ceremony itself doesn't complete on iOS in some path.
+## Phase BW - GFM tables + fix nested-element rendering (BV walk-depth regression)
+- [ ] BW.0 - Phase exit: content pages render GFM tables + math/images/diagrams nested in lists/headings/blockquotes (BV walk-depth regression fixed); live on prod
+- [x] BW.1 - Fix transformer walk to descend into ALL containers (lists/headings/blockquotes/emphasis/links), not just Root/Paragraph — math/images/diagrams nested anywhere now convert; test
+- [x] BW.2 - GFM tables: enable gfm_table in to_mdast + the to_html re-parse so | a | b | renders as a table; test
+- [ ] BW.3 - Docs (CLAUDE.md/SPEC) + deploy beta → verify → tag vX.Y.Z (prod)
 
 ## Backlog (not yet phased)
 

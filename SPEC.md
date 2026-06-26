@@ -124,6 +124,7 @@ The lecture-style content (the recon-gen deep-dive) wants real math + readable c
 
 - **Math** is authored as `$$…$$` — single `$` stays literal so prose prices ("$200") don't parse as math. The transformer enables markdown-rs's math constructs and emits each math node as a source-carrying `.math` element (the TeX stays in the served HTML — no-JS / crawler / LLM reads it); **KaTeX** (vendored, client-side) typesets them on load + after HTMX swaps. Same source-in-HTML philosophy as the d2 diagrams.
 - **Code** keeps its fenced `language-*` class; **highlight.js** (vendored, client-side) highlights it, excluding the d2 diagram source. Authoring convention: **deep-link the real code to GitHub at exact lines AND show the important snippet inline** in a highlighted block — the permalink keeps it honest (the canonical source), the inline snippet saves a click for the bit under discussion. The snippet is copied from the real code, never invented; large code is not reproduced wholesale.
+- **Tables** are GFM (`| … |`). Since `mdast_util_to_markdown` can't re-serialize a Table node, each table is rendered from its original markdown slice and emitted as HTML (Phase BW). That same phase fixed a walk-depth bug so math / images / diagrams nested in a list or heading convert too — previously only top-level ones did.
 
 ## Database backups
 

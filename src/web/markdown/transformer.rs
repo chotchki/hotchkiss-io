@@ -27,6 +27,7 @@ pub fn transform(markdown: &str) -> Result<String> {
         constructs: Constructs {
             math_text: true,
             math_flow: true,
+            gfm_table: true,
             ..Constructs::default()
         },
         math_text_single_dollar: false,
@@ -34,6 +35,16 @@ pub fn transform(markdown: &str) -> Result<String> {
     };
     let mut ast = to_mdast(markdown, &parse_options)
         .map_err(|m: markdown::message::Message| anyhow!("Failed to parse markdown {}", m))?;
+
+    // One options bag for the table-slice render (in the walk) AND the final
+    // re-parse; allow_dangerous_html lets the raw HTML we emit pass through.
+    let html_opts = Options {
+        parse: parse_options,
+        compile: CompileOptions {
+            allow_dangerous_html: true,
+            ..CompileOptions::default()
+        },
+    };
 
     let mut queue = VecDeque::from([&mut ast]);
     while let Some(node) = queue.pop_front() {
@@ -99,24 +110,38 @@ role=\"button\" aria-label=\"Zoom image\" src=\"{}\" alt=\"{}\" />",
                     position: None,
                 });
             }
-            Node::Root(root) => queue.extend(root.children.iter_mut()),
-            Node::Paragraph(p) => queue.extend(p.children.iter_mut()),
-            _ => {}
+            Node::Table(_) => {
+                // mdast_util_to_markdown (0.0.1) can't re-serialize a Table, so
+                // the AST round-trip would silently drop it. Render the table
+                // from its ORIGINAL source slice (GFM on) and emit that HTML —
+                // it then passes through the round-trip untouched.
+                let span = node.position().map(|p| (p.start.offset, p.end.offset));
+                if let Some((s, e)) = span {
+                    let table_html =
+                        to_html_with_options(&markdown[s..e], &html_opts).unwrap_or_default();
+                    *node = Node::Html(Html {
+                        value: table_html,
+                        position: None,
+                    });
+                }
+            }
+            // Descend into EVERY other container (lists, list items, headings,
+            // blockquotes, emphasis, strong, links, table cells, …), not just
+            // Root/Paragraph — otherwise math / images / diagrams nested in a
+            // bullet or heading are never reached, round-trip back to raw
+            // `$…$` / plain markdown, and render literally.
+            other => {
+                if let Some(children) = other.children_mut() {
+                    queue.extend(children.iter_mut());
+                }
+            }
         }
     }
-
-    let options = Options {
-        compile: CompileOptions {
-            allow_dangerous_html: true,
-            ..CompileOptions::default()
-        },
-        ..Options::default()
-    };
 
     let transformed_markdown =
         to_markdown(&ast).map_err(|m| anyhow!("AST to Markdown failed {}", m))?;
 
-    to_html_with_options(&transformed_markdown, &options)
+    to_html_with_options(&transformed_markdown, &html_opts)
         .map_err(|m: markdown::message::Message| anyhow!("Failed to stringify markdown {}", m))
 }
 
@@ -247,6 +272,34 @@ mod tests {
             "prose prices must NOT become math: {rendered}"
         );
         assert!(rendered.contains("$200"), "the price text must survive: {rendered}");
+        Ok(())
+    }
+
+    #[test]
+    fn inline_math_in_a_list_item_renders() -> Result<()> {
+        // BW regression: math nested in a bullet (not top-level) must still
+        // convert — the walk has to descend past List / ListItem / Paragraph.
+        let input = "- a credit is $$\\ge 0$$, a debit is $$\\le 0$$\n";
+
+        let rendered = transform(input)?;
+
+        assert_eq!(
+            rendered.matches("class=\"math math-inline\"").count(),
+            2,
+            "both inline math spans in the list item should convert: {rendered}"
+        );
+        assert!(!rendered.contains("$$"), "no raw `$$` should survive: {rendered}");
+        Ok(())
+    }
+
+    #[test]
+    fn gfm_table_renders() -> Result<()> {
+        let input = "| a | b |\n| --- | --- |\n| 1 | 2 |\n";
+
+        let rendered = transform(input)?;
+
+        assert!(rendered.contains("<table>"), "GFM table should render: {rendered}");
+        assert!(rendered.contains("<td>1</td>"), "table cell should render: {rendered}");
         Ok(())
     }
 }
