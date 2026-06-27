@@ -807,3 +807,65 @@ async fn admin_authoring_flow_title_slug_and_edit_toggle() {
         "anon must not see the edit toggle"
     );
 }
+
+/// BX: a blog post in the middle of the timeline shows BOTH a Previous (older)
+/// and a Next (newer) card linking the adjacent posts. Posts are seeded
+/// oldest→newest, so the newest-first order is [third, second, first].
+#[tokio::test]
+async fn blog_post_middle_shows_prev_and_next() {
+    let server = spawn_test_server().await.expect("spawn");
+    server.seed_blog_post("first-post", "the oldest").await.expect("seed");
+    server.seed_blog_post("second-post", "the middle").await.expect("seed");
+    server.seed_blog_post("third-post", "the newest").await.expect("seed");
+
+    let body = reqwest::get(server.url("/blog/second-post"))
+        .await.unwrap().text().await.unwrap();
+
+    assert!(body.contains("fa-arrow-left"), "Previous card missing: {body}");
+    assert!(body.contains("fa-arrow-right"), "Next card missing: {body}");
+    assert!(
+        body.contains("href=\"/blog/first-post\""),
+        "Previous should link the older post: {body}"
+    );
+    assert!(
+        body.contains("href=\"/blog/third-post\""),
+        "Next should link the newer post: {body}"
+    );
+}
+
+/// BX: the newest post has no Next, the oldest has no Previous — a side is
+/// omitted at each end.
+#[tokio::test]
+async fn blog_post_ends_omit_one_side() {
+    let server = spawn_test_server().await.expect("spawn");
+    server.seed_blog_post("first-post", "the oldest").await.expect("seed");
+    server.seed_blog_post("second-post", "the middle").await.expect("seed");
+    server.seed_blog_post("third-post", "the newest").await.expect("seed");
+
+    // Newest post: a Previous card (→ second) only, no Next.
+    let newest = reqwest::get(server.url("/blog/third-post"))
+        .await.unwrap().text().await.unwrap();
+    assert!(newest.contains("fa-arrow-left"), "newest should have a Previous card: {newest}");
+    assert!(!newest.contains("fa-arrow-right"), "newest must NOT have a Next card: {newest}");
+    assert!(newest.contains("href=\"/blog/second-post\""), "Previous → second: {newest}");
+
+    // Oldest post: a Next card (→ second) only, no Previous.
+    let oldest = reqwest::get(server.url("/blog/first-post"))
+        .await.unwrap().text().await.unwrap();
+    assert!(oldest.contains("fa-arrow-right"), "oldest should have a Next card: {oldest}");
+    assert!(!oldest.contains("fa-arrow-left"), "oldest must NOT have a Previous card: {oldest}");
+    assert!(oldest.contains("href=\"/blog/second-post\""), "Next → second: {oldest}");
+}
+
+/// BX: the next/previous nav is blog-only — a regular /pages page (same
+/// template) shows neither card.
+#[tokio::test]
+async fn regular_page_has_no_post_nav() {
+    let server = spawn_test_server().await.expect("spawn");
+    server.seed_content_page("about", "# About\n\nJust a page.").await.expect("seed");
+
+    let body = reqwest::get(server.url("/pages/about"))
+        .await.unwrap().text().await.unwrap();
+    assert!(!body.contains("fa-arrow-left"), "no Previous card on a /pages page: {body}");
+    assert!(!body.contains("fa-arrow-right"), "no Next card on a /pages page: {body}");
+}

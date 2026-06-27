@@ -58,6 +58,15 @@ pub async fn redirect_to_first_page(State(state): State<AppState>) -> Result<Res
     }
 }
 
+/// Compact card for the next/previous nav at the bottom of a blog post. Lives
+/// on GetPageTemplate as Options that ONLY `show_post` (blog) fills — `/pages`
+/// leaves them None, so the nav is blog-only by construction.
+pub struct PostNavCard {
+    pub page_name: String,
+    pub title: String,
+    pub page_creation_date: String,
+}
+
 #[derive(Template)]
 #[template(path = "pages/get_page.html")]
 pub struct GetPageTemplate {
@@ -71,6 +80,10 @@ pub struct GetPageTemplate {
     /// Admin editor visible? Driven by `?edit` so admin defaults to the clean
     /// reader view and opts into the editor.
     pub edit: bool,
+    /// Adjacent blog posts (Previous = older, Next = newer). Both None on
+    /// `/pages`; the template renders the nav only when one is Some.
+    pub prev_post: Option<PostNavCard>,
+    pub next_post: Option<PostNavCard>,
 }
 
 /// `?edit` (any value) toggles the admin editor on a page view; absent = the
@@ -108,6 +121,8 @@ pub async fn get_page_path(
                     .await?,
                 rendered_markdown: transform(&strip_leading_h1(&lp.page_markdown))?,
                 edit: edit_q.edit.is_some(),
+                prev_post: None,
+                next_post: None,
             };
 
             Ok(HtmlTemplate(gpt).into_response())

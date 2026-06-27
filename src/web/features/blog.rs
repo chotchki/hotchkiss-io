@@ -3,7 +3,7 @@ use crate::{
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
         features::{
-            pages::{EditQuery, GetPageTemplate},
+            pages::{EditQuery, GetPageTemplate, PostNavCard},
             top_bar::TopBar,
         },
         html_template::HtmlTemplate,
@@ -188,6 +188,20 @@ pub async fn show_post(
         return Ok((StatusCode::NOT_FOUND, "No such post").into_response());
     };
 
+    // Next/previous nav: pull the post's siblings in the SAME newest-first order
+    // the index uses, locate this post, take its neighbors. Previous = older
+    // (one step down the list), Next = newer (one step up). A side is None at the
+    // ends, so the oldest/newest post shows only one card.
+    let siblings =
+        ContentPageDao::find_by_parent_newest_first(&state.pool, lp.parent_page_id, None).await?;
+    let (prev_post, next_post) = match siblings.iter().position(|p| p.page_id == lp.page_id) {
+        Some(i) => (
+            siblings.get(i + 1).map(nav_card),
+            i.checked_sub(1).and_then(|j| siblings.get(j)).map(nav_card),
+        ),
+        None => (None, None),
+    };
+
     let gpt = GetPageTemplate {
         top_bar: TopBar::create(&state.pool, "blog").await?,
         auth_state: session_data.auth_state,
@@ -197,6 +211,17 @@ pub async fn show_post(
         children_pages: ContentPageDao::find_by_parent(&state.pool, Some(lp.page_id)).await?,
         rendered_markdown: transform(&strip_leading_h1(&lp.page_markdown))?,
         edit: edit_q.edit.is_some(),
+        prev_post,
+        next_post,
     };
     Ok(HtmlTemplate(gpt).into_response())
+}
+
+/// Map a post row to the compact card the next/previous nav renders.
+fn nav_card(p: &ContentPageDao) -> PostNavCard {
+    PostNavCard {
+        page_name: p.page_name.clone(),
+        title: p.display_title(),
+        page_creation_date: p.page_creation_date.format("%B %-d, %Y").to_string(),
+    }
 }
