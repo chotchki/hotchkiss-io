@@ -57,21 +57,25 @@ deploy() {
         snapshot_prod_db_into_beta
     fi
 
-    # Atomic-ish swap: rename current out, rename new in, kickstart, drop old.
-    # The mmap'd binary keeps the old process alive across the rename until
-    # kickstart -k swaps it for the new one.
+    # Atomic-ish swap: rename current out, rename new in, restart, drop old.
+    # The mmap'd binary keeps the old process alive across the rename until the
+    # SIGTERM restart below swaps it for the new one.
     rm -rf "$app_prev"
     if [[ -d "$app_dst" ]]; then
         mv "$app_dst" "$app_prev"
     fi
     mv "$built" "$app_dst"
-    # kickstart restarts a LOADED agent; if it isn't bootstrapped yet (first
-    # deploy of a profile, or after a maintenance unload) it exits non-zero —
-    # bootstrap instead of letting `set -e` abort with the bundle already swapped
-    # in (which would misreport a good deploy as a failed push). A genuine restart
-    # failure of an already-loaded agent still fails (bootstrap of a loaded
-    # service errors), so real problems aren't swallowed.
-    if ! launchctl kickstart -k "gui/$(id -u)/$launch_label"; then
+    # Stop the running instance with SIGTERM, NOT `kickstart -k` (which SIGKILLs
+    # the GUI tray app → macOS files a "<app> quit unexpectedly" crash report on
+    # every deploy, piling dialogs up on the mini's screen). SIGTERM's default
+    # disposition is a clean terminate, so no crash report; KeepAlive=true then
+    # relaunches the agent onto the just-swapped bundle (after up to
+    # ThrottleInterval seconds — kept deliberately so a crash-looping build can't
+    # thrash). If the agent isn't loaded yet (first deploy of a profile, or after
+    # a maintenance unload) `kill` exits non-zero — bootstrap it (RunAtLoad then
+    # starts it) instead of letting `set -e` abort with the bundle already swapped
+    # in (which would misreport a good deploy as a failed push).
+    if ! launchctl kill TERM "gui/$(id -u)/$launch_label"; then
         echo "post-receive: $launch_label not loaded; bootstrapping" >&2
         launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/$launch_label.plist"
     fi
