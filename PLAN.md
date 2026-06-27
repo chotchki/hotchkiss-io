@@ -114,8 +114,9 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
   - [ ] 16.1.1 - Mine the less-visible work for public-safe signal — architecture/problem writeups, scope/scale/impact stated at a safe level, and anything already public (talks, patents, OSS, conference work).
 - [ ] 16.2 - Decide resume structure + narrative (chronological vs impact-led), what to lead with, and public vs gated.
   - [ ] 16.2.1 - Narrative strategy: meet the "lots of depth, little public proof" skeptic head-on (depth + progression), and cross-link the résumé to the side projects as the tangible evidence of range.
-- [ ] 16.3 - Resume page template + content at `/resume`.
-- [ ] 16.4 - Downloadable PDF: decide mechanism (committed static PDF vs generated from a single source of truth).
+- [ ] 16.3 - `/resume` as a content_page rendering the résumé markdown — the SINGLE source for both the web view and the PDF (seed/author from `career-portfolio/resume/resume-draft-v3.md`). DRY with the site, editable inline, source-in-HTML so ATS / AI screeners parse it.
+- [ ] 16.4 - Downloadable PDF — DECIDED (2026-06-26): option B, GENERATE `/resume.pdf` from the same source server-side (no print-stylesheet half-measure, no hand-maintained attachment — chris: "rather not give people the option of a crappy version"). Reuse the d2 pattern: shell out to an HTML→PDF binary, resolve via `$BIN`→brew→PATH, cache, fail-visible-not-500.
+  - [x] 16.4.1 - Pick + vendor the HTML→PDF binary. Recommend `weasyprint` (HTML+print-CSS→PDF — reuses the rendered markdown HTML so markdown stays the single source; a résumé has no JS-rendered content so headless-chrome isn't needed). `typst` only if a bespoke designed layout is wanted (that moves the source-of-truth off markdown). Install on dev + the mini + CI, like d2.
 - [ ] 16.5 - Tie the contact/CTA into the landing page (Phase 13).
 - [ ] 16.6 - e2e coverage for `/resume` + PDF download; CLAUDE.md/SPEC update.
 

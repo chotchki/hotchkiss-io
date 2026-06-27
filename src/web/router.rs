@@ -59,7 +59,9 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
         .route(
             "/diagram/{hash}",
             get(crate::web::features::diagram::render_registered_diagram),
-        );
+        )
+        // /resume + /resume.pdf (the latter generated via weasyprint) — top-level.
+        .merge(crate::web::features::resume::resume_routes());
 
     // Debug-only test-login seam (absent from release builds = prod).
     #[cfg(debug_assertions)]

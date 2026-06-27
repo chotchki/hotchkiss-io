@@ -1,0 +1,87 @@
+/* Résumé print stylesheet for weasyprint (HTML -> PDF). Styles the semantic
+   HTML that the markdown transformer emits; NOT Tailwind. Single source: the same
+   markdown renders the web view and, through this, the PDF. */
+
+@page {
+  size: Letter;
+  margin: 0.6in 0.7in;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.35;
+  color: #1a2233;
+  margin: 0;
+}
+
+h1.resume-name {
+  font-size: 20pt;
+  margin: 0 0 2pt;
+  color: #1a2233;
+}
+
+/* Section headers (## in the résumé markdown). */
+h2 {
+  font-size: 12pt;
+  margin: 12pt 0 4pt;
+  padding-bottom: 2pt;
+  border-bottom: 1.5pt solid #1a2233;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+h3 {
+  font-size: 10.5pt;
+  margin: 7pt 0 1pt;
+}
+
+p {
+  margin: 2pt 0;
+}
+
+ul {
+  margin: 2pt 0 4pt;
+  padding-left: 16pt;
+}
+
+li {
+  margin: 1pt 0;
+}
+
+a {
+  color: #1a2233;
+  text-decoration: none;
+}
+
+strong {
+  font-weight: 600;
+}
+
+hr {
+  border: none;
+  border-top: 0.5pt solid #aab;
+  margin: 8pt 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4pt 0;
+}
+
+td,
+th {
+  text-align: left;
+  padding: 1pt 6pt 1pt 0;
+  vertical-align: top;
+}
+
+code {
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 9.5pt;
+}

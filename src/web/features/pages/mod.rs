@@ -84,6 +84,9 @@ pub struct GetPageTemplate {
     /// `/pages`; the template renders the nav only when one is Some.
     pub prev_post: Option<PostNavCard>,
     pub next_post: Option<PostNavCard>,
+    /// `/resume.pdf` download link — Some only on the résumé page (the template
+    /// shows the button when set); None on /pages and /blog.
+    pub pdf_url: Option<String>,
 }
 
 /// `?edit` (any value) toggles the admin editor on a page view; absent = the
@@ -123,6 +126,7 @@ pub async fn get_page_path(
                 edit: edit_q.edit.is_some(),
                 prev_post: None,
                 next_post: None,
+                pdf_url: None,
             };
 
             Ok(HtmlTemplate(gpt).into_response())

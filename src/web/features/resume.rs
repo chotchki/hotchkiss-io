@@ -1,0 +1,199 @@
+//! `/resume` — the résumé page + its generated PDF.
+//!
+//! `/resume` renders the newest child of the `resume` special page (chris authors
+//! the résumé into that child at `/resume?edit`). `/resume.pdf` renders that SAME
+//! markdown to HTML, wraps it in a print stylesheet and pipes it through
+//! `weasyprint` — so the PDF DERIVES from the one source, no drift. The binary is
+//! resolved like d2 (`$WEASYPRINT_BIN` → brew → PATH). A missing/broken binary is
+//! logged + surfaced as a 500 via `AppError` (a PDF download can't show an inline
+//! error block the way the diagram swap can).
+
+use anyhow::anyhow;
+use anyhow::Result;
+use axum::extract::{Query, State};
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
+use axum::Router;
+use openssl::sha::sha256;
+use sqlx::SqlitePool;
+use std::collections::HashMap;
+use std::io::Write;
+use std::path::Path;
+use std::process::{Command, Stdio};
+use std::sync::{LazyLock, Mutex};
+
+use crate::db::dao::content_pages::ContentPageDao;
+use crate::web::app_error::AppError;
+use crate::web::app_state::AppState;
+use crate::web::features::pages::{EditQuery, GetPageTemplate};
+use crate::web::features::top_bar::TopBar;
+use crate::web::html_template::HtmlTemplate;
+use crate::web::markdown::title::strip_leading_h1;
+use crate::web::markdown::transformer::transform;
+use crate::web::session::SessionData;
+
+/// Résumé-specific print stylesheet (NOT Tailwind — weasyprint styles the
+/// semantic HTML directly). Single source: the same markdown renders the web view
+/// AND, through this CSS, the PDF. `include_str!` makes it a compile-time dep, so
+/// edits trigger a rebuild.
+const RESUME_PRINT_CSS: &str = include_str!("resume-print.css");
+
+pub fn resume_routes() -> Router<AppState> {
+    Router::new()
+        .route("/resume", get(show_resume))
+        .route("/resume.pdf", get(show_resume_pdf))
+}
+
+/// The résumé content lives in the newest child of the `resume` special page.
+async fn newest_resume_child(pool: &SqlitePool) -> Result<Option<ContentPageDao>> {
+    let resume = ContentPageDao::find_by_name(pool, None, "resume")
+        .await?
+        .ok_or_else(|| anyhow!("Server misconfiguration: `resume` special page missing"))?;
+    let children =
+        ContentPageDao::find_by_parent_newest_first(pool, Some(resume.page_id), Some(1)).await?;
+    Ok(children.into_iter().next())
+}
+
+pub async fn show_resume(
+    State(state): State<AppState>,
+    session_data: SessionData,
+    Query(edit_q): Query<EditQuery>,
+) -> Result<Response, AppError> {
+    let Some(child) = newest_resume_child(&state.pool).await? else {
+        return Ok((StatusCode::NOT_FOUND, "Résumé not published yet").into_response());
+    };
+
+    let gpt = GetPageTemplate {
+        top_bar: TopBar::create(&state.pool, "resume").await?,
+        auth_state: session_data.auth_state,
+        page_path: format!("resume/{}", child.page_name),
+        page: child.clone(),
+        pages_path: vec![child.clone()],
+        children_pages: ContentPageDao::find_by_parent(&state.pool, Some(child.page_id)).await?,
+        rendered_markdown: transform(&strip_leading_h1(&child.page_markdown))?,
+        edit: edit_q.edit.is_some(),
+        prev_post: None,
+        next_post: None,
+        pdf_url: Some("/resume.pdf".to_string()),
+    };
+    Ok(HtmlTemplate(gpt).into_response())
+}
+
+pub async fn show_resume_pdf(State(state): State<AppState>) -> Result<Response, AppError> {
+    let Some(child) = newest_resume_child(&state.pool).await? else {
+        return Ok((StatusCode::NOT_FOUND, "Résumé not published yet").into_response());
+    };
+    let pdf = render_resume_pdf(&child)?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/pdf"),
+            (
+                header::CONTENT_DISPOSITION,
+                "inline; filename=\"Christopher-Hotchkiss-Resume.pdf\"",
+            ),
+        ],
+        pdf,
+    )
+        .into_response())
+}
+
+/// hash(markdown) -> rendered PDF bytes. The PDF derives from the markdown, so the
+/// content hash is a safe cache key (regenerates when the résumé changes).
+static PDF_CACHE: LazyLock<Mutex<HashMap<String, Vec<u8>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn render_resume_pdf(child: &ContentPageDao) -> Result<Vec<u8>> {
+    let hash = content_hash(&child.page_markdown);
+    if let Some(hit) = PDF_CACHE
+        .lock()
+        .expect("resume pdf cache poisoned")
+        .get(&hash)
+    {
+        return Ok(hit.clone());
+    }
+    let body = transform(&strip_leading_h1(&child.page_markdown))?;
+    let title = html_escape(&child.display_title());
+    let html = format!(
+        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>{title}</title>\
+<style>{RESUME_PRINT_CSS}</style></head><body><h1 class=\"resume-name\">{title}</h1>{body}</body></html>"
+    );
+    let pdf = weasyprint(&html)?;
+    PDF_CACHE
+        .lock()
+        .expect("resume pdf cache poisoned")
+        .insert(hash, pdf.clone());
+    Ok(pdf)
+}
+
+/// Resolved once: `$WEASYPRINT_BIN`, then brew locations, then PATH (the mini's
+/// LaunchAgent PATH excludes /opt/homebrew/bin, so a bare name can't be relied on).
+static WEASYPRINT_BIN: LazyLock<Option<String>> = LazyLock::new(resolve_weasyprint_bin);
+
+fn resolve_weasyprint_bin() -> Option<String> {
+    if let Ok(p) = std::env::var("WEASYPRINT_BIN")
+        && !p.is_empty()
+    {
+        return Some(p);
+    }
+    for cand in ["/opt/homebrew/bin/weasyprint", "/usr/local/bin/weasyprint"] {
+        if Path::new(cand).is_file() {
+            return Some(cand.to_string());
+        }
+    }
+    let on_path = Command::new("weasyprint")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    on_path.then(|| "weasyprint".to_string())
+}
+
+/// HTML (string) -> PDF (bytes): `weasyprint - -` reads HTML from stdin, writes
+/// the PDF to stdout.
+fn weasyprint(html: &str) -> Result<Vec<u8>> {
+    let bin = WEASYPRINT_BIN.as_deref().ok_or_else(|| {
+        anyhow!("weasyprint not found — `brew install weasyprint` (looked at $WEASYPRINT_BIN, /opt/homebrew/bin, /usr/local/bin, PATH)")
+    })?;
+    let mut child = Command::new(bin)
+        .arg("-")
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| anyhow!("failed to spawn weasyprint ({bin}): {e}"))?;
+    {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("weasyprint stdin unavailable"))?;
+        stdin.write_all(html.as_bytes())?;
+    } // drop stdin -> EOF so weasyprint starts
+    let out = child.wait_with_output()?;
+    if !out.status.success() {
+        return Err(anyhow!(
+            "weasyprint failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    if out.stdout.is_empty() {
+        return Err(anyhow!("weasyprint produced no output"));
+    }
+    Ok(out.stdout)
+}
+
+/// Content hash of the markdown: SHA-256 truncated to 128 bits, hex.
+fn content_hash(source: &str) -> String {
+    let digest = sha256(source.as_bytes());
+    digest[..16].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}

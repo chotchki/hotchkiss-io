@@ -869,3 +869,70 @@ async fn regular_page_has_no_post_nav() {
     assert!(!body.contains("fa-arrow-left"), "no Previous card on a /pages page: {body}");
     assert!(!body.contains("fa-arrow-right"), "no Next card on a /pages page: {body}");
 }
+
+/// Phase 16.3: /resume renders the résumé content (the newest child of the
+/// `resume` special page) with the title from its leading H1 + a PDF download link.
+#[tokio::test]
+async fn resume_page_renders_with_pdf_link() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_resume("# Christopher Hotchkiss\n\nSoftware architect and systems engineer.")
+        .await
+        .expect("seed");
+
+    let body = reqwest::get(server.url("/resume"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("Christopher Hotchkiss"), "résumé title (from H1): {body}");
+    assert!(body.contains("Software architect"), "résumé body: {body}");
+    assert!(
+        body.contains("href=\"/resume.pdf\""),
+        "the PDF download link must be present: {body}"
+    );
+}
+
+/// Phase 16.4: /resume.pdf generates a real PDF from the same markdown via
+/// weasyprint. weasyprint is a real dependency (like d2) — skip the strict check
+/// if it isn't installed so the suite still passes on a box without it.
+#[tokio::test]
+async fn resume_pdf_is_a_real_pdf() {
+    let have_weasyprint = std::process::Command::new("weasyprint")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+        || ["/opt/homebrew/bin/weasyprint", "/usr/local/bin/weasyprint"]
+            .iter()
+            .any(|p| std::path::Path::new(p).exists());
+    if !have_weasyprint {
+        eprintln!("weasyprint not installed — skipping /resume.pdf assertion");
+        return;
+    }
+
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_resume("# Christopher Hotchkiss\n\nSoftware architect and systems engineer.")
+        .await
+        .expect("seed");
+
+    let resp = reqwest::get(server.url("/resume.pdf")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    assert!(ct.contains("application/pdf"), "content-type was: {ct}");
+    let bytes = resp.bytes().await.unwrap();
+    assert!(
+        bytes.starts_with(b"%PDF"),
+        "body should be a PDF (got {} bytes)",
+        bytes.len()
+    );
+}

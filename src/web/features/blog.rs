@@ -213,6 +213,7 @@ pub async fn show_post(
         edit: edit_q.edit.is_some(),
         prev_post,
         next_post,
+        pdf_url: None,
     };
     Ok(HtmlTemplate(gpt).into_response())
 }

@@ -78,6 +78,24 @@ impl TestServer {
         Ok(())
     }
 
+    /// Seed a child of the `resume` special_page (seeded by migration 0012) — the
+    /// résumé content. `/resume` renders the newest child.
+    pub async fn seed_resume(&self, markdown: &str) -> Result<()> {
+        let resume = ContentPageDao::find_by_name(&self.pool, None, "resume")
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("resume special_page missing — migration 0012?"))?;
+        ContentPageDao::create(
+            &self.pool,
+            Some(resume.page_id),
+            "main".to_string(),
+            None,
+            markdown.to_string(),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Seed a child of the `projects` special_page (seeded by migration 0007).
     pub async fn seed_project(&self, slug: &str, markdown: &str) -> Result<()> {
         let projects = ContentPageDao::find_by_name(&self.pool, None, "projects")
