@@ -291,3 +291,14 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] BW.2 - GFM tables: enable gfm_table in to_mdast + the to_html re-parse so | a | b | renders as a table; test
 - [x] BW.3 - Docs (CLAUDE.md/SPEC) + deploy beta → verify → tag vX.Y.Z (prod)
 
+---
+
+## 2026-06-27
+
+## Phase BX - Blog post next/previous navigation cards
+- [x] BX.0 - Phase exit: blog posts show next/previous cards to adjacent posts; omitted at the ends; absent on /pages; live on prod
+- [x] BX.1 - PostNavCard + Option prev/next on GetPageTemplate; render nav section in get_page.html (blog-only, compact, omit a side at the ends)
+- [x] BX.2 - show_post computes older/newer siblings + builds the cards; get_page_path passes None
+- [x] BX.3 - Tests (web) + CLAUDE.md docs
+- [x] BX.4 - Deploy beta → verify → tag vX.Y.Z (prod)
+
