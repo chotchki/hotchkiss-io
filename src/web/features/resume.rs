@@ -104,7 +104,11 @@ static PDF_CACHE: LazyLock<Mutex<HashMap<String, Vec<u8>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn render_resume_pdf(child: &ContentPageDao) -> Result<Vec<u8>> {
-    let hash = content_hash(&child.page_markdown);
+    // Key the cache on the ACTUAL PDF inputs (title + body), NOT markdown alone:
+    // editing the title (the `page_title` column) leaves `page_markdown` unchanged,
+    // so a markdown-only key kept serving a stale PDF after a title edit.
+    let title = child.display_title();
+    let hash = pdf_cache_key(&title, &child.page_markdown);
     if let Some(hit) = PDF_CACHE
         .lock()
         .expect("resume pdf cache poisoned")
@@ -113,7 +117,7 @@ fn render_resume_pdf(child: &ContentPageDao) -> Result<Vec<u8>> {
         return Ok(hit.clone());
     }
     let body = transform(&strip_leading_h1(&child.page_markdown))?;
-    let title = html_escape(&child.display_title());
+    let title = html_escape(&title);
     let html = format!(
         "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>{title}</title>\
 <style>{RESUME_PRINT_CSS}</style></head><body><h1 class=\"resume-name\">{title}</h1>{body}</body></html>"
@@ -196,4 +200,31 @@ fn html_escape(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+/// Cache key for the rendered PDF — over the ACTUAL inputs (title + body) so a
+/// title-only edit busts it (markdown alone wouldn't change). NUL-joined so a
+/// shift of the title/body boundary can't collide.
+fn pdf_cache_key(title: &str, markdown: &str) -> String {
+    content_hash(&format!("{title}\u{0}{markdown}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pdf_cache_key_busts_on_title_or_body_change() {
+        let md = "# Name\n\nthe body";
+        // The bug: a title-only edit (markdown unchanged) must change the key.
+        assert_ne!(
+            pdf_cache_key("Old Title", md),
+            pdf_cache_key("New Title", md),
+            "a title-only change must invalidate the PDF cache"
+        );
+        // Body-only change too.
+        assert_ne!(pdf_cache_key("T", "a"), pdf_cache_key("T", "b"));
+        // Identical inputs -> same key (so the cache actually hits).
+        assert_eq!(pdf_cache_key("T", md), pdf_cache_key("T", md));
+    }
 }
