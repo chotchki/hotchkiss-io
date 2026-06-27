@@ -302,3 +302,12 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] BX.3 - Tests (web) + CLAUDE.md docs
 - [x] BX.4 - Deploy beta → verify → tag vX.Y.Z (prod)
 
+---
+
+## 2026-06-27
+
+## Phase BY - Graceful deploy restart (kill the mini crash dialogs)
+- [x] BY.0 - Phase exit: deploys leave no "quit unexpectedly" dialogs on the mini (graceful SIGTERM restart); verified on the mini
+- [x] BY.1 - post-receive: graceful SIGTERM restart instead of kickstart -k (SIGKILL); re-copy the hook to the mini
+- [x] BY.2 - Verify on the mini; add an app SIGTERM handler if the tray app doesn't exit cleanly
+
