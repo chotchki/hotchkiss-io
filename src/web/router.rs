@@ -21,7 +21,10 @@ use build_time::build_time_utc;
 use time::Duration;
 use tower::ServiceBuilder;
 use tower_http::{
-    compression::CompressionLayer,
+    compression::{
+        predicate::{DefaultPredicate, NotForContentType, Predicate},
+        CompressionLayer,
+    },
     trace::{DefaultMakeSpan, DefaultOnRequest, TraceLayer},
 };
 use tower_livereload::LiveReloadLayer;
@@ -99,7 +102,19 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
             // method requires admin by default (except the anonymous auth
             // ceremony). INNER to session_layer so SessionData is populated.
             .layer(axum::middleware::from_fn(require_admin_for_mutations))
-            .layer(CompressionLayer::new()),
+            // Compress text, NEVER binary media: gzipping a `video/*` (or other
+            // already-compressed) `206` range response corrupts the byte ranges
+            // the browser seeks/streams with — it played back jerky. Images are
+            // already excluded by DefaultPredicate; add video/audio/model/binary.
+            .layer(
+                CompressionLayer::new().compress_when(
+                    DefaultPredicate::new()
+                        .and(NotForContentType::const_new("video/"))
+                        .and(NotForContentType::const_new("audio/"))
+                        .and(NotForContentType::const_new("model/"))
+                        .and(NotForContentType::const_new("application/octet-stream")),
+                ),
+            ),
     );
 
     Ok(router)

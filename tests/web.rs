@@ -1099,6 +1099,30 @@ async fn media_upload_serve_and_embed_vertical() {
     assert_eq!(served.status(), StatusCode::OK);
     assert!(!served.bytes().await.unwrap().is_empty(), "served bytes non-empty");
 
+    // Range + gzip: media must serve 206 and must NOT be compressed — gzipping a
+    // range response corrupts the byte ranges the browser seeks with (the cause
+    // of jerky video). This guards the serve route end-to-end.
+    let ranged = reqwest::Client::new()
+        .get(server.url(&format!("/media/file/{url_key}")))
+        .header("Range", "bytes=0-9")
+        .header("Accept-Encoding", "gzip, br")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ranged.status(), StatusCode::PARTIAL_CONTENT, "range request → 206");
+    assert!(
+        ranged.headers().get("content-encoding").is_none(),
+        "media must not be compressed (breaks ranges)"
+    );
+    let cr = ranged
+        .headers()
+        .get("content-range")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert!(cr.starts_with("bytes 0-9/"), "content-range was: {cr}");
+    assert_eq!(ranged.bytes().await.unwrap().len(), 10, "exactly the requested 10 bytes");
+
     // A junk token is a clean 404 — no existence oracle.
     let bad = reqwest::get(server.url(&format!("/media/file/{}", "0".repeat(64))))
         .await
