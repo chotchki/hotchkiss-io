@@ -99,8 +99,8 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] BZ.5 - Ingest: ffprobe-derive codec/mime/dims/duration per upload, store variants; auto-poster (ffmpeg frame→AVIF)
 - [x] BZ.6 - Transformer dispatch: ![](/media/<ref>) → /media/embed HTMX swap → <img>/<video multi-source>/<object stl> (diagram-style, low-risk vs transform() refactor)
 - [x] BZ.7 - Central media library /admin/media (drag-drop grouped upload, codec chips, copy-ref, delete; admin-gated; JSON ingest endpoint)
-- [ ] BZ.8 - One-shot Rust migration: attachment BLOBs → store + media rows + rewrite page refs /attachments→/media; verify on beta; retire /attachments + drop table
-- [ ] BZ.9 - Inline editor media upload (async drag-drop in the page editor, insert ![](/media/ref) at cursor, NO refresh — fixes the save_attachments lose-edits bug) + cover-image picker
+- [ ] BZ.8 - One-shot migration: attachment BLOBs → store + media rows + rewrite page refs /attachments→/media + re-home page_cover_attachment_id → media; verify on beta; retire /attachments + drop table
+- [x] BZ.9 - Inline editor media upload (async drag-drop onto the textarea + toolbar button, insert ![](/media/ref) at cursor, NO refresh — fixes the save_attachments lose-edits bug)
 - [x] BZ.10 - Merge / add-encode: associate a separately-uploaded video encode into an EXISTING media item (today merge needs all encodes in one simultaneous drop). Per-video "add encode" action and/or prompt-to-merge on video upload.
 - [x] BZ.11 - Thumbnails / posters: auto frame-grab a video poster (ffmpeg → AVIF) shown on the library card AND as <video poster=…>; a real thumbnail for every kind in the library grid.
 - [x] BZ.12 - Rename media: edit title freely; ref rename is riskier (breaks existing ![](/media/oldref) embeds) — gate it (ref editable only until referenced, or rewrite references like the BZ.8 migration).

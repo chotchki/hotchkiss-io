@@ -29,3 +29,59 @@ function addAttachment(event) {
 function setAsCoverId(attachment_id) {
     document.getElementById("page_cover_attachment_id").value = attachment_id;
 }
+
+// --- Inline media upload (Phase BZ): async upload → insert ![](/media/<ref>) at
+// the cursor, with NO page refresh, so unsaved markdown survives. (The old
+// attachment upload returned htmx_refresh(), which reloaded the page and ate
+// your edits.) Drop files onto the textarea, or use the toolbar button. ---
+function insertMediaRef(ref) {
+    const el = document.getElementById("page_markdown");
+    if (!el) return;
+    const [start, end] = [el.selectionStart, el.selectionEnd];
+    el.setRangeText("![](/media/" + ref + ")", start, end, "end");
+    el.focus();
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function uploadMediaFiles(files) {
+    const list = Array.from(files || []).filter((f) => f && f.size);
+    if (!list.length) return;
+    const status = document.getElementById("media-upload-status");
+    const fd = new FormData();
+    for (const f of list) fd.append("file", f, f.name);
+    if (status) status.textContent = "Uploading " + list.length + " file(s)…";
+    fetch("/admin/media/upload", { method: "POST", body: fd })
+        .then((r) => (r.ok ? r.json() : r.text().then((t) => Promise.reject(t || r.status))))
+        .then((j) => {
+            insertMediaRef(j.media_ref);
+            if (status) status.textContent = "Inserted ![](/media/" + j.media_ref + ")";
+        })
+        .catch((e) => {
+            if (status) status.textContent = "Upload failed: " + e;
+        });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    const input = document.getElementById("media-upload-input");
+    if (input) {
+        input.addEventListener("change", () => {
+            uploadMediaFiles(input.files);
+            input.value = "";
+        });
+    }
+    // Drag files onto the markdown box → upload + insert at the drop.
+    const ta = document.getElementById("page_markdown");
+    if (ta) {
+        ta.addEventListener("dragover", (e) => {
+            if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) {
+                e.preventDefault();
+            }
+        });
+        ta.addEventListener("drop", (e) => {
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+                e.preventDefault();
+                uploadMediaFiles(e.dataTransfer.files);
+            }
+        });
+    }
+});
