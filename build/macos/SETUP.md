@@ -126,6 +126,13 @@ registrable parent) so your existing prod passkey authenticates against beta.
    # then edit: cloudflare_token
    ```
 
+   The sample sets `media_path` + `backup_path` to `io.hotchkiss.web.beta/`
+   explicitly: `app_support` is hardcoded to `io.hotchkiss.web` in the binary, so
+   without them beta would default both into PROD's dirs (shared store + backups).
+   The `post-receive` snapshot then rsyncs prod's media → beta's own dir and keeps
+   the media-URL HMAC key (`crypto_keys` id 2) so beta's url_keys match prod's
+   (BZ.8 Stage 2c).
+
    No `static_ip` — beta is public, so (like prod) it discovers the public IP
    itself and its `DnsProviderService` keeps `beta.hotchkiss.io` pointed at it.
    Ports `8080`/`8443` coexist with prod's `80`/`443`. Beta deploys as a
