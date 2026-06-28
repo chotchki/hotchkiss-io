@@ -130,10 +130,10 @@ impl MediaDao {
         Ok(media)
     }
 
-    pub async fn delete(&self, executor: impl SqliteExecutor<'_>) -> Result<()> {
-        // ON DELETE CASCADE drops the variant rows; the disk bytes are swept
-        // separately (content-addressed → a sha may still be referenced elsewhere).
-        query!(r#"DELETE FROM media WHERE media_id = ?1"#, self.media_id)
+    /// ON DELETE CASCADE drops the variant rows; the disk bytes are swept
+    /// separately (content-addressed → a sha may still be referenced elsewhere).
+    pub async fn delete_by_id(executor: impl SqliteExecutor<'_>, media_id: i64) -> Result<()> {
+        query!(r#"DELETE FROM media WHERE media_id = ?1"#, media_id)
             .execute(executor)
             .await?;
         Ok(())
@@ -291,7 +291,7 @@ mod tests {
         assert!(MediaVariantDao::find_by_url_key(&pool, "nope").await?.is_none());
 
         // CASCADE: deleting the media drops its variants.
-        media.delete(&pool).await?;
+        MediaDao::delete_by_id(&pool, media.media_id).await?;
         assert!(MediaDao::find_by_ref(&pool, "skylander-intro").await?.is_none());
         assert!(MediaVariantDao::find_by_media_id(&pool, media.media_id)
             .await?

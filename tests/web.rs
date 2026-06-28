@@ -966,3 +966,90 @@ async fn not_found_renders_cat_page_on_both_paths() {
         );
     }
 }
+
+/// BZ: the media upload → serve → embed vertical. Admin uploads an image; it's
+/// stored content-addressed + ffprobe'd, listed in the library, and renders as
+/// an `<img>` whose bytes serve from the HMAC-keyed `url_key` (never the sha).
+/// Needs ffprobe; skips where absent.
+#[tokio::test]
+async fn media_upload_serve_and_embed_vertical() {
+    let has_ffprobe = std::process::Command::new("ffprobe")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !has_ffprobe {
+        eprintln!("skipping media vertical test: ffprobe not found");
+        return;
+    }
+
+    let server = spawn_test_server().await.expect("spawn");
+
+    // Management is admin-gated: anonymous GET + upload → 403.
+    assert_eq!(
+        client().get(server.url("/admin/media")).send().await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        client().post(server.url("/admin/media/upload")).send().await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // Admin uploads a real image (the committed cat AVIF).
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("assets/images/404/blame_bonnie.avif");
+    let bytes = std::fs::read(&fixture).expect("read avif fixture");
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(bytes)
+            .file_name("bonnie.avif")
+            .mime_str("image/avif")
+            .unwrap(),
+    );
+    let resp = admin
+        .post(server.url("/admin/media/upload"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "admin upload should succeed");
+    let j: serde_json::Value = resp.json().await.unwrap();
+    let media_ref = j["media_ref"].as_str().expect("media_ref in response").to_string();
+    assert!(!media_ref.is_empty());
+
+    // The library lists it.
+    let lib = admin.get(server.url("/admin/media")).send().await.unwrap().text().await.unwrap();
+    assert!(lib.contains(&media_ref), "library should list {media_ref}");
+
+    // The embed renders an <img> pointing at /media/file/<url_key>.
+    let embed = reqwest::get(server.url(&format!("/media/embed/{media_ref}")))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(embed.contains("<img"), "image embeds an <img>: {embed}");
+    let url_key = embed
+        .split("/media/file/")
+        .nth(1)
+        .expect("embed carries a file url")
+        .split('"')
+        .next()
+        .unwrap()
+        .to_string();
+
+    // The bytes serve from the HMAC token.
+    let served = reqwest::get(server.url(&format!("/media/file/{url_key}"))).await.unwrap();
+    assert_eq!(served.status(), StatusCode::OK);
+    assert!(!served.bytes().await.unwrap().is_empty(), "served bytes non-empty");
+
+    // A junk token is a clean 404 — no existence oracle.
+    let bad = reqwest::get(server.url(&format!("/media/file/{}", "0".repeat(64))))
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), StatusCode::NOT_FOUND);
+}

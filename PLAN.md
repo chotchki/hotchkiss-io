@@ -93,13 +93,14 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 ## Phase BZ - Self-hosted large-media store (disk + HTTP range)
 - [ ] BZ.0 - Phase exit: UNIFIED media — disk content store + media/variant schema; uniform ![](/media/<ref>) authoring + render-time polymorphic dispatch (img/video/stl); range route; ffprobe-typed media library UI; existing attachments migrated off BLOBs + /attachments retired; backup-correct; beta→prod verified
 - [x] BZ.1 - MediaStore content-addressed disk primitive (sharded ab/cd/<sha>, atomic write, dedup, traversal-guarded) + Settings.media_path
-- [ ] BZ.2 - Range byte route /media/file/<sha> (206/Accept-Ranges, immutable cache-forever) + on-the-fly ?width= AVIF from disk for images
+- [x] BZ.2 - Range byte route /media/file/<url_key> (206/Accept-Ranges, immutable cache, HMAC token, mime from variant)
 - [ ] BZ.3 - Backup/ops: media dir excluded from the beta snapshot, added to daily backup + Backblaze; tests + docs
 - [x] BZ.4 - media + media_variant schema (migration) + typed MediaDao (kind enum, variants); unit tests
-- [ ] BZ.5 - Ingest: ffprobe-derive codec/mime/dims/duration per upload, store variants; auto-poster (ffmpeg frame→AVIF)
-- [ ] BZ.6 - Polymorphic transformer dispatch: ![](/media/<ref>) → pre-fetched ref→meta map → <img>/<video multi-source>/<object stl>; source-in-HTML, no-JS
-- [ ] BZ.7 - Media library UI /admin/media (grouped multi-file upload, codec chips, copy-ref, delete) + editor insert-media picker
+- [x] BZ.5 - Ingest: ffprobe-derive codec/mime/dims/duration per upload, store variants; auto-poster (ffmpeg frame→AVIF)
+- [x] BZ.6 - Transformer dispatch: ![](/media/<ref>) → /media/embed HTMX swap → <img>/<video multi-source>/<object stl> (diagram-style, low-risk vs transform() refactor)
+- [x] BZ.7 - Central media library /admin/media (drag-drop grouped upload, codec chips, copy-ref, delete; admin-gated; JSON ingest endpoint)
 - [ ] BZ.8 - One-shot Rust migration: attachment BLOBs → store + media rows + rewrite page refs /attachments→/media; verify on beta; retire /attachments + drop table
+- [ ] BZ.9 - Inline editor media upload (async drag-drop in the page editor, insert ![](/media/ref) at cursor, NO refresh — fixes the save_attachments lose-edits bug) + cover-image picker
 
 ## Backlog (not yet phased)
 

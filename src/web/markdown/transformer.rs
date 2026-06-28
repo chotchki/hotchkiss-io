@@ -50,7 +50,21 @@ pub fn transform(markdown: &str) -> Result<String> {
     while let Some(node) = queue.pop_front() {
         match node {
             Node::Image(image) => {
-                if image.url.ends_with(".stl") {
+                if let Some(media_ref) = image.url.strip_prefix("/media/") {
+                    // A unified-media reference (Phase BZ): resolve it at load via
+                    // the embed route (HTMX swap, same pattern as inline diagrams).
+                    // The server looks up the kind + variants and returns the right
+                    // element (<img> / <video> multi-source / <object>). No-JS
+                    // degradation: the alt text shows inside the placeholder.
+                    *node = Node::Html(Html {
+                        value: format!(
+                            "<span class=\"media-embed\" hx-get=\"/media/embed/{}\" hx-trigger=\"load\" hx-swap=\"outerHTML\">{}</span>",
+                            attr_escape(media_ref),
+                            attr_escape(&image.alt),
+                        ),
+                        position: None,
+                    })
+                } else if image.url.ends_with(".stl") {
                     *node = Node::Html(Html {
                         value: format!(
                             "<object class=\"stl-view size-40 m-2 rounded-md border-8 border-navy\" data-filename=\"{}\"></object>",

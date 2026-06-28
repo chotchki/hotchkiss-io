@@ -2,6 +2,7 @@ pub mod admin;
 pub mod blog;
 pub mod diagram;
 pub mod login;
+pub mod media;
 pub mod not_found;
 pub mod pages;
 pub mod resume;

@@ -53,6 +53,8 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
         .nest("/projects", projects_router())
         .nest("/blog", blog_router())
         .nest("/admin", admin_router())
+        // Public media (Phase BZ): byte serve route + the embed swap target.
+        .nest("/media", crate::web::features::media::media_router())
         // HTMX swap target for inline diagrams (public; renders only
         // server-registered sources — see web/features/diagram.rs).
         .route(

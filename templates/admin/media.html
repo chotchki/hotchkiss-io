@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Media Library{% endblock %}
+
+{% block head %}
+<script defer src="/scripts/media-upload.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+    <h2 class="font-display text-lg text-navy uppercase mb-1">Media Library</h2>
+    <p class="text-sm text-navy/70 mb-4">Upload images, video (drop the AV1 + HEVC encodes
+        together), or STL. Copy a reference and paste <code>![](/media/&lt;ref&gt;)</code> into any page.</p>
+
+    <!-- Drop zone (also click-to-select). media-upload.js POSTs to /admin/media/upload. -->
+    <label id="media-drop" for="media-file-input"
+        class="block border-2 border-dashed border-navy/40 rounded-lg p-8 text-center cursor-pointer mb-6 hover:bg-navy/5">
+        <i class="fa-solid fa-cloud-arrow-up text-3xl text-navy/60"></i>
+        <p class="text-navy mt-2 font-display uppercase text-sm">Drop files here, or click to select</p>
+        <p class="text-navy/60 text-xs mt-1">For a video, drop every encode (AV1 + HEVC) in one go so they group into one item.</p>
+        <input id="media-file-input" type="file" multiple class="hidden" />
+        <p id="media-upload-status" class="text-navy mt-2 text-sm"></p>
+    </label>
+
+    {% if cards.is_empty() %}
+    <p class="text-navy/60 italic">No media yet.</p>
+    {% else %}
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+        {% for c in cards %}
+        <div class="border border-navy/20 rounded-lg p-2 flex flex-col gap-2 bg-white/60">
+            {% if let Some(key) = c.thumb_url_key %}
+            <img src="/media/file/{{ key }}" class="w-full aspect-square object-cover rounded" alt="{{ c.title }}" />
+            {% else %}
+            <div class="w-full aspect-square rounded bg-navy/10 flex items-center justify-center text-navy/50">
+                <i class="fa-solid {% if c.kind == "video" %}fa-film{% else if c.kind == "stl" %}fa-cube{% else %}fa-file{% endif %} text-3xl"></i>
+            </div>
+            {% endif %}
+
+            <code class="text-xs text-navy break-all">{{ c.media_ref }}</code>
+            <div class="flex flex-wrap gap-1 items-center">
+                <span class="text-[10px] bg-navy text-yellow px-1.5 py-0.5 rounded uppercase font-display">{{ c.kind }}</span>
+                {% for cd in c.codecs %}
+                <span class="text-[10px] bg-navy/10 text-navy px-1.5 py-0.5 rounded">{{ cd }}</span>
+                {% endfor %}
+                {% if c.variant_count > 1 %}
+                <span class="text-[10px] text-navy/60">{{ c.variant_count }} files</span>
+                {% endif %}
+            </div>
+
+            <div class="flex gap-1 mt-auto">
+                <button type="button" class="copy-ref grow text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
+                    data-ref="{{ c.media_ref }}">Copy <code>![]()</code></button>
+                <button type="button" class="text-xs bg-red-600 hover:bg-red-700 text-div-grey px-2 py-1 rounded"
+                    hx-delete="/admin/media/{{ c.media_id }}" hx-confirm="Delete this media item?"
+                    title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can"></i></button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

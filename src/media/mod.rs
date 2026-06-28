@@ -34,6 +34,7 @@ impl MediaStore {
             .join(sha_hex)
     }
 
+    #[allow(dead_code)] // store API; used by the BZ.8 orphan sweep
     pub fn exists(&self, sha_hex: &str) -> bool {
         self.path_for(sha_hex).is_file()
     }
