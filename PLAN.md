@@ -91,10 +91,15 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 See SPEC.md Pillar 3. The substance and the long pole: making less-visible work credible, not just recording it.
 
 ## Phase BZ - Self-hosted large-media store (disk + HTTP range)
-- [ ] BZ.0 - Phase exit: site self-hosts large/streamed media (video, big STLs) via a disk store + HTTP range serving, backup-correct
-- [ ] BZ.1 - Disk content-addressed media store (SHA→path under Settings.media_path) + SQLite metadata; size guard; keep BLOB+AVIF for images
-- [ ] BZ.2 - HTTP range-capable streaming route (206/Accept-Ranges) serving from the store off-disk
+- [ ] BZ.0 - Phase exit: UNIFIED media — disk content store + media/variant schema; uniform ![](/media/<ref>) authoring + render-time polymorphic dispatch (img/video/stl); range route; ffprobe-typed media library UI; existing attachments migrated off BLOBs + /attachments retired; backup-correct; beta→prod verified
+- [x] BZ.1 - MediaStore content-addressed disk primitive (sharded ab/cd/<sha>, atomic write, dedup, traversal-guarded) + Settings.media_path
+- [ ] BZ.2 - Range byte route /media/file/<sha> (206/Accept-Ranges, immutable cache-forever) + on-the-fly ?width= AVIF from disk for images
 - [ ] BZ.3 - Backup/ops: media dir excluded from the beta snapshot, added to daily backup + Backblaze; tests + docs
+- [x] BZ.4 - media + media_variant schema (migration) + typed MediaDao (kind enum, variants); unit tests
+- [ ] BZ.5 - Ingest: ffprobe-derive codec/mime/dims/duration per upload, store variants; auto-poster (ffmpeg frame→AVIF)
+- [ ] BZ.6 - Polymorphic transformer dispatch: ![](/media/<ref>) → pre-fetched ref→meta map → <img>/<video multi-source>/<object stl>; source-in-HTML, no-JS
+- [ ] BZ.7 - Media library UI /admin/media (grouped multi-file upload, codec chips, copy-ref, delete) + editor insert-media picker
+- [ ] BZ.8 - One-shot Rust migration: attachment BLOBs → store + media rows + rewrite page refs /attachments→/media; verify on beta; retire /attachments + drop table
 
 ## Backlog (not yet phased)
 

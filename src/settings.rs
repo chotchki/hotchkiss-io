@@ -22,6 +22,11 @@ pub struct Settings {
     /// Directory the daily SQLite snapshots (`database-YYYY-MM-DD.sqlite`) are
     /// written to. Defaults under Application Support; created if missing.
     pub backup_path: PathBuf,
+    /// Root of the content-addressed large-media store (video, big STLs) — files
+    /// sharded by SHA-256 under here, served via the range route. Kept OUT of the
+    /// SQLite DB so backups/snapshots don't copy gigabytes. Defaults under
+    /// Application Support; created on first store.
+    pub media_path: PathBuf,
     pub http_port: u16,
     pub https_port: u16,
     pub static_ip: Option<IpAddr>,
@@ -36,6 +41,7 @@ struct RawSettings {
     log_path: Option<String>,
     cache_path: Option<String>,
     backup_path: Option<String>,
+    media_path: Option<String>,
     http_port: Option<u16>,
     https_port: Option<u16>,
     static_ip: Option<IpAddr>,
@@ -91,6 +97,10 @@ impl Settings {
                 .backup_path
                 .map(PathBuf::from)
                 .unwrap_or_else(|| app_support.join("backups")),
+            media_path: raw
+                .media_path
+                .map(PathBuf::from)
+                .unwrap_or_else(|| app_support.join("media")),
             http_port: raw.http_port.unwrap_or(80),
             https_port: raw.https_port.unwrap_or(443),
             static_ip: raw.static_ip,
@@ -207,6 +217,7 @@ mod test {
             log_path: None,
             cache_path: None,
             backup_path: None,
+            media_path: None,
             http_port: None,
             https_port: None,
             static_ip: None,
@@ -233,6 +244,10 @@ mod test {
         assert_eq!(
             s.backup_path,
             PathBuf::from("/Users/test/Library/Application Support/io.hotchkiss.web/backups"),
+        );
+        assert_eq!(
+            s.media_path,
+            PathBuf::from("/Users/test/Library/Application Support/io.hotchkiss.web/media"),
         );
         assert_eq!(s.http_port, 80);
         assert_eq!(s.https_port, 443);
