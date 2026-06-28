@@ -61,7 +61,17 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
             get(crate::web::features::diagram::render_registered_diagram),
         )
         // /resume + /resume.pdf (the latter generated via weasyprint) — top-level.
-        .merge(crate::web::features::resume::resume_routes());
+        .merge(crate::web::features::resume::resume_routes())
+        // TEMPORARY (remove before the next prod tag): forces the styled 500 so
+        // it's verifiable on the release-build beta (no debug /test seam there).
+        .route(
+            "/test/boom",
+            get(|| async {
+                Err::<axum::response::Response, crate::web::app_error::AppError>(
+                    anyhow::anyhow!("intentional 500 to verify the error page").into(),
+                )
+            }),
+        );
 
     // Debug-only test-login seam (absent from release builds = prod).
     #[cfg(debug_assertions)]
