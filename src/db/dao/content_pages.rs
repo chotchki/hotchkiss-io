@@ -102,9 +102,10 @@ impl ContentPageDao {
             page_markdown = ?5,
             page_cover_attachment_id = ?6,
             page_order = ?7,
+            page_creation_date = ?8,
             page_modified_date = datetime('now', 'utc')
         WHERE
-            page_id = ?8
+            page_id = ?9
         RETURNING
             page_modified_date as "page_modified_date: DateTime<Utc>"
         "#,
@@ -115,6 +116,7 @@ impl ContentPageDao {
             self.page_markdown,
             self.page_cover_attachment_id,
             self.page_order,
+            self.page_creation_date,
             self.page_id
         )
         .fetch_one(executor)
@@ -314,6 +316,13 @@ impl ContentPageDao {
             .filter(|t| !t.trim().is_empty())
             .or_else(|| Self::first_h1(&self.page_markdown))
             .unwrap_or_else(|| self.page_name.clone())
+    }
+
+    /// The post date formatted for an `<input type="datetime-local" step="1">` —
+    /// the editor's backdating field. (The blog sorts + displays by this date, so
+    /// setting it back-dates a Wayback-recovered post to its real slot.)
+    pub fn creation_date_input(&self) -> String {
+        self.page_creation_date.format("%Y-%m-%dT%H:%M:%S").to_string()
     }
 
     /// First level-1 ATX heading (`# Title`) in the markdown, if any.

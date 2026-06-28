@@ -1616,3 +1616,53 @@ async fn admin_can_delete_a_user() {
         .fetch_one(&server.pool).await.unwrap().get("c");
     assert_eq!(count, 0, "alice should be gone");
 }
+
+// ───────────────────────── Phase CE: editable post date (backdating) ─────────────────────────
+
+#[tokio::test]
+async fn admin_can_backdate_a_page() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("old-post", "# Old Post\n\nfrom way back")
+        .await
+        .expect("seed");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    let put = |date: &str| {
+        admin
+            .put(server.url("/pages/old-post"))
+            .form(&[
+                ("page_title", "Old Post"),
+                ("page_category", ""),
+                ("page_markdown", "# Old Post\n\nfrom way back"),
+                ("page_cover_media_ref", ""),
+                ("page_order", "0"),
+                ("page_creation_date", date),
+            ])
+            .send()
+    };
+
+    // Backdate it to 2014.
+    let r = put("2014-03-15T10:30:00").await.unwrap();
+    assert!(r.status().is_success(), "backdate PUT: {}", r.status());
+    let date: String =
+        sqlx::query("SELECT page_creation_date FROM content_pages WHERE page_name = 'old-post'")
+            .fetch_one(&server.pool)
+            .await
+            .unwrap()
+            .get("page_creation_date");
+    assert!(date.starts_with("2014-03-15"), "should be backdated to 2014, got {date}");
+
+    // A subsequent save with NO date override keeps the (2014) date — doesn't
+    // stamp it back to today.
+    let r = put("").await.unwrap();
+    assert!(r.status().is_success(), "empty-date PUT: {}", r.status());
+    let date: String =
+        sqlx::query("SELECT page_creation_date FROM content_pages WHERE page_name = 'old-post'")
+            .fetch_one(&server.pool)
+            .await
+            .unwrap()
+            .get("page_creation_date");
+    assert!(date.starts_with("2014-03-15"), "empty override must keep the date, got {date}");
+}

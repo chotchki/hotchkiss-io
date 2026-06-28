@@ -94,11 +94,10 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] CA.1 - api_keys schema + ApiKeyDao + HMAC-pepper hashing (crypto_keys id 3) + key generation (hio_<base64url>); unit tests
 - [x] CA.2 - Auth resolution in SessionData extractor: Authorization: Bearer (axum-extra TypedHeader) → live-key lookup → Authenticated(user) + stamp last_used; session fallback; integration test
 - [x] CA.3 - Admin UI /admin/api-keys: generate (label → key shown ONCE), list (label/created/last-used), revoke; admin-gated; CLAUDE.md docs
-## Phase CD - SEO regressions: HTTP/2 host + project URLs
-- [ ] CD.0 - Phase exit: prod sitemap/robots/feed emit the REAL host over HTTP/2 (not localhost) and project entries link the working /pages/projects/<slug>; beta de-indexes under h2; verified on prod over both h1.1 + h2
-- [x] CD.1 - HTTP/2 host detection: web/util/host.rs request_host(headers, uri) = Host header ?? uri :authority ?? localhost (h2 puts the host in :authority, not a Host header) + request_scheme(); use it in feed.rs + seo.rs sitemap/robots so prod over h2 emits the real host. Unit-test the helper (Host header, :authority fallback, neither)
-- [x] CD.2 - Project detail URL fix: feed + sitemap link project entries at /pages/projects/<slug> (the real route), NOT /projects/<slug> (404); blog stays /blog/<slug>, /projects index stays. Fix the two CB tests that enshrined the wrong URL
-- [ ] CD.3 - Verify + deploy: full test suite green; ship beta→prod (vX); confirm on prod over BOTH --http1.1 and --http2 that sitemap/robots/feed emit hotchkiss.io + project links are /pages/projects/<slug> + 200; CLAUDE.md note on the h2 :authority gotcha
+## Phase CE - Editable post date (backdating)
+- [ ] CE.0 - Phase exit: a page's post date (page_creation_date) is editable in the editor + over the API, so a Wayback-recovered post can be backdated 10+ years and lands at its real chronological spot on /blog with its real date; modified-date stays auto; tested; beta→prod
+- [x] CE.1 - Make page_creation_date editable: ContentPageDao::update writes page_creation_date (+ creation_date_input() helper formatting it for datetime-local); PutPageForm gains optional page_creation_date (parse YYYY-MM-DDTHH:MM:SS, empty/unparseable → keep existing); put_page_path applies it before update. Integration test: a PUT backdates a page (and reorders /blog)
+- [ ] CE.2 - Editor UI: a "Posted" datetime-local input (step=1) in get_page.html prefilled with the current creation date; CLAUDE.md note that post date is editable (backdating); deploy beta→prod
 
 ## Backlog (not yet phased)
 

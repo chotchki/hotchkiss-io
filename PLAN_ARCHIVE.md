@@ -366,3 +366,13 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] CC.4 - Tests + docs: integration tests (list, promote/demote, last-admin guard blocks, delete cascades api_keys, deleted/demoted user loses access immediately, /admin/users admin-gated); CLAUDE.md user-management section; deploy beta→prod
 - [x] CC.5 - Cookie hardening: make the session cookie's HttpOnly + Secure explicit on SessionManagerLayer (HttpOnly always; Secure in release — debug/test is plain HTTP so it stays off there by design), set SameSite explicitly; integration test asserts Set-Cookie carries HttpOnly + SameSite. The session cookie is the only cookie the app sets (tower-sessions)
 
+---
+
+## 2026-06-28
+
+## Phase CD - SEO regressions: HTTP/2 host + project URLs
+- [x] CD.0 - Phase exit: prod sitemap/robots/feed emit the REAL host over HTTP/2 (not localhost) and project entries link the working /pages/projects/<slug>; beta de-indexes under h2; verified on prod over both h1.1 + h2
+- [x] CD.1 - HTTP/2 host detection: web/util/host.rs request_host(headers, uri) = Host header ?? uri :authority ?? localhost (h2 puts the host in :authority, not a Host header) + request_scheme(); use it in feed.rs + seo.rs sitemap/robots so prod over h2 emits the real host. Unit-test the helper (Host header, :authority fallback, neither)
+- [x] CD.2 - Project detail URL fix: feed + sitemap link project entries at /pages/projects/<slug> (the real route), NOT /projects/<slug> (404); blog stays /blog/<slug>, /projects index stays. Fix the two CB tests that enshrined the wrong URL
+- [x] CD.3 - Verify + deploy: full test suite green; ship beta→prod (vX); confirm on prod over BOTH --http1.1 and --http2 that sitemap/robots/feed emit hotchkiss.io + project links are /pages/projects/<slug> + 200; CLAUDE.md note on the h2 :authority gotcha
+

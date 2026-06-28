@@ -81,6 +81,10 @@
       <span class="text-sm font-display text-navy uppercase">Order</span>
       <input class="border border-navy/30 rounded px-3 py-2" name="page_order" value="{{page.page_order}}" type="number" />
     </label>
+    <label class="flex flex-col gap-1">
+      <span class="text-sm font-display text-navy uppercase">Posted</span>
+      <input class="border border-navy/30 rounded px-3 py-2" name="page_creation_date" value="{{page.creation_date_input()}}" type="datetime-local" step="1" />
+    </label>
   </div>
 </form>
 

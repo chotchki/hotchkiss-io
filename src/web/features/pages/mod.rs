@@ -1,5 +1,6 @@
 use crate::web::htmx_responses::htmx_redirect;
 use crate::web::util::deserialize::empty_string_as_none;
+use sqlx::types::chrono::{DateTime, NaiveDateTime, Utc};
 use crate::web::util::slug::slugify;
 use crate::{
     db::dao::content_pages::ContentPageDao,
@@ -201,6 +202,22 @@ pub struct PutPageForm {
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub page_cover_media_ref: Option<String>,
     pub page_order: i64,
+    /// Optional post-date override (datetime-local `YYYY-MM-DDTHH:MM[:SS]`). Empty
+    /// or unparseable → keep the existing date. Lets a Wayback-recovered post be
+    /// backdated to its real chronological slot.
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub page_creation_date: Option<String>,
+}
+
+/// Parse a `datetime-local` form value as a UTC instant. The input carries no
+/// timezone, so we store it as UTC verbatim (exact tz is irrelevant for backdating
+/// an old post). `None` on a bad/empty value → a save with no override keeps the
+/// existing date.
+fn parse_local_datetime(s: &str) -> Option<DateTime<Utc>> {
+    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M"))
+        .ok()
+        .map(|naive| naive.and_utc())
 }
 
 pub async fn put_page_path(
@@ -227,6 +244,15 @@ pub async fn put_page_path(
             lp.page_category = put_page_form.page_category;
             lp.page_markdown = rewrite_site_links(&put_page_form.page_markdown, &state.site_host)?;
             lp.page_order = put_page_form.page_order;
+            // Optional backdating: only override the post date when a valid value
+            // is supplied; otherwise keep the existing one.
+            if let Some(dt) = put_page_form
+                .page_creation_date
+                .as_deref()
+                .and_then(parse_local_datetime)
+            {
+                lp.page_creation_date = dt;
+            }
             lp.update(&state.pool).await?;
 
             sqlx::query!(
