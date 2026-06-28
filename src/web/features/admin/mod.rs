@@ -11,6 +11,7 @@ pub mod analytics;
 pub mod api_keys;
 pub mod media;
 pub mod pages;
+pub mod users;
 
 /// Everything under `/admin` — gated as a group by the `require_admin` layer,
 /// so handlers inside don't repeat the check.
@@ -38,5 +39,9 @@ pub fn admin_router() -> Router<AppState> {
             get(api_keys::show_api_keys).post(api_keys::create_api_key),
         )
         .route("/api-keys/{id}", delete(api_keys::revoke_api_key))
+        // User management (Phase CC): list / promote-demote / delete.
+        .route("/users", get(users::show_users))
+        .route("/users/{id}/role", post(users::set_user_role))
+        .route("/users/{id}", delete(users::delete_user))
         .layer(from_fn(require_admin))
 }

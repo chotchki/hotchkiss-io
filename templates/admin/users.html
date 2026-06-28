@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <div class="flex flex-row items-center justify-between mb-4">
+        <h1 class="text-2xl font-display text-navy">Users</h1>
+        <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/pages">← Admin</a>
+    </div>
+    <p class="text-sm text-navy/70 mb-4">Promote/demote between <strong>Registered</strong> and <strong>Admin</strong>,
+        or remove a user. Users register themselves with a passkey; the first to register is Admin. The last admin
+        can't be demoted or deleted, and changes take effect immediately (no re-login needed).</p>
+
+    {% if users.is_empty() %}
+    <p class="text-navy/60 text-sm">No users yet.</p>
+    {% else %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <tr class="text-left border-b border-navy/20">
+                <th class="py-2 pr-4">User</th>
+                <th class="py-2 pr-4">Role</th>
+                <th class="py-2 pr-4 text-right">Passkeys</th>
+                <th class="py-2 pr-4 text-right">API keys</th>
+                <th class="py-2"></th>
+            </tr>
+            {% for user in users %}
+            <tr class="border-b border-navy/10">
+                <td class="py-2 pr-4 font-display text-navy break-all">
+                    {{ user.display_name }}{% if user.is_self %} <span class="text-xs text-navy/50">(you)</span>{% endif %}
+                </td>
+                <td class="py-2 pr-4">
+                    {% if user.is_admin %}
+                    <span class="px-2 py-0.5 rounded-sm bg-navy text-yellow uppercase text-xs font-display">Admin</span>
+                    {% else %}
+                    <span class="px-2 py-0.5 rounded-sm bg-navy/10 text-navy uppercase text-xs font-display">Registered</span>
+                    {% endif %}
+                </td>
+                <td class="py-2 pr-4 text-right">{{ user.passkey_count }}</td>
+                <td class="py-2 pr-4 text-right">{{ user.api_key_count }}</td>
+                <td class="py-2">
+                    <div class="flex flex-row flex-wrap items-center gap-2 justify-end">
+                        {% if user.is_admin %}
+                            {% if user.is_last_admin %}
+                            <span class="text-xs text-navy/40 uppercase">last admin</span>
+                            {% else %}
+                            <form hx-post="/admin/users/{{ user.id }}/role" hx-confirm="Demote {{ user.display_name }} to Registered?">
+                                <input type="hidden" name="role" value="Registered" />
+                                <button class="text-xs text-navy border border-navy/40 rounded px-2 py-1 hover:bg-navy hover:text-div-grey uppercase" type="submit">Demote</button>
+                            </form>
+                            {% endif %}
+                        {% else %}
+                        <form hx-post="/admin/users/{{ user.id }}/role" hx-confirm="Promote {{ user.display_name }} to Admin?">
+                            <input type="hidden" name="role" value="Admin" />
+                            <button class="text-xs text-navy border border-navy/40 rounded px-2 py-1 hover:bg-navy hover:text-div-grey uppercase" type="submit">Promote</button>
+                        </form>
+                        {% endif %}
+                        {% if !user.is_last_admin %}
+                        <button class="text-xs text-red-700 border border-red-700 rounded px-2 py-1 hover:bg-red-700 hover:text-white uppercase"
+                            hx-delete="/admin/users/{{ user.id }}"
+                            hx-confirm="Delete {{ user.display_name }}? This removes their account, passkeys, and API keys. They can re-register as Registered.">Delete</button>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

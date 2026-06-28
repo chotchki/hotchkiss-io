@@ -94,6 +94,13 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] CA.1 - api_keys schema + ApiKeyDao + HMAC-pepper hashing (crypto_keys id 3) + key generation (hio_<base64url>); unit tests
 - [x] CA.2 - Auth resolution in SessionData extractor: Authorization: Bearer (axum-extra TypedHeader) → live-key lookup → Authenticated(user) + stamp last_used; session fallback; integration test
 - [x] CA.3 - Admin UI /admin/api-keys: generate (label → key shown ONCE), list (label/created/last-used), revoke; admin-gated; CLAUDE.md docs
+## Phase CC - User management admin screen
+- [ ] CC.0 - Phase exit: an admin can list users (role + passkey/API-key counts) at /admin/users, promote/demote Registered↔Admin, and delete a user; the last admin can never be removed/demoted; role + delete take effect IMMEDIATELY on a live cookie session (per-request recheck); tested + documented; beta→prod verified
+- [x] CC.1 - UserDao methods: list_summaries (display_name, id, role, passkey_count = json_array_length(keys), api_key_count = live api_keys), count_admins, set_role(id, role), delete(id) (DELETE the user's api_keys first then the row, in a tx — FK). Unit tests incl. delete cascade + count_admins
+- [x] CC.2 - Live enforcement: refresh_session_role middleware (from_fn_with_state, layered INNER to api_key_auth) — for a cookie session that is Authenticated and has no api-key injection, re-load the user by id and inject the refreshed SessionData (updated role), or inject Anonymous if the user was deleted. Makes demote/delete immediate. Integration test: demote/delete reflected without re-login
+- [x] CC.3 - /admin/users UI: web/features/admin/users.rs + templates/admin/users.html — list table (name, role badge, passkey/key counts), promote/demote (POST), delete (hx-delete + confirm); admin-gated under the /admin nest; last-admin guard enforced in handlers (block demote/delete of the final admin with a clear message); hub link from /admin/pages
+- [ ] CC.4 - Tests + docs: integration tests (list, promote/demote, last-admin guard blocks, delete cascades api_keys, deleted/demoted user loses access immediately, /admin/users admin-gated); CLAUDE.md user-management section; deploy beta→prod
+- [x] CC.5 - Cookie hardening: make the session cookie's HttpOnly + Secure explicit on SessionManagerLayer (HttpOnly always; Secure in release — debug/test is plain HTTP so it stays off there by design), set SameSite explicitly; integration test asserts Set-Cookie carries HttpOnly + SameSite. The session cookie is the only cookie the app sets (tower-sessions)
 
 ## Backlog (not yet phased)
 

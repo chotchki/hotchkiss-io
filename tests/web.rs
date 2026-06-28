@@ -1406,3 +1406,213 @@ async fn content_page_carries_seo_meta() {
         "description should derive from the page excerpt: {body}"
     );
 }
+
+// ───────────────── Phase CC: live role enforcement (cookie sessions) ─────────────────
+
+#[tokio::test]
+async fn role_change_takes_effect_on_live_session() {
+    // An admin's cookie session stores a snapshot of their role; the
+    // refresh_session_role middleware must re-check the DB each request so a
+    // demote bites WITHOUT a re-login.
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    // The gate is open while they're Admin.
+    let ok = admin.get(server.url("/admin/analytics")).send().await.unwrap();
+    assert_eq!(ok.status(), StatusCode::OK);
+
+    // Demote them in the DB (out of band, same as another admin would).
+    sqlx::query("UPDATE users SET app_role = 'Registered' WHERE display_name = 'test-Admin'")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+
+    // Same cookie, next request → the live recheck sees Registered → 403.
+    let denied = admin.get(server.url("/admin/analytics")).send().await.unwrap();
+    assert_eq!(
+        denied.status(),
+        StatusCode::FORBIDDEN,
+        "a demoted admin must lose access on their live session"
+    );
+}
+
+#[tokio::test]
+async fn deleted_user_loses_access_on_live_session() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        admin
+            .get(server.url("/admin/analytics"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+
+    // Delete the user out from under the live session.
+    sqlx::query("DELETE FROM users WHERE display_name = 'test-Admin'")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+
+    // The middleware downgrades a deleted user to Anonymous → 403.
+    let denied = admin.get(server.url("/admin/analytics")).send().await.unwrap();
+    assert_eq!(
+        denied.status(),
+        StatusCode::FORBIDDEN,
+        "a deleted user must lose access on their live session"
+    );
+}
+
+#[tokio::test]
+async fn session_cookie_is_http_only_and_samesite() {
+    // The session cookie (the only cookie the app sets) must be HttpOnly +
+    // SameSite. Secure isn't asserted here — the test harness is plain HTTP, so
+    // Secure is off by design in debug (on in release).
+    let server = spawn_test_server().await.expect("spawn");
+    let resp = client()
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+    let set_cookie = resp
+        .headers()
+        .get("set-cookie")
+        .expect("login sets a session cookie")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        set_cookie.to_lowercase().contains("httponly"),
+        "session cookie must be HttpOnly: {set_cookie}"
+    );
+    assert!(
+        set_cookie.to_lowercase().contains("samesite"),
+        "session cookie must set SameSite: {set_cookie}"
+    );
+}
+
+// ───────────────────────── Phase CC: /admin/users management ─────────────────────────
+
+/// The display_name `/test/login?role=Admin` seeds — used to grab the live
+/// admin's id from the DB.
+async fn admin_user_id(server: &hotchkiss_io::test_support::TestServer) -> String {
+    sqlx::query("SELECT id FROM users WHERE display_name = 'test-Admin'")
+        .fetch_one(&server.pool)
+        .await
+        .unwrap()
+        .get::<String, _>("id")
+}
+
+#[tokio::test]
+async fn admin_users_list_requires_admin() {
+    let server = spawn_test_server().await.expect("spawn");
+    server.seed_user("alice", "Registered").await.unwrap();
+
+    // Anonymous → 403.
+    assert_eq!(
+        client().get(server.url("/admin/users")).send().await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // Registered → 403.
+    let reg = client();
+    reg.post(server.url("/test/login?role=Registered")).send().await.unwrap();
+    assert_eq!(
+        reg.get(server.url("/admin/users")).send().await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // Admin → 200, listing both alice and the test admin.
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+    let resp = admin.get(server.url("/admin/users")).send().await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("alice"), "list should show seeded user");
+    assert!(body.contains("test-Admin"), "list should show the admin");
+}
+
+#[tokio::test]
+async fn admin_can_promote_and_demote() {
+    let server = spawn_test_server().await.expect("spawn");
+    let alice = server.seed_user("alice", "Registered").await.unwrap();
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // Promote alice → Admin.
+    let r = admin
+        .post(server.url(&format!("/admin/users/{alice}/role")))
+        .form(&[("role", "Admin")])
+        .send()
+        .await
+        .unwrap();
+    assert!(r.status().is_success(), "promote should succeed: {}", r.status());
+    let role: String = sqlx::query("SELECT app_role FROM users WHERE display_name = 'alice'")
+        .fetch_one(&server.pool).await.unwrap().get("app_role");
+    assert_eq!(role, "Admin");
+
+    // Demote alice → Registered (test-Admin keeps the floor, so it's allowed).
+    let r = admin
+        .post(server.url(&format!("/admin/users/{alice}/role")))
+        .form(&[("role", "Registered")])
+        .send()
+        .await
+        .unwrap();
+    assert!(r.status().is_success(), "demote should succeed: {}", r.status());
+    let role: String = sqlx::query("SELECT app_role FROM users WHERE display_name = 'alice'")
+        .fetch_one(&server.pool).await.unwrap().get("app_role");
+    assert_eq!(role, "Registered");
+}
+
+#[tokio::test]
+async fn last_admin_protected_from_demote_and_delete() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+    let id = admin_user_id(&server).await;
+
+    // Demoting the sole admin → 409.
+    let r = admin
+        .post(server.url(&format!("/admin/users/{id}/role")))
+        .form(&[("role", "Registered")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CONFLICT, "can't demote the last admin");
+
+    // Deleting the sole admin → 409.
+    let r = admin.delete(server.url(&format!("/admin/users/{id}"))).send().await.unwrap();
+    assert_eq!(r.status(), StatusCode::CONFLICT, "can't delete the last admin");
+
+    // Still admin, still here.
+    let role: String = sqlx::query("SELECT app_role FROM users WHERE display_name = 'test-Admin'")
+        .fetch_one(&server.pool).await.unwrap().get("app_role");
+    assert_eq!(role, "Admin");
+}
+
+#[tokio::test]
+async fn admin_can_delete_a_user() {
+    let server = spawn_test_server().await.expect("spawn");
+    let alice = server.seed_user("alice", "Registered").await.unwrap();
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    let r = admin.delete(server.url(&format!("/admin/users/{alice}"))).send().await.unwrap();
+    assert!(r.status().is_success(), "delete should succeed: {}", r.status());
+
+    let count: i64 = sqlx::query("SELECT COUNT(*) as c FROM users WHERE display_name = 'alice'")
+        .fetch_one(&server.pool).await.unwrap().get("c");
+    assert_eq!(count, 0, "alice should be gone");
+}

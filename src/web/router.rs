@@ -8,8 +8,8 @@ use crate::{
             pages::{pages_router, projects::projects_router, redirect_to_first_page},
         },
         middleware::{
-            api_key_auth::api_key_auth, request_log::log_requests,
-            require_admin_for_mutations::require_admin_for_mutations,
+            api_key_auth::api_key_auth, refresh_session_role::refresh_session_role,
+            request_log::log_requests, require_admin_for_mutations::require_admin_for_mutations,
         },
     },
 };
@@ -25,7 +25,7 @@ use tower_http::{
     trace::{DefaultMakeSpan, DefaultOnRequest, TraceLayer},
 };
 use tower_livereload::LiveReloadLayer;
-use tower_sessions::{Expiry, SessionManagerLayer};
+use tower_sessions::{cookie::SameSite, Expiry, SessionManagerLayer};
 use tracing::{debug, Level};
 
 pub const BUILD_TIME_CACHE_BUST: &str = build_time_utc!("%s");
@@ -36,9 +36,14 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
     let key = CryptoKey::get_or_create(&app_state.pool, 1).await?;
 
     debug!("Making session layer");
-    // `Secure` cookies aren't sent over plain HTTP, which the local test harness
-    // / dev server use — so only set it in release (= prod, which is HTTPS-only).
+    // Harden the session cookie (the only cookie the app sets): HttpOnly so JS
+    // (an XSS) can't read it, SameSite=Lax so it rides top-level navigation but not
+    // cross-site POSTs, and Secure in release. `Secure` is OFF in debug because the
+    // test harness / dev server are plain HTTP; prod is HTTPS-only. HttpOnly is
+    // tower-sessions' default — set explicitly so it can't silently regress.
     let session_layer = SessionManagerLayer::new(app_state.session_store.clone())
+        .with_http_only(true)
+        .with_same_site(SameSite::Lax)
         .with_secure(!cfg!(debug_assertions))
         .with_expiry(Expiry::OnInactivity(Duration::days(1)))
         .with_signed(key.key()?);
@@ -48,6 +53,8 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
     // API-key middleware needs the full state (the pool) — clone before app_state
     // is moved into `.with_state`.
     let api_key_state = app_state.clone();
+    // Live role-recheck middleware (Phase CC) also needs the pool.
+    let refresh_state = app_state.clone();
     let router = Router::new()
         .route("/", get(redirect_to_first_page))
         .nest("/login", login_router())
@@ -111,6 +118,14 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
             .layer(axum::middleware::from_fn_with_state(
                 api_key_state,
                 api_key_auth,
+            ))
+            // Live role enforcement (Phase CC): re-load a cookie session's user
+            // each request so a role change / delete bites immediately. INNER to
+            // api_key_auth (a Bearer key already resolves fresh → this no-ops);
+            // OUTER to the authz layer so the refreshed role is what gets gated.
+            .layer(axum::middleware::from_fn_with_state(
+                refresh_state,
+                refresh_session_role,
             ))
             // Fail-closed authz (Phase E): GET/HEAD/OPTIONS public; every other
             // method requires admin by default (except the anonymous auth

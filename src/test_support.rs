@@ -115,6 +115,21 @@ impl TestServer {
         Ok(())
     }
 
+    /// Seed a user with an explicit role ("Admin" | "Registered"), returning their
+    /// id — for the `/admin/users` management tests. Bypasses the first-user→Admin
+    /// rule so a test can stand up several users deterministically.
+    pub async fn seed_user(&self, display_name: &str, role: &str) -> Result<Uuid> {
+        let id = Uuid::now_v7();
+        let id_str = id.to_string();
+        sqlx::query("INSERT INTO users (display_name, id, keys, app_role) VALUES (?1, ?2, '[]', ?3)")
+            .bind(display_name)
+            .bind(id_str)
+            .bind(role)
+            .execute(&self.pool)
+            .await?;
+        Ok(id)
+    }
+
     /// Seed a child of the `projects` special_page (seeded by migration 0007).
     pub async fn seed_project(&self, slug: &str, markdown: &str) -> Result<()> {
         let projects = ContentPageDao::find_by_name(&self.pool, None, "projects")
