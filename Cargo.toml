@@ -91,7 +91,7 @@ tower-sessions = { version = "0.14.0", default-features = false, features = [
     "signed",
 ] }
 tower-sessions-sqlx-store = { version = "0.15.0", features = ["sqlite"] }
-uuid = "1.11.0"
+uuid = { version = "1.11.0", features = ["v4", "v7"] }
 webauthn-rs = { version = "0.5.1", features = [
     "conditional-ui",
     "danger-allow-state-serialisation",

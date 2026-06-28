@@ -27,7 +27,6 @@ use crate::web::authentication_state::AuthenticationState;
 use crate::web::features::media::render_embed_html;
 use crate::web::features::top_bar::TopBar;
 use crate::web::htmx_responses::htmx_refresh;
-use crate::web::util::slug::slugify;
 use crate::web::{app_error::AppError, app_state::AppState, html_template::HtmlTemplate, session::SessionData};
 
 /// CryptoKey row id for the media-URL HMAC secret (session signing key is id 1).
@@ -90,7 +89,7 @@ pub async fn show_media_library(
             })
             .collect();
         let title = m.title.clone().unwrap_or_else(|| m.media_ref.clone());
-        let search = format!("{} {}", m.media_ref, title).to_lowercase();
+        let search = title.to_lowercase();
         cards.push(MediaCard {
             media_id: m.media_id,
             media_ref: m.media_ref,
@@ -158,12 +157,15 @@ pub async fn upload_media(
         return Ok((StatusCode::BAD_REQUEST, "No files in the upload").into_response());
     }
 
-    let base = ref_input.unwrap_or_else(|| strip_media_suffixes(&files[0].0));
-    let mut slug = slugify(&base);
-    if slug.is_empty() {
-        slug = "media".to_string();
-    }
-    let media_ref = unique_ref(&state.pool, slug).await?;
+    // The URL ref is an OPAQUE, unguessable token (NOT a slug) — the byte route is
+    // already HMAC'd; this closes the slug-guess gap for unpublished media. The
+    // human name lives in `title` (library display / search / rename), derived
+    // from the filename when not given.
+    let media_ref = uuid::Uuid::now_v7().simple().to_string();
+    let title = title
+        .or(ref_input)
+        .or_else(|| Some(strip_media_suffixes(&files[0].0)))
+        .filter(|s| !s.trim().is_empty());
 
     let hmac_key = CryptoKey::get_or_create(&state.pool, MEDIA_HMAC_KEY_ID)
         .await?
@@ -365,15 +367,3 @@ fn strip_media_suffixes(filename: &str) -> String {
     stem.to_string()
 }
 
-async fn unique_ref(pool: &SqlitePool, slug: String) -> Result<String> {
-    if MediaDao::find_by_ref(pool, &slug).await?.is_none() {
-        return Ok(slug);
-    }
-    for n in 2..1000 {
-        let candidate = format!("{slug}-{n}");
-        if MediaDao::find_by_ref(pool, &candidate).await?.is_none() {
-            return Ok(candidate);
-        }
-    }
-    Err(anyhow!("could not find a unique media ref for {slug:?}"))
-}
