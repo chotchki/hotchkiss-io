@@ -89,6 +89,9 @@ pub struct GetPageTemplate {
     /// Current cover's media ref (token), pre-filling the editor's cover field
     /// (BZ.8 — covers are media now, not `page_cover_attachment_id`).
     pub cover_media_ref: Option<String>,
+    /// Per-page SEO/social metadata (description, canonical, OpenGraph) rendered
+    /// into `<head>` via the `{% block meta %}` override.
+    pub meta: crate::web::features::seo::Meta,
 }
 
 /// `?edit` (any value) toggles the admin editor on a page view; absent = the
@@ -119,6 +122,17 @@ pub async fn get_page_path(
                 return Ok(Redirect::temporary(&lp.page_markdown).into_response());
             }
 
+            let cover_url =
+                crate::web::features::media::cover_url_for(&state.pool, lp.page_id).await;
+            let meta = crate::web::features::seo::Meta::page(
+                &state.site_host,
+                lp.display_title(),
+                &lp.page_markdown,
+                &format!("pages/{page_path}"),
+                cover_url.as_deref(),
+                "article",
+            );
+
             let gpt = GetPageTemplate {
                 top_bar: TopBar::create(&state.pool, page_names.first().unwrap()).await?,
                 auth_state: session_data.auth_state,
@@ -137,6 +151,7 @@ pub async fn get_page_path(
                     lp.page_id,
                 )
                 .await,
+                meta,
             };
 
             Ok(HtmlTemplate(gpt).into_response())

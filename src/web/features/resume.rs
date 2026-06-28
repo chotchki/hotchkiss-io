@@ -64,6 +64,15 @@ pub async fn show_resume(
         return Ok((StatusCode::NOT_FOUND, "Résumé not published yet").into_response());
     };
 
+    let meta = crate::web::features::seo::Meta::page(
+        &state.site_host,
+        child.display_title(),
+        &child.page_markdown,
+        "resume",
+        None,
+        "website",
+    );
+
     let gpt = GetPageTemplate {
         top_bar: TopBar::create(&state.pool, "resume").await?,
         auth_state: session_data.auth_state,
@@ -78,6 +87,7 @@ pub async fn show_resume(
         pdf_url: Some("/resume.pdf".to_string()),
         cover_media_ref: crate::web::features::media::cover_ref_for(&state.pool, child.page_id)
             .await,
+        meta,
     };
     Ok(HtmlTemplate(gpt).into_response())
 }

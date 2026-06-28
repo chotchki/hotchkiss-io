@@ -64,7 +64,14 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
             get(crate::web::features::diagram::render_registered_diagram),
         )
         // /resume + /resume.pdf (the latter generated via weasyprint) — top-level.
-        .merge(crate::web::features::resume::resume_routes());
+        .merge(crate::web::features::resume::resume_routes())
+        // Unified Atom feed (blog posts + project pages). `/blog/feed.xml` serves
+        // the same handler for back-compat (see blog_router).
+        .route("/feed.xml", get(crate::web::features::feed::show_feed))
+        // SEO: dynamic sitemap + robots (host-correct Sitemap directive, beta
+        // de-indexed) — see web/features/seo.rs.
+        .route("/sitemap.xml", get(crate::web::features::seo::sitemap_xml))
+        .route("/robots.txt", get(crate::web::features::seo::robots_txt));
 
     // Debug-only test-login seam (absent from release builds = prod).
     #[cfg(debug_assertions)]

@@ -10,7 +10,20 @@
     <link rel="manifest" href="/manifest.webmanifest?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" />
     <link rel="apple-touch-icon" href="/images/apple-touch-icon.png?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" />
     <meta name="theme-color" content="#14213d" />
-    <link rel="alternate" type="application/atom+xml" title="Hotchkiss-io Blog" href="/blog/feed.xml" />
+    <link rel="alternate" type="application/atom+xml" title="Christopher Hotchkiss" href="/feed.xml" />
+
+    {# Site-default SEO/social tags. Content templates override `{% block meta %}`
+       (via partials/seo_meta.html) with page-specific description/canonical/OG. #}
+    {% block meta %}
+    <meta name="description"
+        content="Christopher Hotchkiss — crafting solutions, shaping products: from concept to code." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Hotchkiss-io" />
+    <meta property="og:title" content="Christopher Hotchkiss" />
+    <meta property="og:description"
+        content="Christopher Hotchkiss — crafting solutions, shaping products: from concept to code." />
+    <meta name="twitter:card" content="summary" />
+    {% endblock %}
 
     <title>{% block title %}{{ title }}{% endblock %}</title>
 
@@ -34,7 +47,10 @@
             </div>
         </div>
 
-        <div class="p-2 min-w-full">
+        {# w-full (definite viewport width) + min-w-0 so this column can't shrink-wrap
+           to a wide descendant (a nowrap table, the logged-in nav) and blow past the
+           phone viewport — that bug let `overflow-x-auto` children never kick in. #}
+        <div class="p-2 w-full min-w-0">
             <!-- Navigation -->
             <div class="max-w-screen-md pl-2">
                 <!-- Desktop (lg+): single-row nav — content tabs + admin tabs (own group) -->

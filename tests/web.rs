@@ -1216,3 +1216,193 @@ async fn media_upload_serve_and_embed_vertical() {
         .unwrap();
     assert_eq!(bad.status(), StatusCode::NOT_FOUND);
 }
+
+// ───────────────────────── Phase CB: unified feed + SEO ─────────────────────────
+
+#[tokio::test]
+async fn unified_feed_includes_blog_and_project() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_blog_post("feed-post", "A blog body.")
+        .await
+        .expect("seed post");
+    server
+        .seed_project("the-widget", "A project body.")
+        .await
+        .expect("seed project");
+
+    let resp = reqwest::get(server.url("/feed.xml")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert!(ct.contains("atom"), "unexpected content-type: {ct}");
+
+    let body = resp.text().await.unwrap();
+    assert!(body.starts_with("<?xml"), "not xml: {body}");
+    assert!(
+        body.contains("<title>Christopher Hotchkiss</title>"),
+        "feed retitled to the unified site title"
+    );
+    // Blog post entry, linked under /blog.
+    assert!(body.contains("/blog/feed-post"), "blog entry url missing");
+    assert!(
+        body.contains("<category term=\"blog\""),
+        "blog entry category missing"
+    );
+    // Project page entry, linked under /projects — this is the CB.2 ask.
+    assert!(
+        body.contains("/projects/the-widget"),
+        "project entry url missing: {body}"
+    );
+    assert!(
+        body.contains("<category term=\"projects\""),
+        "project entry category missing"
+    );
+}
+
+#[tokio::test]
+async fn blog_feed_alias_still_serves_unified_feed() {
+    // /blog/feed.xml is kept for back-compat and now serves the SAME unified feed,
+    // so a project page shows up there too.
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_project("legacy-alias", "body")
+        .await
+        .expect("seed project");
+
+    let body = reqwest::get(server.url("/blog/feed.xml"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        body.contains("/projects/legacy-alias"),
+        "the /blog/feed.xml alias should carry projects too: {body}"
+    );
+}
+
+#[tokio::test]
+async fn sitemap_lists_home_pages_blog_and_projects() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("about-me", "# About\n\nbody")
+        .await
+        .expect("seed page");
+    server
+        .seed_blog_post("hello-world", "post body")
+        .await
+        .expect("seed post");
+    server
+        .seed_project("the-widget", "project body")
+        .await
+        .expect("seed project");
+
+    let resp = reqwest::get(server.url("/sitemap.xml")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert!(ct.contains("xml"), "unexpected content-type: {ct}");
+
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("<urlset"), "not a sitemap: {body}");
+    // Home + the section indexes + the seeded leaves are all present.
+    assert!(body.contains("<loc>http://localhost"), "absolute locs");
+    assert!(body.contains("/pages/about-me</loc>"), "content page");
+    assert!(body.contains("/blog/hello-world</loc>"), "blog post");
+    assert!(body.contains("/projects/the-widget</loc>"), "project page");
+    assert!(body.contains("<lastmod>"), "lastmod present");
+    // Special redirect rows are NOT exposed as /pages/<slug>.
+    assert!(
+        !body.contains("/pages/blog</loc>"),
+        "special pages must not leak as /pages/<slug>"
+    );
+}
+
+#[tokio::test]
+async fn robots_txt_canonical_host_has_sitemap_directive() {
+    let server = spawn_test_server().await.expect("spawn");
+    let resp = reqwest::get(server.url("/robots.txt")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert!(ct.contains("text/plain"), "unexpected content-type: {ct}");
+
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("Sitemap:"), "missing Sitemap directive: {body}");
+    assert!(body.contains("/sitemap.xml"), "sitemap url missing");
+    assert!(body.contains("Disallow: /admin/"), "admin should be hidden");
+    assert!(body.contains("Allow: /"), "canonical host should allow crawling");
+}
+
+#[tokio::test]
+async fn robots_txt_deindexes_non_canonical_beta_host() {
+    // A request whose Host isn't the canonical site host (e.g. beta.hotchkiss.io)
+    // must get a blanket Disallow so the ephemeral beta copy isn't indexed.
+    let server = spawn_test_server().await.expect("spawn");
+    let body = client()
+        .get(server.url("/robots.txt"))
+        .header("Host", "beta.hotchkiss.io")
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("Disallow: /"), "beta should be fully disallowed: {body}");
+    assert!(
+        !body.contains("Sitemap:"),
+        "a disallowed host shouldn't advertise a sitemap"
+    );
+}
+
+#[tokio::test]
+async fn content_page_carries_seo_meta() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("about-me", "# About Me\n\nI build robust, typed systems.")
+        .await
+        .expect("seed");
+
+    let body = reqwest::get(server.url("/pages/about-me"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    assert!(
+        body.contains("<meta name=\"description\""),
+        "per-page meta description missing"
+    );
+    // Canonical is the CANONICAL host (hotchkiss.io), not the served localhost.
+    assert!(
+        body.contains("<link rel=\"canonical\" href=\"https://hotchkiss.io/pages/about-me\""),
+        "canonical url wrong/missing: {body}"
+    );
+    assert!(
+        body.contains("property=\"og:title\""),
+        "OpenGraph title missing"
+    );
+    assert!(
+        body.contains("name=\"twitter:card\""),
+        "twitter card missing"
+    );
+    // The description should reflect the page body (excerpt), not just the default.
+    assert!(
+        body.contains("I build robust, typed systems."),
+        "description should derive from the page excerpt: {body}"
+    );
+}

@@ -15,17 +15,18 @@ use anyhow::anyhow;
 use askama::Template;
 use axum::{
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
     Router,
 };
-use sqlx::types::chrono::{DateTime, Utc};
 
 pub fn blog_router() -> Router<AppState> {
     Router::new()
         .route("/", get(show_index))
-        .route("/feed.xml", get(show_feed))
+        // The feed is unified (blog + projects) and lives canonically at
+        // `/feed.xml`; this path serves the same handler for back-compat.
+        .route("/feed.xml", get(crate::web::features::feed::show_feed))
         .route("/{slug}", get(show_post))
 }
 
@@ -43,6 +44,7 @@ pub struct BlogIndexTemplate {
     pub top_bar: TopBar,
     pub auth_state: AuthenticationState,
     pub posts: Vec<BlogPostCard>,
+    pub meta: crate::web::features::seo::Meta,
 }
 
 pub async fn show_index(
@@ -72,109 +74,20 @@ pub async fn show_index(
         });
     }
 
+    let meta = crate::web::features::seo::Meta::section(
+        &state.site_host,
+        "Blog — Christopher Hotchkiss".to_string(),
+        "Writing from Christopher Hotchkiss on software, hardware, and building things.".to_string(),
+        "blog",
+    );
+
     let template = BlogIndexTemplate {
         top_bar: TopBar::create(&state.pool, "blog").await?,
         auth_state: session_data.auth_state,
         posts,
+        meta,
     };
     Ok(HtmlTemplate(template).into_response())
-}
-
-pub async fn show_feed(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Response, AppError> {
-    let blog_page = ContentPageDao::find_by_name(&state.pool, None, "blog").await?;
-    let Some(blog_page) = blog_page else {
-        return Err(
-            anyhow!("Server misconfiguration, could not find the `blog` special page").into(),
-        );
-    };
-
-    let posts = ContentPageDao::find_by_parent_newest_first(
-        &state.pool,
-        Some(blog_page.page_id),
-        Some(50),
-    )
-    .await?;
-
-    let host = headers
-        .get(header::HOST)
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("localhost");
-    let scheme = if cfg!(debug_assertions) { "http" } else { "https" };
-    let base = format!("{scheme}://{host}");
-
-    let updated = posts
-        .iter()
-        .map(|p| p.page_modified_date)
-        .max()
-        .unwrap_or_else(Utc::now);
-
-    let xml = render_atom(&base, &posts, updated)?;
-    Ok((
-        [(header::CONTENT_TYPE, "application/atom+xml; charset=utf-8")],
-        xml,
-    )
-        .into_response())
-}
-
-fn render_atom(
-    base: &str,
-    posts: &[ContentPageDao],
-    updated: DateTime<Utc>,
-) -> anyhow::Result<String> {
-    let mut out = String::new();
-    out.push_str("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
-    out.push_str("<feed xmlns=\"http://www.w3.org/2005/Atom\">\n");
-    out.push_str("  <title>Hotchkiss-io Blog</title>\n");
-    out.push_str(&format!("  <link href=\"{base}/blog\"/>\n"));
-    out.push_str(&format!(
-        "  <link rel=\"self\" href=\"{base}/blog/feed.xml\"/>\n"
-    ));
-    out.push_str(&format!("  <id>{base}/blog</id>\n"));
-    out.push_str(&format!("  <updated>{}</updated>\n", updated.to_rfc3339()));
-    out.push_str("  <author><name>Christopher Hotchkiss</name></author>\n");
-    for p in posts {
-        out.push_str("  <entry>\n");
-        out.push_str(&format!(
-            "    <title>{}</title>\n",
-            escape_xml(&p.display_title())
-        ));
-        out.push_str(&format!("    <link href=\"{base}/blog/{}\"/>\n", p.page_name));
-        out.push_str(&format!("    <id>{base}/blog/{}</id>\n", p.page_name));
-        out.push_str(&format!(
-            "    <published>{}</published>\n",
-            p.page_creation_date.to_rfc3339()
-        ));
-        out.push_str(&format!(
-            "    <updated>{}</updated>\n",
-            p.page_modified_date.to_rfc3339()
-        ));
-        let summary = excerpt(&p.page_markdown);
-        if !summary.is_empty() {
-            out.push_str(&format!(
-                "    <summary>{}</summary>\n",
-                escape_xml(&summary)
-            ));
-        }
-        let html = transform(&strip_leading_h1(&p.page_markdown)).unwrap_or_default();
-        out.push_str(&format!(
-            "    <content type=\"html\">{}</content>\n",
-            escape_xml(&html)
-        ));
-        out.push_str("  </entry>\n");
-    }
-    out.push_str("</feed>\n");
-    Ok(out)
-}
-
-fn escape_xml(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
 }
 
 pub async fn show_post(
@@ -203,6 +116,16 @@ pub async fn show_post(
         None => (None, None),
     };
 
+    let cover_url = crate::web::features::media::cover_url_for(&state.pool, lp.page_id).await;
+    let meta = crate::web::features::seo::Meta::page(
+        &state.site_host,
+        lp.display_title(),
+        &lp.page_markdown,
+        &format!("blog/{slug}"),
+        cover_url.as_deref(),
+        "article",
+    );
+
     let gpt = GetPageTemplate {
         top_bar: TopBar::create(&state.pool, "blog").await?,
         auth_state: session_data.auth_state,
@@ -216,6 +139,7 @@ pub async fn show_post(
         next_post,
         pdf_url: None,
         cover_media_ref: crate::web::features::media::cover_ref_for(&state.pool, lp.page_id).await,
+        meta,
     };
     Ok(HtmlTemplate(gpt).into_response())
 }

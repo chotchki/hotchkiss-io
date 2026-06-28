@@ -16,7 +16,8 @@ pub fn static_content() -> Router {
         //.route("/favicon.ico", get(static_handler))
         .route("/images/{*file}", get(static_handler))
         .route("/manifest.webmanifest", get(static_handler))
-        .route("/robots.txt", get(static_handler))
+        // /robots.txt is served dynamically (host-aware Sitemap directive + beta
+        // de-index) by web/features/seo.rs, NOT from the static asset.
         .route("/scripts/{*file}", get(static_handler))
         .route("/styles/{*file}", get(static_handler))
         .route("/vendor/{*file}", get(static_handler))

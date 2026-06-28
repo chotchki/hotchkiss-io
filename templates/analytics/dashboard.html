@@ -10,7 +10,7 @@
 <p class="text-sm text-navy mb-4">Last {{ since_days }} days</p>
 
 <!-- Range selector -->
-<div class="flex flex-row items-center gap-2 mb-3 text-sm">
+<div class="flex flex-row flex-wrap items-center gap-2 mb-3 text-sm">
     <span class="text-navy uppercase text-xs mr-1">Range</span>
     <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 7 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since=7&metric={{ metric }}&paths={{ paths_mode }}">7d</a>
     <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 30 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since=30&metric={{ metric }}&paths={{ paths_mode }}">30d</a>
@@ -18,13 +18,13 @@
 </div>
 
 <!-- Metric toggle -->
-<div class="flex flex-row items-center gap-2 mb-4 text-sm">
+<div class="flex flex-row flex-wrap items-center gap-2 mb-4 text-sm">
     <span class="text-navy uppercase text-xs mr-1">Show</span>
     <a class="px-2 py-1 rounded-sm {% if metric == "total" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric=total&paths={{ paths_mode }}">Total views</a>
     <a class="px-2 py-1 rounded-sm {% if metric == "unique" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric=unique&paths={{ paths_mode }}">Unique visitors</a>
 </div>
 
-<div class="flex flex-row gap-12 mb-6">
+<div class="flex flex-row flex-wrap gap-x-12 gap-y-3 mb-6">
     <div><span class="text-3xl text-navy">{{ total_requests }}</span><br/><span class="text-sm">total views</span></div>
     <div><span class="text-3xl text-navy">{{ distinct_ips }}</span><br/><span class="text-sm">unique visitors</span></div>
 </div>
@@ -32,44 +32,50 @@
 <h3 class="font-display text-navy uppercase mt-6 mb-2">
     {% if metric == "unique" %}Unique visitors per day{% else %}Views per day{% endif %}
 </h3>
-<div class="mb-8 border border-div-grey rounded-md p-2 bg-white">
+<div class="mb-8 border border-div-grey rounded-md p-2 bg-white overflow-x-auto">
     {{ chart_svg|safe }}
 </div>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Top pages</h3>
-<div class="flex flex-row items-center gap-2 mb-1 text-sm">
+<div class="flex flex-row flex-wrap items-center gap-2 mb-1 text-sm">
     <a class="px-2 py-0.5 rounded-sm {% if paths_mode == "content" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric={{ metric }}&paths=content">Content</a>
     <a class="px-2 py-0.5 rounded-sm {% if paths_mode == "all" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric={{ metric }}&paths=all">All (incl. probes)</a>
 </div>
 <p class="text-xs text-navy/60 mb-1">Static assets excluded. {% if paths_mode == "all" %}Showing ALL requests including 4xx/5xx — the bot/scanner probes.{% else %}Successful loads only (status &lt; 400).{% endif %}</p>
-<table class="text-sm mb-2">
+<div class="overflow-x-auto">
+<table class="text-sm mb-2 w-full">
     {% for row in by_path %}
-    <tr><td class="pr-4 text-right">{{ row.count }}</td><td><span class="break-all">{{ row.path }}</span></td></tr>
+    <tr><td class="pr-4 text-right align-top">{{ row.count }}</td><td><span class="break-all">{{ row.path }}</span></td></tr>
     {% endfor %}
 </table>
+</div>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Top user agents</h3>
-<table class="text-sm mb-2">
+<div class="overflow-x-auto">
+<table class="text-sm mb-2 w-full">
     {% for row in by_user_agent %}
     <tr>
-        <td class="pr-4 text-right">{{ row.count }}</td>
-        <td>{% if let Some(ua) = row.user_agent.as_ref() %}{{ ua }}{% else %}(none){% endif %}</td>
+        <td class="pr-4 text-right align-top">{{ row.count }}</td>
+        <td class="break-all">{% if let Some(ua) = row.user_agent.as_ref() %}{{ ua }}{% else %}(none){% endif %}</td>
     </tr>
     {% endfor %}
 </table>
+</div>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Top referrers (external)</h3>
 <p class="text-xs text-navy/60 mb-1">Excludes direct hits + our own domain. Directional only — referrers are spoofable and often stripped.</p>
-<table class="text-sm mb-2">
+<div class="overflow-x-auto">
+<table class="text-sm mb-2 w-full">
     {% for row in by_referer %}
-    <tr><td class="pr-4 text-right">{{ row.count }}</td><td class="break-all">{{ row.referer }}</td></tr>
+    <tr><td class="pr-4 text-right align-top">{{ row.count }}</td><td class="break-all">{{ row.referer }}</td></tr>
     {% endfor %}
     {% if by_referer.is_empty() %}<tr><td></td><td class="text-navy/60">(none yet)</td></tr>{% endif %}
 </table>
+</div>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Recent requests</h3>
 <div class="overflow-x-auto">
-<table class="text-sm">
+<table class="text-sm whitespace-nowrap">
     <tr class="text-left">
         <th class="pr-6">When (UTC)</th><th class="pr-4">Method</th><th class="pr-4">Status</th><th class="pr-6">Path</th><th class="pr-6">IP</th><th>User agent</th>
     </tr>

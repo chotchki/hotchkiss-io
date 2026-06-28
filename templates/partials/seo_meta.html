@@ -1,0 +1,15 @@
+{# Per-page SEO + social tags. Included by a content template's
+   `{% block meta %}` override; the including template MUST carry a `meta` field
+   (crate::web::features::seo::Meta). base.html renders a site default instead. #}
+<meta name="description" content="{{ meta.description }}" />
+<link rel="canonical" href="{{ meta.canonical_url }}" />
+<meta property="og:type" content="{{ meta.og_type }}" />
+<meta property="og:site_name" content="Hotchkiss-io" />
+<meta property="og:title" content="{{ meta.title }}" />
+<meta property="og:description" content="{{ meta.description }}" />
+<meta property="og:url" content="{{ meta.canonical_url }}" />
+<meta property="og:image" content="{{ meta.og_image }}" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="{{ meta.title }}" />
+<meta name="twitter:description" content="{{ meta.description }}" />
+<meta name="twitter:image" content="{{ meta.og_image }}" />

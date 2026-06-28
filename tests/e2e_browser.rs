@@ -308,3 +308,73 @@ async fn anonymous_forbidden_from_admin_dashboard() {
     let _ = std::fs::remove_dir_all(&profile);
     drop(server);
 }
+
+#[tokio::test]
+#[ignore = "browser e2e — needs Chrome; run via `cargo test --test e2e_browser -- --ignored`"]
+async fn analytics_usable_on_mobile() {
+    // Regression guard for the prod report: the analytics dashboard "didn't even
+    // look like a table, none of the widgets show" on a phone — a wide unwrapped
+    // table forced the document past 390px and Safari mangled the whole layout.
+    // The fix wraps every table in overflow-x-auto so nothing exceeds the
+    // viewport; this asserts no page-wide horizontal scroll AND that the widgets
+    // (chart, stat numbers, top-pages row) actually render.
+    let server: TestServer = spawn_test_server().await.expect("spawn harness");
+
+    // Seed traffic incl. a deliberately LONG user-agent — the overflow-prone cell
+    // that used to blow out the page width on mobile.
+    let long_ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1 SomeVeryLongTrackingTokenThatGoesOnAndOnAndOn";
+    for _ in 0..3 {
+        sqlx::query("INSERT INTO request_log (method, path, status, ip, user_agent) VALUES ('GET', '/pages/mobile-test', 200, '1.1.1.1', ?)")
+            .bind(long_ua)
+            .execute(&server.pool)
+            .await
+            .unwrap();
+    }
+
+    let (mut browser, handle, profile) = launch().await;
+    let page = browser.new_page("about:blank").await.expect("new page");
+    use_mobile_viewport(&page).await;
+    add_virtual_authenticator(&page).await;
+
+    // Register the first user (→ Admin) via the real passkey ceremony.
+    page.goto(server.url("/login")).await.expect("goto /login");
+    let username = page.find_element("#username").await.expect("#username");
+    username.click().await.expect("focus #username");
+    username.type_str("e2e-admin").await.expect("type username");
+    page.find_element("button[type=submit]")
+        .await
+        .expect("submit button")
+        .click()
+        .await
+        .expect("click submit");
+    wait_until_left_login(&page).await;
+
+    page.goto(server.url("/admin/analytics"))
+        .await
+        .expect("goto /admin/analytics");
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    // The core fix: no element forces the document wider than the phone viewport.
+    // (The wide recent-requests table still exists, but now scrolls inside its
+    // own overflow-x-auto box rather than growing the page.)
+    let scroll_width: i64 = js(&page, "document.documentElement.scrollWidth").await;
+    let inner_width: i64 = js(&page, "window.innerWidth").await;
+    assert!(
+        scroll_width <= inner_width,
+        "/admin/analytics has horizontal scroll on a 390px viewport: scrollWidth={scroll_width}, innerWidth={inner_width}",
+    );
+
+    // The widgets are actually present (not collapsed/hidden).
+    let html = page.content().await.expect("page content");
+    assert!(html.contains("<svg"), "the views-per-day chart should render");
+    assert!(html.contains("total views"), "stat widgets should render");
+    assert!(
+        html.contains("/pages/mobile-test"),
+        "the top-pages table should render the seeded path"
+    );
+
+    browser.close().await.ok();
+    handle.await.ok();
+    let _ = std::fs::remove_dir_all(&profile);
+    drop(server);
+}

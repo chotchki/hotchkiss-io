@@ -35,6 +35,7 @@ pub struct ListProjectsTemplate {
     pub top_bar: TopBar,
     pub auth_state: AuthenticationState,
     pub projects: Vec<ProjectCard>,
+    pub meta: crate::web::features::seo::Meta,
 }
 
 pub async fn show_all_projects(
@@ -61,10 +62,19 @@ pub async fn show_all_projects(
         });
     }
 
+    let meta = crate::web::features::seo::Meta::section(
+        &state.site_host,
+        "Projects — Christopher Hotchkiss".to_string(),
+        "Software and hardware projects by Christopher Hotchkiss — public, clickable proof of range."
+            .to_string(),
+        "projects",
+    );
+
     let lpt = ListProjectsTemplate {
         top_bar: TopBar::create(&state.pool, "projects").await?,
         auth_state: session_data.auth_state,
         projects,
+        meta,
     };
     Ok(HtmlTemplate(lpt).into_response())
 }
