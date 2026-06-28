@@ -342,3 +342,15 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] BZ.11 - Thumbnails / posters: auto frame-grab a video poster (ffmpeg → AVIF) shown on the library card AND as <video poster=…>; a real thumbnail for every kind in the library grid.
 - [x] BZ.12 - Rename media: edit title freely; ref rename is riskier (breaks existing ![](/media/oldref) embeds) — gate it (ref editable only until referenced, or rewrite references like the BZ.8 migration).
 
+---
+
+## 2026-06-28
+
+## Phase CB - Prod feedback: mobile analytics, unified feed, SEO
+- [x] CB.0 - Phase exit: /admin/analytics usable on a 390px phone (tables + widgets visible, no page-wide horizontal scroll); /feed.xml carries blog posts AND project pages newest-first; /sitemap.xml + a Sitemap-directive robots.txt live with per-page meta description/canonical/OpenGraph; beta de-indexed; verified on beta then prod
+- [x] CB.1 - Analytics dashboard mobile-responsive: wrap every data table in overflow-x-auto, wrap the stat + range/metric/paths chip rows (flex-wrap), break long UA/referer strings; confirm the SVG chart scales
+- [x] CB.2 - Unified /feed.xml (blog posts + project pages, newest-first, retitled to chris's name); /blog/feed.xml keeps serving it (back-compat); base.html link rel=alternate → /feed.xml; factor feed render into web/features/feed.rs
+- [x] CB.3 - SEO discovery: dynamic /sitemap.xml (home + top-level pages + blog posts + projects + /resume, lastmod from page_modified_date, absolute URLs from request host) + dynamic /robots.txt (Sitemap: directive; Disallow non-canonical hosts e.g. beta)
+- [x] CB.4 - Per-page meta: base.html baseline meta description + canonical + OpenGraph/Twitter via an askama seo macro; enrich get_page (pages/blog/resume), blog index, projects list with page description (excerpt), absolute canonical URL, og:image (cover or site photo)
+- [x] CB.5 - Tests + docs: e2e mobile-analytics + integration feed/sitemap/robots/meta; CLAUDE.md update (feed/sitemap/robots/meta + beta de-index); flag Google Search Console resubmission as chris's manual step
+

@@ -4,19 +4,21 @@
 //! chromiumoxide tests in `e2e_browser.rs` miss — Dynamic Type, WebKit
 //! font metrics, viewport behavior, etc.
 //!
-//! Macos-only because the underlying `xcrun simctl` +
-//! `ios-webkit-debug-proxy` only exist there. `#[ignore]` because
-//! cold-booting a sim takes 10–60 s.
+//! Macos-only (the underlying `xcrun simctl` + `ios-webkit-debug-proxy` only
+//! exist there) AND gated behind the `ios_e2e` Cargo feature — booting a sim
+//! takes 10–60 s, so it's out of the default `cargo test`. It is NOT ignore-gated
+//! (ignored tests rot silently; see the `lint_no_ignored_tests` guard): the mini
+//! runs `cargo test --features ios_e2e` to exercise these.
 //!
 //! Prereqs:
 //!  - Xcode + at least one iPhone iOS runtime (Xcode → Settings → Platforms).
 //!  - `brew install ios-webkit-debug-proxy`.
 //!  - `../skylander-portal-controller` checked out next to this repo.
 //!
-//! Run with:
-//!   `cargo test --test e2e_ios -- --ignored --test-threads=1`
+//! Run with (one sim at a time):
+//!   `cargo test --features ios_e2e --test e2e_ios -- --test-threads=1`
 
-#![cfg(target_os = "macos")]
+#![cfg(all(target_os = "macos", feature = "ios_e2e"))]
 
 use std::time::Duration;
 
@@ -68,7 +70,6 @@ async fn js_i64(device: &DeviceState, expr: &str) -> i64 {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "boots an iOS Simulator; long-running; mac-only. Run via `cargo test --test e2e_ios -- --ignored --test-threads=1`"]
 async fn ios_blog_no_horizontal_scroll() {
     let server: TestServer = spawn_test_server().await.expect("spawn harness");
     let (device, _teardown) = boot_iphone().await;
@@ -95,7 +96,6 @@ async fn ios_blog_no_horizontal_scroll() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "boots an iOS Simulator; long-running; mac-only. Run via `cargo test --test e2e_ios -- --ignored --test-threads=1`"]
 async fn ios_top_nav_no_overflow() {
     let server: TestServer = spawn_test_server().await.expect("spawn harness");
     let (device, _teardown) = boot_iphone().await;

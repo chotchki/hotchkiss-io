@@ -4,6 +4,14 @@ description = "Christopher Hotchkiss's Web Home"
 version = "0.0.67"
 edition = "2024"
 
+[features]
+# Gates the iOS-Simulator e2e (`tests/e2e_ios.rs`) — it boots a sim (10–60 s) and
+# needs Xcode, so it's out of the default `cargo test` (run with this feature on a
+# mac with a sim). NOT `#[ignore]`-gated: the `lint_no_ignored_tests` guard bans
+# the ignore attribute (it rots silently); a Cargo feature is the visible,
+# on-demand alternative.
+ios_e2e = []
+
 [build-dependencies]
 anyhow = "1.0"
 reqwest = { version = "0.12", features = [

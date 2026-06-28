@@ -3,10 +3,17 @@
 //! CDP **virtual authenticator** so the WebAuthn/passkey ceremony completes with
 //! no hardware or human.
 //!
-//! `#[ignore]`d (needs Chrome installed) — run with:
-//!   `cargo test --test e2e_browser -- --ignored --nocapture`
+//! These run as part of plain `cargo test` (no longer ignore-gated — ignored
+//! tests rot silently; see the `lint_no_ignored_tests` guard). They need Google
+//! Chrome installed. Every test SERIALIZES on `E2E_LOCK`: each launches its own
+//! Chrome + WebAuthn virtual authenticator, and running the passkey ceremonies
+//! concurrently races (resource contention blows the 20s registration deadline) —
+//! test isolation (each test wants its own server + DB, so a shared fixture
+//! doesn't fit yet).
 
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, MutexGuard};
 
 use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
 use chromiumoxide::cdp::browser_protocol::web_authn::{
@@ -16,6 +23,15 @@ use chromiumoxide::cdp::browser_protocol::web_authn::{
 use chromiumoxide::{Browser, BrowserConfig, Page};
 use futures::StreamExt;
 use hotchkiss_io::test_support::{spawn_test_server, TestServer};
+
+/// Serializes the browser e2e — see the module docs. Acquire at the top of every
+/// test (`let _e2e = e2e_lock().await;`) so only one Chrome + WebAuthn ceremony
+/// runs at a time.
+static E2E_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+async fn e2e_lock() -> MutexGuard<'static, ()> {
+    E2E_LOCK.lock().await
+}
 
 /// Launch headless Chrome with a throwaway profile dir (so concurrent test
 /// instances don't fight over a shared `SingletonLock`). Returns the browser,
@@ -93,8 +109,8 @@ async fn wait_until_left_login(page: &Page) {
 }
 
 #[tokio::test]
-#[ignore = "browser e2e — needs Chrome; run via `cargo test --test e2e_browser -- --ignored`"]
 async fn passkey_registration_then_admin_dashboard() {
+    let _e2e = e2e_lock().await;
     let server: TestServer = spawn_test_server().await.expect("spawn harness");
     let (mut browser, handle, profile) = launch().await;
     let page = browser.new_page("about:blank").await.expect("new page");
@@ -145,8 +161,8 @@ async fn js<T: serde::de::DeserializeOwned>(page: &Page, expr: &str) -> T {
 }
 
 #[tokio::test]
-#[ignore = "browser e2e — needs Chrome; run via `cargo test --test e2e_browser -- --ignored`"]
 async fn blog_no_horizontal_scroll_on_mobile() {
+    let _e2e = e2e_lock().await;
     let server: TestServer = spawn_test_server().await.expect("spawn harness");
     let (mut browser, handle, profile) = launch().await;
     let page = browser.new_page("about:blank").await.expect("new page");
@@ -177,8 +193,8 @@ async fn blog_no_horizontal_scroll_on_mobile() {
 }
 
 #[tokio::test]
-#[ignore = "browser e2e — needs Chrome; run via `cargo test --test e2e_browser -- --ignored`"]
 async fn top_nav_no_overflow_on_mobile() {
+    let _e2e = e2e_lock().await;
     let server: TestServer = spawn_test_server().await.expect("spawn harness");
     let (mut browser, handle, profile) = launch().await;
     let page = browser.new_page("about:blank").await.expect("new page");
@@ -187,21 +203,25 @@ async fn top_nav_no_overflow_on_mobile() {
     page.goto(server.url("/blog")).await.expect("goto /blog");
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let nav_scroll: i64 = js(
-        &page,
-        "document.querySelector('nav ul, ul.flex.flex-row')?.scrollWidth ?? 0",
-    )
-    .await;
-    let nav_client: i64 = js(
-        &page,
-        "document.querySelector('nav ul, ul.flex.flex-row')?.clientWidth ?? 0",
-    )
-    .await;
+    // Below `lg` the nav is a native `<details>` hamburger (no JS) — the old
+    // single-row `<ul>` is `hidden` on mobile. It must exist, and crucially must
+    // still fit the viewport when fully EXPANDED (the old nav-cut-off regression).
+    let has_hamburger: bool = js(&page, "!!document.querySelector('details > summary')").await;
+    assert!(has_hamburger, "mobile hamburger <details><summary> not found");
 
-    assert!(nav_client > 0, "nav <ul> not found on page");
+    page.find_element("details > summary")
+        .await
+        .expect("hamburger summary")
+        .click()
+        .await
+        .expect("open hamburger");
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let scroll_width: i64 = js(&page, "document.documentElement.scrollWidth").await;
+    let inner_width: i64 = js(&page, "window.innerWidth").await;
     assert!(
-        nav_scroll <= nav_client,
-        "top nav <ul> overflows on a 390px viewport: scrollWidth={nav_scroll}, clientWidth={nav_client}",
+        scroll_width <= inner_width,
+        "expanded mobile nav overflows a 390px viewport: scrollWidth={scroll_width}, innerWidth={inner_width}",
     );
 
     browser.close().await.ok();
@@ -211,8 +231,13 @@ async fn top_nav_no_overflow_on_mobile() {
 }
 
 #[tokio::test]
-#[ignore = "browser e2e — needs Chrome; run via `cargo test --test e2e_browser -- --ignored`"]
-async fn admin_new_post_form_and_slugify_on_blog() {
+async fn admin_create_page_server_slugifies_title() {
+    // Page creation moved off /blog to the admin hub (`/admin/pages`) in Phase F,
+    // and slugification moved from a client-side oninput handler to the SERVER
+    // (`post_top_level_page_path` → `slugify`). This is the current flow: a title
+    // with spaces creates a page and redirects to its slugified URL — no silent
+    // 400 (the regression that originally motivated this test).
+    let _e2e = e2e_lock().await;
     let server: TestServer = spawn_test_server().await.expect("spawn harness");
     let (mut browser, handle, profile) = launch().await;
     let page = browser.new_page("about:blank").await.expect("new page");
@@ -233,52 +258,42 @@ async fn admin_new_post_form_and_slugify_on_blog() {
         .expect("click submit");
     wait_until_left_login(&page).await;
 
-    // Anonymous would not see the form; admin should.
-    page.goto(server.url("/blog")).await.expect("goto /blog");
+    page.goto(server.url("/admin/pages"))
+        .await
+        .expect("goto /admin/pages");
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let has_form: bool = js(
-        &page,
-        "!!document.querySelector('form[hx-post=\"/pages/blog\"] input[name=\"page_name\"]')",
-    )
-    .await;
-    assert!(has_form, "admin should see the + New post form on /blog");
-
-    // Typing "Hello world" with a space should result in "hello-world" — the
-    // oninput slugifier must run AND not eat the space.
-    let slug_input = page
-        .find_element("form[hx-post='/pages/blog'] input[name='page_name']")
+    let title_input = page
+        .find_element("form[hx-post='/pages'] input[name='page_title']")
         .await
-        .expect("slug input");
-    slug_input.click().await.expect("focus slug input");
-    slug_input.type_str("Hello world").await.expect("type slug");
-
-    let value: String = js(
-        &page,
-        "document.querySelector('form[hx-post=\"/pages/blog\"] input[name=\"page_name\"]').value",
-    )
-    .await;
-    assert_eq!(
-        value, "hello-world",
-        "slugify should convert spaces and lowercase as you type"
-    );
-
-    // Submit and confirm the round-trip succeeds (no silent 400). After htmx
-    // refresh the new post card should be on /blog.
-    page.find_element("form[hx-post='/pages/blog'] button[type=submit]")
+        .expect("new-page title input");
+    title_input.click().await.expect("focus title");
+    title_input
+        .type_str("Hello World E2E")
         .await
-        .expect("submit button")
+        .expect("type title");
+    page.find_element("form[hx-post='/pages'] button[type=submit]")
+        .await
+        .expect("create button")
         .click()
         .await
-        .expect("click submit");
-    tokio::time::sleep(Duration::from_millis(500)).await;
+        .expect("click create");
 
-    let html = page.content().await.expect("page content");
-    assert!(
-        html.contains("hello-world"),
-        "new post card should appear after submission; first 500 chars: {}",
-        &html[..html.len().min(500)]
-    );
+    // The handler htmx-redirects to `/pages/<slug>?edit=1`; poll the URL until the
+    // server-slugified path appears (spaces → hyphens, lowercased).
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "create never navigated to the slugified page (silent 400?)"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if let Ok(Some(url)) = page.url().await
+            && url.contains("/pages/hello-world-e2e")
+        {
+            break;
+        }
+    }
 
     browser.close().await.ok();
     handle.await.ok();
@@ -287,8 +302,8 @@ async fn admin_new_post_form_and_slugify_on_blog() {
 }
 
 #[tokio::test]
-#[ignore = "browser e2e — needs Chrome; run via `cargo test --test e2e_browser -- --ignored`"]
 async fn anonymous_forbidden_from_admin_dashboard() {
+    let _e2e = e2e_lock().await;
     let server: TestServer = spawn_test_server().await.expect("spawn harness");
     let (mut browser, handle, profile) = launch().await;
     let page = browser.new_page("about:blank").await.expect("new page");
@@ -297,9 +312,11 @@ async fn anonymous_forbidden_from_admin_dashboard() {
         .await
         .expect("goto /admin/analytics");
     let html = page.content().await.expect("page content");
+    // A full-page (non-HTMX) nav to a gated route renders the styled 403 page
+    // (Phase 50) — "How about NO!" — not the old plain "Admin only" string.
     assert!(
-        html.contains("Admin only"),
-        "anonymous request should hit the 403 body; first 300 chars: {}",
+        html.contains("How about NO"),
+        "anonymous request should hit the styled 403 page; first 300 chars: {}",
         &html[..html.len().min(300)]
     );
 
@@ -310,7 +327,6 @@ async fn anonymous_forbidden_from_admin_dashboard() {
 }
 
 #[tokio::test]
-#[ignore = "browser e2e — needs Chrome; run via `cargo test --test e2e_browser -- --ignored`"]
 async fn analytics_usable_on_mobile() {
     // Regression guard for the prod report: the analytics dashboard "didn't even
     // look like a table, none of the widgets show" on a phone — a wide unwrapped
@@ -318,6 +334,7 @@ async fn analytics_usable_on_mobile() {
     // The fix wraps every table in overflow-x-auto so nothing exceeds the
     // viewport; this asserts no page-wide horizontal scroll AND that the widgets
     // (chart, stat numbers, top-pages row) actually render.
+    let _e2e = e2e_lock().await;
     let server: TestServer = spawn_test_server().await.expect("spawn harness");
 
     // Seed traffic incl. a deliberately LONG user-agent — the overflow-prone cell
