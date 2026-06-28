@@ -93,4 +93,16 @@
         .catch((e) => setStatus("Rename failed: " + e));
     });
   });
+
+  // Filter cards by name (ref + title) as you type — client-side, instant.
+  const search = document.getElementById("media-search");
+  if (search) {
+    search.addEventListener("input", () => {
+      const q = search.value.trim().toLowerCase();
+      document.querySelectorAll(".media-card").forEach((card) => {
+        const hit = !q || (card.dataset.search || "").includes(q);
+        card.classList.toggle("hidden", !hit);
+      });
+    });
+  }
 })();

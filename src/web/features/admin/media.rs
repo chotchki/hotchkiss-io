@@ -24,6 +24,7 @@ use crate::media::poster::generate_poster;
 use crate::media::probe::{probe, Probed};
 use crate::media::{media_url_key, MediaStore};
 use crate::web::authentication_state::AuthenticationState;
+use crate::web::features::media::render_embed_html;
 use crate::web::features::top_bar::TopBar;
 use crate::web::htmx_responses::htmx_refresh;
 use crate::web::util::slug::slugify;
@@ -45,11 +46,19 @@ pub struct MediaCard {
     pub media_ref: String,
     pub title: String,
     pub kind: String,
-    /// An image variant's url_key — the image itself, or a video's poster; None
-    /// for stl/file (a kind icon shows instead).
+    /// Image kind: the image's url_key, shown as a thumbnail.
     pub thumb_url_key: Option<String>,
-    pub codecs: Vec<String>,
-    pub variant_count: usize,
+    /// Video kind: the playable `<video>` element (reuses the embed render).
+    pub play_html: Option<String>,
+    pub variants: Vec<VariantRow>,
+    /// Lowercased "ref title" for the client-side name filter.
+    pub search: String,
+}
+
+pub struct VariantRow {
+    pub variant_id: i64,
+    pub label: String,
+    pub size: String,
 }
 
 pub async fn show_media_library(
@@ -60,22 +69,37 @@ pub async fn show_media_library(
     let mut cards = Vec::with_capacity(media.len());
     for m in media {
         let variants = MediaVariantDao::find_by_media_id(&state.pool, m.media_id).await?;
-        // The thumbnail is any image variant: an image's own bytes, or a video's
-        // poster. The LAST one wins so a manually-added poster overrides the auto.
-        let thumb_url_key = variants
+        // Video → a playable <video> (poster + sources, preload metadata). Other
+        // kinds → an image-variant thumbnail (image itself, or none → kind icon).
+        let (thumb_url_key, play_html) = if m.kind == "video" {
+            (None, Some(render_embed_html(&m, &variants)))
+        } else {
+            let thumb = variants
+                .iter()
+                .rev()
+                .find(|v| v.mime.starts_with("image/"))
+                .map(|v| v.url_key.clone());
+            (thumb, None)
+        };
+        let variant_rows = variants
             .iter()
-            .rev()
-            .find(|v| v.mime.starts_with("image/"))
-            .map(|v| v.url_key.clone());
-        let codecs = variants.iter().filter_map(|v| v.codecs.clone()).collect();
+            .map(|v| VariantRow {
+                variant_id: v.variant_id,
+                label: v.codecs.clone().unwrap_or_else(|| v.mime.clone()),
+                size: format_bytes(v.bytes),
+            })
+            .collect();
+        let title = m.title.clone().unwrap_or_else(|| m.media_ref.clone());
+        let search = format!("{} {}", m.media_ref, title).to_lowercase();
         cards.push(MediaCard {
             media_id: m.media_id,
-            title: m.title.clone().unwrap_or_else(|| m.media_ref.clone()),
             media_ref: m.media_ref,
+            title,
             kind: m.kind,
             thumb_url_key,
-            codecs,
-            variant_count: variants.len(),
+            play_html,
+            variants: variant_rows,
+            search,
         });
     }
     Ok(HtmlTemplate(MediaLibraryTemplate {
@@ -84,6 +108,18 @@ pub async fn show_media_library(
         cards,
     })
     .into_response())
+}
+
+/// Human-readable byte size for the per-stream display.
+fn format_bytes(b: i64) -> String {
+    let bf = b as f64;
+    if bf >= 1_048_576.0 {
+        format!("{:.1} MB", bf / 1_048_576.0)
+    } else if bf >= 1024.0 {
+        format!("{:.0} KB", bf / 1024.0)
+    } else {
+        format!("{b} B")
+    }
 }
 
 pub async fn upload_media(
@@ -228,6 +264,15 @@ pub async fn delete_media(
     Path(media_id): Path<i64>,
 ) -> Result<Response, AppError> {
     MediaDao::delete_by_id(&state.pool, media_id).await?;
+    Ok(htmx_refresh())
+}
+
+/// Delete one stored encoding (per-stream). Leaves the rest of the item intact.
+pub async fn delete_variant(
+    State(state): State<AppState>,
+    Path(variant_id): Path<i64>,
+) -> Result<Response, AppError> {
+    MediaVariantDao::delete_by_id(&state.pool, variant_id).await?;
     Ok(htmx_refresh())
 }
 

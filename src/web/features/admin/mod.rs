@@ -29,6 +29,7 @@ pub fn admin_router() -> Router<AppState> {
             post(media::add_encode).layer(DefaultBodyLimit::disable()),
         )
         .route("/media/{media_id}/rename", post(media::rename_media))
+        .route("/media/variant/{variant_id}", delete(media::delete_variant))
         .route("/media/{media_id}", delete(media::delete_media))
         .layer(from_fn(require_admin))
 }

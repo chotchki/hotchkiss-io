@@ -1060,6 +1060,23 @@ async fn media_upload_serve_and_embed_vertical() {
         assert_eq!(resp.status(), StatusCode::OK, "add-encode (and dedup re-add) should be OK");
     }
 
+    // Per-stream delete: pull a variant delete link from the library and use it.
+    let lib = admin.get(server.url("/admin/media")).send().await.unwrap().text().await.unwrap();
+    let variant_id = lib
+        .split("/admin/media/variant/")
+        .nth(1)
+        .expect("a variant delete link in the library")
+        .split('"')
+        .next()
+        .unwrap()
+        .to_string();
+    let resp = admin
+        .delete(server.url(&format!("/admin/media/variant/{variant_id}")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "per-stream delete should succeed");
+
     // The embed renders an <img> pointing at /media/file/<url_key>.
     let embed = reqwest::get(server.url(&format!("/media/embed/{media_ref}")))
         .await

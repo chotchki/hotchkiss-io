@@ -96,7 +96,8 @@ async fn render_media_embed(
 }
 
 /// Build the element for a media item — the polymorphic dispatch on `kind`.
-fn render_embed_html(media: &MediaDao, variants: &[MediaVariantDao]) -> String {
+/// `pub(crate)` so the admin library can reuse the playable `<video>`.
+pub(crate) fn render_embed_html(media: &MediaDao, variants: &[MediaVariantDao]) -> String {
     let alt = attr_escape(media.title.as_deref().unwrap_or(&media.media_ref));
     let kind = media.kind().unwrap_or(MediaKind::File);
     match kind {

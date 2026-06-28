@@ -232,6 +232,19 @@ impl MediaVariantDao {
         Ok(variants)
     }
 
+    /// Delete one stored encoding. The disk bytes are NOT swept here — the same
+    /// sha may back another media item (content-addressed dedup); an orphan sweep
+    /// handles unreferenced files (BZ.8).
+    pub async fn delete_by_id(executor: impl SqliteExecutor<'_>, variant_id: i64) -> Result<()> {
+        query!(
+            r#"DELETE FROM media_variant WHERE variant_id = ?1"#,
+            variant_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    }
+
     /// The serve route's lookup: public HMAC token → the variant (mime + sha).
     /// Not unique (dedup'd content shares a url_key), so take the first.
     #[allow(dead_code)] // wired by the range serve route (BZ.2)
