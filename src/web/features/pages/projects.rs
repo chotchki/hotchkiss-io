@@ -2,14 +2,19 @@ use crate::{
     db::dao::content_pages::ContentPageDao,
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
-        features::top_bar::TopBar, html_template::HtmlTemplate, markdown::excerpt::excerpt,
+        features::{
+            listing::{paginate, ListOrder, ListingQuery, Pagination},
+            top_bar::TopBar,
+        },
+        html_template::HtmlTemplate,
+        markdown::excerpt::excerpt,
         session::SessionData,
     },
 };
 use anyhow::anyhow;
 use askama::Template;
 use axum::{
-    extract::State,
+    extract::{Query, State},
     response::{IntoResponse, Response},
     routing::get,
     Router,
@@ -35,12 +40,14 @@ pub struct ListProjectsTemplate {
     pub top_bar: TopBar,
     pub auth_state: AuthenticationState,
     pub projects: Vec<ProjectCard>,
+    pub pagination: Pagination,
     pub meta: crate::web::features::seo::Meta,
 }
 
 pub async fn show_all_projects(
     State(state): State<AppState>,
     session_data: SessionData,
+    Query(query): Query<ListingQuery>,
 ) -> Result<Response, AppError> {
     let project_page = ContentPageDao::find_by_name(&state.pool, None, "projects").await?;
     let Some(project_page) = project_page else {
@@ -49,8 +56,14 @@ pub async fn show_all_projects(
         );
     };
 
-    let raw_projects =
-        ContentPageDao::find_by_parent(&state.pool, Some(project_page.page_id)).await?;
+    let (raw_projects, pagination) = paginate(
+        &state.pool,
+        Some(project_page.page_id),
+        &query,
+        ListOrder::Ordered,
+        "/projects",
+    )
+    .await?;
     let mut projects: Vec<ProjectCard> = Vec::with_capacity(raw_projects.len());
     for p in raw_projects {
         let cover_url = crate::web::features::media::cover_url_for(&state.pool, p.page_id).await;
@@ -74,6 +87,7 @@ pub async fn show_all_projects(
         top_bar: TopBar::create(&state.pool, "projects").await?,
         auth_state: session_data.auth_state,
         projects,
+        pagination,
         meta,
     };
     Ok(HtmlTemplate(lpt).into_response())

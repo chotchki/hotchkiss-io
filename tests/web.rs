@@ -1705,3 +1705,71 @@ async fn blog_post_page_shows_its_date() {
         .unwrap();
     assert!(body.contains("March 15, 2014"), "post page must show its date: {body}");
 }
+
+// ───────────────────── Phase CH: blog/projects pagination + search ─────────────────────
+
+#[tokio::test]
+async fn blog_paginates_at_page_size() {
+    let server = spawn_test_server().await.expect("spawn");
+    for i in 0..12 {
+        server
+            .seed_blog_post(&format!("post-{i:02}"), &format!("body number {i}"))
+            .await
+            .unwrap();
+    }
+    let p1 = reqwest::get(server.url("/blog")).await.unwrap().text().await.unwrap();
+    assert_eq!(p1.matches("/blog/post-").count(), 10, "page 1 shows PAGE_SIZE cards");
+    assert!(p1.contains("Page 1 of 2"), "pager present: {p1}");
+    assert!(p1.contains("Next"), "page 1 has a Next link");
+    assert!(!p1.contains("Previous"), "page 1 has no Previous link");
+
+    let p2 = reqwest::get(server.url("/blog?page=2")).await.unwrap().text().await.unwrap();
+    assert_eq!(p2.matches("/blog/post-").count(), 2, "page 2 shows the remainder");
+    assert!(p2.contains("Page 2 of 2"));
+    assert!(p2.contains("Previous"), "page 2 has a Previous link");
+    assert!(!p2.contains("Next"), "page 2 has no Next link");
+}
+
+#[tokio::test]
+async fn blog_search_filters_and_composes_with_pagination() {
+    let server = spawn_test_server().await.expect("spawn");
+    server.seed_blog_post("rust-post", "all about rustlang internals").await.unwrap();
+    server.seed_blog_post("python-post", "all about serpents").await.unwrap();
+
+    let hit = reqwest::get(server.url("/blog?q=rustlang")).await.unwrap().text().await.unwrap();
+    assert!(hit.contains("/blog/rust-post"), "matching post shown");
+    assert!(!hit.contains("/blog/python-post"), "non-matching post hidden");
+    assert!(hit.contains("1 result for"), "result count shown: {hit}");
+
+    let miss = reqwest::get(server.url("/blog?q=zzznotathing")).await.unwrap().text().await.unwrap();
+    assert!(miss.contains("No posts match your search"), "empty-search message: {miss}");
+
+    // A filtered set that is itself larger than a page: the search must paginate AND
+    // the next link must carry the query.
+    for i in 0..12 {
+        server.seed_blog_post(&format!("widget-{i:02}"), "shared widgetword body").await.unwrap();
+    }
+    let s1 = reqwest::get(server.url("/blog?q=widgetword")).await.unwrap().text().await.unwrap();
+    assert!(s1.contains("12 results for"), "filtered count: {s1}");
+    assert!(s1.contains("Page 1 of 2"), "filtered set paginates");
+    assert!(
+        s1.contains("q=widgetword") && s1.contains("page=2"),
+        "next link composes q + page"
+    );
+}
+
+#[tokio::test]
+async fn projects_listing_uses_the_shared_search_and_pager() {
+    let server = spawn_test_server().await.expect("spawn");
+    for i in 0..12 {
+        server.seed_project(&format!("proj-{i:02}"), &format!("project {i} body")).await.unwrap();
+    }
+    let body = reqwest::get(server.url("/projects")).await.unwrap().text().await.unwrap();
+    assert!(body.contains("action=\"/projects\""), "shared search box wired on projects: {body}");
+    assert!(body.contains("Page 1 of 2"), "projects paginate via the shared machinery");
+    assert_eq!(
+        body.matches("/pages/projects/proj-").count(),
+        10,
+        "page 1 shows PAGE_SIZE projects"
+    );
+}

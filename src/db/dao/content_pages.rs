@@ -284,6 +284,119 @@ impl ContentPageDao {
         Ok(content_pages)
     }
 
+    /// Count children of `parent_page_id`, optionally filtered by `search`
+    /// (matched case-insensitively against title / markdown / slug; an empty
+    /// string disables the filter). Shared by the paginated `/blog` + `/projects`
+    /// listings (see `web/features/listing.rs`).
+    pub async fn count_children(
+        executor: impl SqliteExecutor<'_>,
+        parent_page_id: Option<i64>,
+        search: &str,
+    ) -> Result<i64> {
+        let row = query!(
+            r#"
+                select count(*) as "count!: i64"
+                from content_pages
+                where parent_page_id IS ?1
+                  and (?2 = ''
+                       or page_title    like '%' || ?2 || '%'
+                       or page_markdown like '%' || ?2 || '%'
+                       or page_name     like '%' || ?2 || '%')
+            "#,
+            parent_page_id,
+            search
+        )
+        .fetch_one(executor)
+        .await?;
+        Ok(row.count)
+    }
+
+    /// One page of children newest-first (the `/blog` ordering), with optional
+    /// `search` + LIMIT/OFFSET. Empty `search` disables the filter.
+    pub async fn find_children_newest_paged(
+        executor: impl SqliteExecutor<'_>,
+        parent_page_id: Option<i64>,
+        search: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ContentPageDao>> {
+        let content_pages: Vec<ContentPageDao> = query_as!(
+            ContentPageDao,
+            r#"
+                select
+                    page_id as "page_id!",
+                    parent_page_id,
+                    page_name,
+                    page_title,
+                    page_category,
+                    page_markdown,
+                    page_cover_attachment_id as "page_cover_attachment_id?",
+                    page_order,
+                    page_creation_date as "page_creation_date: DateTime<Utc>",
+                    page_modified_date as "page_modified_date: DateTime<Utc>",
+                    special_page
+                from content_pages
+                where parent_page_id IS ?1
+                  and (?2 = ''
+                       or page_title    like '%' || ?2 || '%'
+                       or page_markdown like '%' || ?2 || '%'
+                       or page_name     like '%' || ?2 || '%')
+                order by page_creation_date DESC, page_id DESC
+                limit ?3 offset ?4
+            "#,
+            parent_page_id,
+            search,
+            limit,
+            offset
+        )
+        .fetch_all(executor)
+        .await?;
+        Ok(content_pages)
+    }
+
+    /// One page of children by manual `page_order` (the `/projects` ordering),
+    /// with optional `search` + LIMIT/OFFSET.
+    pub async fn find_children_ordered_paged(
+        executor: impl SqliteExecutor<'_>,
+        parent_page_id: Option<i64>,
+        search: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ContentPageDao>> {
+        let content_pages: Vec<ContentPageDao> = query_as!(
+            ContentPageDao,
+            r#"
+                select
+                    page_id as "page_id!",
+                    parent_page_id,
+                    page_name,
+                    page_title,
+                    page_category,
+                    page_markdown,
+                    page_cover_attachment_id as "page_cover_attachment_id?",
+                    page_order,
+                    page_creation_date as "page_creation_date: DateTime<Utc>",
+                    page_modified_date as "page_modified_date: DateTime<Utc>",
+                    special_page
+                from content_pages
+                where parent_page_id IS ?1
+                  and (?2 = ''
+                       or page_title    like '%' || ?2 || '%'
+                       or page_markdown like '%' || ?2 || '%'
+                       or page_name     like '%' || ?2 || '%')
+                order by page_order, page_id
+                limit ?3 offset ?4
+            "#,
+            parent_page_id,
+            search,
+            limit,
+            offset
+        )
+        .fetch_all(executor)
+        .await?;
+        Ok(content_pages)
+    }
+
     pub async fn find_by_path(
         executor: impl sqlx::SqliteExecutor<'_> + Clone,
         paths: &[&str],

@@ -94,10 +94,11 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] CA.1 - api_keys schema + ApiKeyDao + HMAC-pepper hashing (crypto_keys id 3) + key generation (hio_<base64url>); unit tests
 - [x] CA.2 - Auth resolution in SessionData extractor: Authorization: Bearer (axum-extra TypedHeader) → live-key lookup → Authenticated(user) + stamp last_used; session fallback; integration test
 - [x] CA.3 - Admin UI /admin/api-keys: generate (label → key shown ONCE), list (label/created/last-used), revoke; admin-gated; CLAUDE.md docs
-## Phase CG - Harden against content-triggered panics
-- [ ] CG.0 - Phase exit: content can't crash a request or the feed — transform() catches panics + degrades to escaped source; the markdown table-slice is char-boundary-safe (markdown-rs offsets are CHAR offsets, not bytes); a CatchPanicLayer turns any handler panic into a 500 (not a 000 connection reset); regression tests; beta→prod
-- [x] CG.1 - transform() hardening: char-safe table slice (markdown.chars().skip(s).take(e-s), NOT byte &markdown[s..e]) + wrap transform in catch_unwind → on panic, log + return escaped-source fallback so a page/feed degrades, never crashes. Regression tests: a table after a smart-quote line + the netcat perl content → transform returns Ok
-- [ ] CG.2 - CatchPanicLayer on the router (outermost) → any handler panic returns a 500 (styled if cheap) instead of a dropped connection; integration test (a debug-only panic route → 500, not a reset). CLAUDE.md note. Deploy beta→prod
+## Phase CH - Blog pagination + search
+- [ ] CH.0 - Phase exit: /blog paginates (N newest per page, prev/next, no-JS, mobile) AND supports text search (?q= over title + body); the two compose (?q=…&page=N); server-rendered; tested; beta→prod
+- [x] CH.1 - Pagination: ContentPageDao gains count_children(parent) + a paged find (LIMIT/OFFSET on find_by_parent_newest_first); /blog?page=N (1-indexed, PAGE_SIZE const ~10); prev/next links at the bottom (no-JS, mobile, omitted at the ends); blog index handler + template. The Atom feed stays full (newest 50) — feed paging is out of scope
+- [x] CH.2 - Search: a GET search box on /blog (?q=) filtering posts by title + markdown. Decide mechanism — LIKE %q% is adequate at this scale (recommend); SQLite FTS5 (virtual table + sync triggers, ranked) is the noted upgrade if the corpus grows. Echo the query + a result count + a clear-search link; results render as the same cards; composes with ?page=N
+- [ ] CH.3 - Tests + docs + deploy: integration tests (page boundaries + prev/next presence/omission, search hit/miss/empty-q, ?q=&page=N composition), an e2e mobile check that /blog paginates with no horizontal scroll; CLAUDE.md blog section update; beta→prod
 
 ## Backlog (not yet phased)
 

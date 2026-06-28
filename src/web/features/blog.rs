@@ -3,6 +3,7 @@ use crate::{
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
         features::{
+            listing::{paginate, ListOrder, ListingQuery, Pagination},
             pages::{EditQuery, GetPageTemplate, PostNavCard},
             top_bar::TopBar,
         },
@@ -44,12 +45,14 @@ pub struct BlogIndexTemplate {
     pub top_bar: TopBar,
     pub auth_state: AuthenticationState,
     pub posts: Vec<BlogPostCard>,
+    pub pagination: Pagination,
     pub meta: crate::web::features::seo::Meta,
 }
 
 pub async fn show_index(
     State(state): State<AppState>,
     session_data: SessionData,
+    Query(query): Query<ListingQuery>,
 ) -> Result<Response, AppError> {
     let blog_page = ContentPageDao::find_by_name(&state.pool, None, "blog").await?;
     let Some(blog_page) = blog_page else {
@@ -58,9 +61,14 @@ pub async fn show_index(
         );
     };
 
-    let raw_posts =
-        ContentPageDao::find_by_parent_newest_first(&state.pool, Some(blog_page.page_id), None)
-            .await?;
+    let (raw_posts, pagination) = paginate(
+        &state.pool,
+        Some(blog_page.page_id),
+        &query,
+        ListOrder::Newest,
+        "/blog",
+    )
+    .await?;
 
     let mut posts: Vec<BlogPostCard> = Vec::with_capacity(raw_posts.len());
     for p in raw_posts {
@@ -85,6 +93,7 @@ pub async fn show_index(
         top_bar: TopBar::create(&state.pool, "blog").await?,
         auth_state: session_data.auth_state,
         posts,
+        pagination,
         meta,
     };
     Ok(HtmlTemplate(template).into_response())

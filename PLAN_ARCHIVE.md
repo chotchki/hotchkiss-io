@@ -394,3 +394,12 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] CF.1 - Scrape + convert: for each selected post, fetch the Wayback raw capture (id_), extract title (h2#single-title), real date (byline "on Month Dayth, Year"), and body (between byline and post-bottom-meta) → pandoc to markdown. Save per-post {title, date, markdown}; validate the netcat sample + the title/date table before publishing
 - [x] CF.2 - Publish each post via the API: POST /pages/blog (title → slug) then PUT /pages/blog/<slug> with the markdown + page_creation_date set to the real byline date (backdated). Verify all 16 land on /blog dated correctly (oldest at the bottom)
 
+---
+
+## 2026-06-28
+
+## Phase CG - Harden against content-triggered panics
+- [x] CG.0 - Phase exit: content can't crash a request or the feed — transform() catches panics + degrades to escaped source; the markdown table-slice is char-boundary-safe (markdown-rs offsets are CHAR offsets, not bytes); a CatchPanicLayer turns any handler panic into a 500 (not a 000 connection reset); regression tests; beta→prod
+- [x] CG.1 - transform() hardening: char-safe table slice (markdown.chars().skip(s).take(e-s), NOT byte &markdown[s..e]) + wrap transform in catch_unwind → on panic, log + return escaped-source fallback so a page/feed degrades, never crashes. Regression tests: a table after a smart-quote line + the netcat perl content → transform returns Ok
+- [x] CG.2 - CatchPanicLayer on the router (outermost) → any handler panic returns a 500 (styled if cheap) instead of a dropped connection; integration test (a debug-only panic route → 500, not a reset). CLAUDE.md note. Deploy beta→prod
+

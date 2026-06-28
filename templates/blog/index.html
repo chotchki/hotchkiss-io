@@ -17,8 +17,10 @@
 </form>
 {% endif %}
 
+{% include "partials/listing_search.html" %}
+
 {% if posts.is_empty() %}
-<p class="text-navy italic">No posts yet.</p>
+<p class="text-navy italic">{% if pagination.is_search() %}No posts match your search.{% else %}No posts yet.{% endif %}</p>
 {% else %}
 <ul class="grid grid-cols-1 md:grid-cols-2 gap-4 list-none p-0">
     {% for post in posts %}
@@ -45,5 +47,7 @@
     {% endfor %}
 </ul>
 {% endif %}
+
+{% include "partials/listing_pager.html" %}
 </div>
 {% endblock %}

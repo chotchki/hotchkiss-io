@@ -1,0 +1,22 @@
+{# Shared prev/next pager for the /blog + /projects listings. Only rendered when
+   there's more than one page; a side is omitted at the ends. No JS — plain links
+   that carry ?q= + page=N (see Pagination::prev_url / next_url). #}
+{% if pagination.is_paged() %}
+<nav class="mt-6 flex items-center justify-between gap-2" aria-label="Pagination">
+    {% if pagination.has_prev() %}
+    <a href="{{ pagination.prev_url() }}" class="px-3 py-2 bg-navy text-div-grey rounded-sm">
+        <i class="fa-solid fa-arrow-left"></i> Previous
+    </a>
+    {% else %}
+    <span></span>
+    {% endif %}
+    <span class="text-navy/70 text-sm">Page {{ pagination.current_page }} of {{ pagination.total_pages }}</span>
+    {% if pagination.has_next() %}
+    <a href="{{ pagination.next_url() }}" class="px-3 py-2 bg-navy text-div-grey rounded-sm">
+        Next <i class="fa-solid fa-arrow-right"></i>
+    </a>
+    {% else %}
+    <span></span>
+    {% endif %}
+</nav>
+{% endif %}
