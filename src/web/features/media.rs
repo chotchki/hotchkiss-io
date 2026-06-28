@@ -113,17 +113,26 @@ role=\"button\" aria-label=\"Zoom image\" src=\"/media/file/{}\" alt=\"{alt}\" /
             )
         }
         MediaKind::Video => {
-            // Video/* variants are playback sources; an image/* variant (auto or
-            // manually added) is the poster — last one wins.
+            // Video/* variants are playback sources; an image/* variant is the
+            // poster (below). Order sources by HARDWARE-decode likelihood: HEVC
+            // first (Apple HW-decodes it; most Macs/iPhones lack AV1 HW and
+            // software-decode AV1 → dropped frames), then AV1, then the rest. The
+            // browser picks the FIRST source it can play, so the order decides
+            // which decoder it uses — getting this wrong played back jerky.
+            let mut vids: Vec<&MediaVariantDao> = variants
+                .iter()
+                .filter(|v| v.mime.starts_with("video/"))
+                .collect();
+            vids.sort_by_key(|v| codec_rank(v.codecs.as_deref()));
             let mut sources = String::new();
-            for v in variants.iter().filter(|v| v.mime.starts_with("video/")) {
+            for v in vids {
+                // `type` is single-quoted and the mime/codecs are server-derived
+                // (ffprobe-mapped, safe charset), so no escaping — keeps the inner
+                // `codecs="…"` double quotes intact.
                 let type_attr = match &v.codecs {
                     Some(c) => format!("{}; codecs=\"{}\"", v.mime, c),
                     None => v.mime.clone(),
                 };
-                // `type` is single-quoted and the mime/codecs are server-derived
-                // (ffprobe-mapped, safe charset), so no escaping — keeps the inner
-                // `codecs="…"` double quotes intact.
                 sources.push_str(&format!(
                     "<source src=\"/media/file/{}\" type='{type_attr}'>",
                     v.url_key
@@ -171,6 +180,19 @@ fn error_span(msg: &str) -> String {
         "<span class=\"media-error text-red-700 italic\">{}</span>",
         attr_escape(msg)
     )
+}
+
+/// `<source>` ordering preference by hardware-decode likelihood (lower first):
+/// HEVC (Apple HW) → AV1 (royalty-free, but software-decoded on most devices) →
+/// H.264 → unknown. The browser plays the first source it can decode, so this
+/// steers it toward a hardware path where one exists.
+fn codec_rank(codecs: Option<&str>) -> u8 {
+    match codecs {
+        Some(c) if c.starts_with("hvc1") || c.starts_with("hev1") => 0,
+        Some(c) if c.starts_with("av01") => 1,
+        Some(c) if c.starts_with("avc1") => 2,
+        _ => 3,
+    }
 }
 
 /// Minimal HTML-attribute escaping for values we interpolate into tags.
@@ -227,6 +249,12 @@ mod tests {
         assert!(html.contains("src=\"/media/file/hevckey\" type='video/mp4; codecs=\"hvc1\"'"), "{html}");
         // the poster image is the <video poster>, NOT a playback <source>
         assert!(!html.contains("<source src=\"/media/file/posterkey\""), "{html}");
+        // HEVC is ordered BEFORE AV1 (Apple hardware-decodes HEVC → smooth),
+        // even though AV1 was the first variant.
+        assert!(
+            html.find("hevckey").unwrap() < html.find("av1key").unwrap(),
+            "HEVC source must come first: {html}"
+        );
     }
 
     #[test]
