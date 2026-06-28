@@ -74,11 +74,17 @@ impl AcmeProviderService {
         *current_certificate = new_cert;
 
         if let Some(cl) = current_certificate {
-            let server_config = Arc::new(
-                ServerConfig::builder()
-                    .with_no_client_auth()
-                    .with_single_cert(cl.certificate_chain.clone(), cl.private_key.clone_key())?,
-            );
+            let mut server_config = ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(cl.certificate_chain.clone(), cl.private_key.clone_key())?;
+            // Advertise HTTP/2 (then HTTP/1.1 fallback) via ALPN. axum-server
+            // already serves h2 over hyper, but without ALPN nothing selects it —
+            // so every visitor was stuck on HTTP/1.1, serializing the page's many
+            // small vendored assets (Font Awesome, htmx, KaTeX, highlight.js, …)
+            // over the 6-connection cap with no multiplexing. h1 stays for clients
+            // that can't do h2.
+            server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+            let server_config = Arc::new(server_config);
 
             // Broadcast the renewable ServerConfig; the endpoints service owns
             // the live RustlsConfig handle and reloads it (so a renewed cert is
