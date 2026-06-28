@@ -31,7 +31,7 @@ pub struct Probed {
 /// on — same pattern as d2 / weasyprint).
 static FFPROBE_BIN: LazyLock<Option<String>> = LazyLock::new(|| resolve_bin("FFPROBE_BIN", "ffprobe"));
 
-fn resolve_bin(env: &str, name: &str) -> Option<String> {
+pub(crate) fn resolve_bin(env: &str, name: &str) -> Option<String> {
     if let Ok(p) = std::env::var(env)
         && !p.is_empty()
     {

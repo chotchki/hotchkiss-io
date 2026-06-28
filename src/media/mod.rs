@@ -6,6 +6,7 @@
 //! cache key, and a stored file is immutable — safe to serve with a far-future
 //! cache header and a `206` range response.
 
+pub mod poster;
 pub mod probe;
 
 use anyhow::{Context, Result};

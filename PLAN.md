@@ -101,6 +101,9 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] BZ.7 - Central media library /admin/media (drag-drop grouped upload, codec chips, copy-ref, delete; admin-gated; JSON ingest endpoint)
 - [ ] BZ.8 - One-shot Rust migration: attachment BLOBs → store + media rows + rewrite page refs /attachments→/media; verify on beta; retire /attachments + drop table
 - [ ] BZ.9 - Inline editor media upload (async drag-drop in the page editor, insert ![](/media/ref) at cursor, NO refresh — fixes the save_attachments lose-edits bug) + cover-image picker
+- [x] BZ.10 - Merge / add-encode: associate a separately-uploaded video encode into an EXISTING media item (today merge needs all encodes in one simultaneous drop). Per-video "add encode" action and/or prompt-to-merge on video upload.
+- [x] BZ.11 - Thumbnails / posters: auto frame-grab a video poster (ffmpeg → AVIF) shown on the library card AND as <video poster=…>; a real thumbnail for every kind in the library grid.
+- [x] BZ.12 - Rename media: edit title freely; ref rename is riskier (breaks existing ![](/media/oldref) embeds) — gate it (ref editable only until referenced, or rewrite references like the BZ.8 migration).
 
 ## Backlog (not yet phased)
 
@@ -148,3 +151,5 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - **Add Biome for first-party JS/CSS lint (augment Prettier)** — added 2026-06-24.
 - **Richer interactive analytics dashboard (port recon-gen's d3 pipeline)** — added 2026-06-25.
 - **Embed widgets: live-demo iframe + source-code iframe (deep-link line ranges, no copy-paste)** — added 2026-06-26. Two forms. (1) **Page iframe** embeds a live demo app inline (e.g. `recon-gen-spec.hotchkiss.io`) so a project page shows the REAL thing, not a screenshot — surfaced from the recon-gen draft's "I'd really like an Iframe to the demo app instead" note. (2) **Source-code iframe** takes a deep-link WITH a line range (the recon-gen page already links `…/schema.py#L2934-L2953`) and renders the actual source at those lines inline, so a snippet is never copy-pasted into a page. DRY — the repo is the single source, the pasted copy is what drifts (the recon-gen draft today pastes the SQL AND deep-links it, exactly the duplication this kills). Both reusable across every project page (extends the "deep-link + show the snippet" pattern). Open Qs: render target (GitHub's own embed vs raw-fetch + highlight.js into our own block vs an iframe to a `/source/<repo>/<path>?lines=` route on the site), pinning the ref so line ranges don't rot, caching and private-repo handling.
+- **Cheeky styled 403 "No!" page — reuse base.html (like the 404 cat page) instead of the plain (FORBIDDEN, "...") from require_admin / require_admin_for_mutations. Surfaces when a session dies (e.g. beta redeploy) and you hit an admin page. Mind HTMX-mutation 403 vs full-page-nav 403 (full nav wants the styled page).** — added 2026-06-28.
+- **Styled 500 error page — AppError returns plain text + a trace UUID today; render a styled page (base.html, same family as the 403 + 404 cat page) that KEEPS the visible trace id for support.** — added 2026-06-28.

@@ -130,6 +130,26 @@ impl MediaDao {
         Ok(media)
     }
 
+    /// Edit the display title (the URL `media_ref` is the stable key and is NOT
+    /// renamed here — that would break existing `![](/media/<ref>)` embeds).
+    /// An empty title clears it (display falls back to the ref).
+    pub async fn update_title(
+        executor: impl SqliteExecutor<'_>,
+        media_id: i64,
+        title: &str,
+    ) -> Result<()> {
+        let trimmed = title.trim();
+        let title_opt = (!trimmed.is_empty()).then_some(trimmed);
+        query!(
+            r#"UPDATE media SET title = ?1 WHERE media_id = ?2"#,
+            title_opt,
+            media_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    }
+
     /// ON DELETE CASCADE drops the variant rows; the disk bytes are swept
     /// separately (content-addressed → a sha may still be referenced elsewhere).
     pub async fn delete_by_id(executor: impl SqliteExecutor<'_>, media_id: i64) -> Result<()> {

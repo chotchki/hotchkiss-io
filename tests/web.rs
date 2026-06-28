@@ -1025,6 +1025,41 @@ async fn media_upload_serve_and_embed_vertical() {
     let lib = admin.get(server.url("/admin/media")).send().await.unwrap().text().await.unwrap();
     assert!(lib.contains(&media_ref), "library should list {media_ref}");
 
+    // Rename → the new title shows in the library.
+    let media_id = j["media_id"].as_i64().expect("media_id in response");
+    let resp = admin
+        .post(server.url(&format!("/admin/media/{media_id}/rename")))
+        .form(&[("title", "Bonnie Mugshot")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let lib = admin.get(server.url("/admin/media")).send().await.unwrap().text().await.unwrap();
+    assert!(lib.contains("Bonnie Mugshot"), "renamed title should show");
+
+    // Add-encode a second file (separate upload) → 200; re-adding the same bytes
+    // dedups (still 200, idempotent — not a 400).
+    let hobbes = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/images/404/blame_hobbes.avif"),
+    )
+    .unwrap();
+    for _ in 0..2 {
+        let form = reqwest::multipart::Form::new().part(
+            "file",
+            reqwest::multipart::Part::bytes(hobbes.clone())
+                .file_name("hobbes.avif")
+                .mime_str("image/avif")
+                .unwrap(),
+        );
+        let resp = admin
+            .post(server.url(&format!("/admin/media/{media_id}/encode")))
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "add-encode (and dedup re-add) should be OK");
+    }
+
     // The embed renders an <img> pointing at /media/file/<url_key>.
     let embed = reqwest::get(server.url(&format!("/media/embed/{media_ref}")))
         .await

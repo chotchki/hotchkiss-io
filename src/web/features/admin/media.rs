@@ -4,9 +4,10 @@
 //! Upload ingest: each dropped file is stored content-addressed, ffprobe'd for
 //! its typed facts (kind / mime / codecs / dims / duration — never trusting the
 //! filename), and recorded as a `media_variant`. All files in ONE upload group
-//! into ONE `media` item (so a video's AV1 + HEVC encodes share a `media_ref`).
-//! The response is JSON `{media_ref}` so the same endpoint serves the library
-//! drag-drop AND the in-editor insert.
+//! into ONE `media` item; a video also gets an auto-poster (ffmpeg frame-grab →
+//! AVIF, stored as an image variant). After the fact, "+ add encode" appends a
+//! variant to an EXISTING item — drop the other codec, or an image to set the
+//! poster.
 
 use anyhow::{anyhow, Result};
 use askama::Template;
@@ -18,8 +19,10 @@ use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::db::dao::crypto_key::CryptoKey;
-use crate::db::dao::media::{MediaDao, MediaVariantDao};
-use crate::media::{media_url_key, probe::probe};
+use crate::db::dao::media::{MediaDao, MediaKind, MediaVariantDao};
+use crate::media::poster::generate_poster;
+use crate::media::probe::{probe, Probed};
+use crate::media::{media_url_key, MediaStore};
 use crate::web::authentication_state::AuthenticationState;
 use crate::web::features::top_bar::TopBar;
 use crate::web::htmx_responses::htmx_refresh;
@@ -42,7 +45,8 @@ pub struct MediaCard {
     pub media_ref: String,
     pub title: String,
     pub kind: String,
-    /// For image kind, the variant's url_key (so the card shows the image); else None.
+    /// An image variant's url_key — the image itself, or a video's poster; None
+    /// for stl/file (a kind icon shows instead).
     pub thumb_url_key: Option<String>,
     pub codecs: Vec<String>,
     pub variant_count: usize,
@@ -56,11 +60,13 @@ pub async fn show_media_library(
     let mut cards = Vec::with_capacity(media.len());
     for m in media {
         let variants = MediaVariantDao::find_by_media_id(&state.pool, m.media_id).await?;
-        let thumb_url_key = if m.kind == "image" {
-            variants.first().map(|v| v.url_key.clone())
-        } else {
-            None
-        };
+        // The thumbnail is any image variant: an image's own bytes, or a video's
+        // poster. The LAST one wins so a manually-added poster overrides the auto.
+        let thumb_url_key = variants
+            .iter()
+            .rev()
+            .find(|v| v.mime.starts_with("image/"))
+            .map(|v| v.url_key.clone());
         let codecs = variants.iter().filter_map(|v| v.codecs.clone()).collect();
         cards.push(MediaCard {
             media_id: m.media_id,
@@ -78,13 +84,6 @@ pub async fn show_media_library(
         cards,
     })
     .into_response())
-}
-
-/// The stored + probed facts for one uploaded file.
-struct Ingested {
-    sha: String,
-    bytes: i64,
-    probed: crate::media::probe::Probed,
 }
 
 pub async fn upload_media(
@@ -123,8 +122,6 @@ pub async fn upload_media(
         return Ok((StatusCode::BAD_REQUEST, "No files in the upload").into_response());
     }
 
-    // Derive a unique ref: the given slug, else the first filename minus its
-    // codec/extension suffix (so intro.av1.mp4 + intro.mp4 both → "intro").
     let base = ref_input.unwrap_or_else(|| strip_media_suffixes(&files[0].0));
     let mut slug = slugify(&base);
     if slug.is_empty() {
@@ -136,32 +133,19 @@ pub async fn upload_media(
         .await?
         .key_value;
 
-    // Store + probe each file OFF the async runtime (disk write + ffprobe block).
-    let mut ingested: Vec<Ingested> = Vec::with_capacity(files.len());
+    // Store + probe every file (off the runtime).
+    let mut ingested: Vec<(String, Probed, i64)> = Vec::with_capacity(files.len());
     for (fname, bytes) in files {
-        let store = state.media_store.clone();
-        let len = bytes.len() as i64;
-        let (sha, probed) = tokio::task::spawn_blocking(move || -> Result<_> {
-            let sha = store.store(&bytes)?;
-            let probed = probe(&store.path_for(&sha), &fname)?;
-            Ok((sha, probed))
-        })
-        .await
-        .map_err(|e| anyhow!("ingest task panicked: {e}"))??;
-        ingested.push(Ingested {
-            sha,
-            bytes: len,
-            probed,
-        });
+        ingested.push(store_and_probe(state.media_store.clone(), fname, bytes).await?);
     }
 
-    // The media row takes its kind + dims/duration from the first file (a video's
-    // encodes agree; an image upload is a single file).
-    let first = &ingested[0].probed;
+    // The media row takes its kind + dims/duration from the first file.
+    let first = &ingested[0].1;
+    let kind = first.kind;
     let media = MediaDao::create(
         &state.pool,
         media_ref.clone(),
-        first.kind,
+        kind,
         title,
         first.width,
         first.height,
@@ -169,25 +153,74 @@ pub async fn upload_media(
     )
     .await?;
 
-    for i in &ingested {
-        let url_key = media_url_key(&hmac_key, &i.sha)?;
-        MediaVariantDao::create(
+    for (sha, probed, len) in &ingested {
+        create_variant(
             &state.pool,
+            &hmac_key,
             media.media_id,
-            i.sha.clone(),
-            url_key,
-            i.probed.mime.clone(),
-            i.probed.codecs.clone(),
-            i.bytes,
+            sha.clone(),
+            probed.mime.clone(),
+            probed.codecs.clone(),
+            *len,
         )
         .await?;
     }
 
+    // Auto-poster for video (non-fatal — the video still plays without one).
+    if kind == MediaKind::Video {
+        maybe_add_poster(&state, &hmac_key, media.media_id, ingested[0].0.clone()).await;
+    }
+
     Ok(Json(json!({
+        "media_id": media.media_id,
         "media_ref": media_ref,
         "markdown": format!("![](/media/{media_ref})"),
     }))
     .into_response())
+}
+
+/// Append a variant (another encode, or an image → poster) to an existing item.
+pub async fn add_encode(
+    State(state): State<AppState>,
+    Path(media_id): Path<i64>,
+    mut multipart: Multipart,
+) -> Result<Response, AppError> {
+    let hmac_key = CryptoKey::get_or_create(&state.pool, MEDIA_HMAC_KEY_ID)
+        .await?
+        .key_value;
+    let existing = MediaVariantDao::find_by_media_id(&state.pool, media_id).await?;
+
+    let mut saw_file = false;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| anyhow!("reading multipart: {e}"))?
+    {
+        if let Some(fname) = field.file_name().map(|s| s.to_string()) {
+            let bytes = field
+                .bytes()
+                .await
+                .map_err(|e| anyhow!("reading uploaded file: {e}"))?;
+            if bytes.is_empty() {
+                continue;
+            }
+            saw_file = true;
+            let (sha, probed, len) =
+                store_and_probe(state.media_store.clone(), fname, bytes.to_vec()).await?;
+            // Dedup: the same bytes are already an encode of this item → no-op.
+            if existing.iter().any(|v| v.sha256 == sha) {
+                continue;
+            }
+            create_variant(&state.pool, &hmac_key, media_id, sha, probed.mime, probed.codecs, len)
+                .await?;
+        }
+    }
+
+    if !saw_file {
+        return Ok((StatusCode::BAD_REQUEST, "No file in the upload").into_response());
+    }
+    // A file present but fully deduped is an idempotent no-op — still refresh.
+    Ok(htmx_refresh())
 }
 
 pub async fn delete_media(
@@ -196,6 +229,82 @@ pub async fn delete_media(
 ) -> Result<Response, AppError> {
     MediaDao::delete_by_id(&state.pool, media_id).await?;
     Ok(htmx_refresh())
+}
+
+#[derive(serde::Deserialize)]
+pub struct RenameForm {
+    pub title: String,
+}
+
+/// Rename the display title (the `media_ref` stays fixed — see DAO note).
+pub async fn rename_media(
+    State(state): State<AppState>,
+    Path(media_id): Path<i64>,
+    axum::Form(form): axum::Form<RenameForm>,
+) -> Result<Response, AppError> {
+    MediaDao::update_title(&state.pool, media_id, &form.title).await?;
+    Ok(htmx_refresh())
+}
+
+/// Store bytes content-addressed + ffprobe the stored file, off the async runtime.
+async fn store_and_probe(
+    store: MediaStore,
+    filename: String,
+    bytes: Vec<u8>,
+) -> Result<(String, Probed, i64)> {
+    let len = bytes.len() as i64;
+    let (sha, probed) = tokio::task::spawn_blocking(move || -> Result<_> {
+        let sha = store.store(&bytes)?;
+        let probed = probe(&store.path_for(&sha), &filename)?;
+        Ok((sha, probed))
+    })
+    .await
+    .map_err(|e| anyhow!("ingest task panicked: {e}"))??;
+    Ok((sha, probed, len))
+}
+
+async fn create_variant(
+    pool: &SqlitePool,
+    hmac_key: &[u8],
+    media_id: i64,
+    sha: String,
+    mime: String,
+    codecs: Option<String>,
+    bytes: i64,
+) -> Result<()> {
+    let url_key = media_url_key(hmac_key, &sha)?;
+    MediaVariantDao::create(pool, media_id, sha, url_key, mime, codecs, bytes).await?;
+    Ok(())
+}
+
+/// Frame-grab a poster for a video and add it as an image variant. Best-effort:
+/// a failure is logged, not surfaced — the video plays fine without a poster.
+async fn maybe_add_poster(state: &AppState, hmac_key: &[u8], media_id: i64, video_sha: String) {
+    let store = state.media_store.clone();
+    let result: Result<(String, i64)> = async {
+        let path_store = store.clone();
+        let avif = tokio::task::spawn_blocking(move || generate_poster(&path_store.path_for(&video_sha)))
+            .await
+            .map_err(|e| anyhow!("poster task panicked: {e}"))??;
+        let len = avif.len() as i64;
+        let sha = tokio::task::spawn_blocking(move || store.store(&avif))
+            .await
+            .map_err(|e| anyhow!("poster store task panicked: {e}"))??;
+        Ok((sha, len))
+    }
+    .await;
+
+    match result {
+        Ok((sha, len)) => {
+            if let Err(e) =
+                create_variant(&state.pool, hmac_key, media_id, sha, "image/avif".to_string(), None, len)
+                    .await
+            {
+                tracing::warn!("auto-poster variant insert failed (media {media_id}): {e:?}");
+            }
+        }
+        Err(e) => tracing::warn!("auto-poster generation failed (media {media_id}): {e:?}"),
+    }
 }
 
 /// `intro.av1.mp4` / `intro.mp4` → `intro` — drop the extension, then a trailing

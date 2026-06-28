@@ -112,25 +112,35 @@ role=\"button\" aria-label=\"Zoom image\" src=\"/media/file/{}\" alt=\"{alt}\" /
             )
         }
         MediaKind::Video => {
+            // Video/* variants are playback sources; an image/* variant (auto or
+            // manually added) is the poster — last one wins.
             let mut sources = String::new();
-            for v in variants {
+            for v in variants.iter().filter(|v| v.mime.starts_with("video/")) {
                 let type_attr = match &v.codecs {
                     Some(c) => format!("{}; codecs=\"{}\"", v.mime, c),
                     None => v.mime.clone(),
                 };
+                // `type` is single-quoted and the mime/codecs are server-derived
+                // (ffprobe-mapped, safe charset), so no escaping — keeps the inner
+                // `codecs="…"` double quotes intact.
                 sources.push_str(&format!(
-                    "<source src=\"/media/file/{}\" type='{}'>",
-                    v.url_key,
-                    attr_escape(&type_attr)
+                    "<source src=\"/media/file/{}\" type='{type_attr}'>",
+                    v.url_key
                 ));
             }
+            let poster = variants
+                .iter()
+                .rev()
+                .find(|v| v.mime.starts_with("image/"))
+                .map(|v| format!(" poster=\"/media/file/{}\"", v.url_key))
+                .unwrap_or_default();
             let dims = match (media.width, media.height) {
                 (Some(w), Some(h)) => format!(" width=\"{w}\" height=\"{h}\""),
                 _ => String::new(),
             };
             format!(
                 "<video class=\"media-video mx-auto my-4 block max-w-full h-auto rounded-md border-4 border-navy\" \
-controls preload=\"metadata\" playsinline{dims}>{sources}\
+controls preload=\"metadata\" playsinline{poster}{dims}>{sources}\
 Your browser can't play this video.</video>"
             )
         }
@@ -169,4 +179,67 @@ fn attr_escape(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn media(kind: &str) -> MediaDao {
+        MediaDao {
+            media_id: 1,
+            media_ref: "intro".to_string(),
+            kind: kind.to_string(),
+            title: None,
+            width: Some(1728),
+            height: Some(1116),
+            duration_ms: Some(44_908),
+            created_at: "now".to_string(),
+        }
+    }
+    fn variant(url_key: &str, mime: &str, codecs: Option<&str>) -> MediaVariantDao {
+        MediaVariantDao {
+            variant_id: 1,
+            media_id: 1,
+            sha256: "sha".to_string(),
+            url_key: url_key.to_string(),
+            mime: mime.to_string(),
+            codecs: codecs.map(|c| c.to_string()),
+            bytes: 100,
+        }
+    }
+
+    #[test]
+    fn video_renders_multi_source_with_poster() {
+        let variants = vec![
+            variant("av1key", "video/mp4", Some("av01.0.12M.08")),
+            variant("hevckey", "video/mp4", Some("hvc1")),
+            variant("posterkey", "image/avif", None), // the auto-poster
+        ];
+        let html = render_embed_html(&media("video"), &variants);
+        assert!(html.contains("<video"), "{html}");
+        assert!(html.contains("poster=\"/media/file/posterkey\""), "{html}");
+        assert!(
+            html.contains("src=\"/media/file/av1key\" type='video/mp4; codecs=\"av01.0.12M.08\"'"),
+            "{html}"
+        );
+        assert!(html.contains("src=\"/media/file/hevckey\" type='video/mp4; codecs=\"hvc1\"'"), "{html}");
+        // the poster image is the <video poster>, NOT a playback <source>
+        assert!(!html.contains("<source src=\"/media/file/posterkey\""), "{html}");
+    }
+
+    #[test]
+    fn image_renders_zoomable_img() {
+        let html = render_embed_html(&media("image"), &[variant("imgkey", "image/avif", None)]);
+        assert!(html.contains("<img"), "{html}");
+        assert!(html.contains("src=\"/media/file/imgkey\""), "{html}");
+        assert!(html.contains("data-zoomable"), "{html}");
+    }
+
+    #[test]
+    fn stl_renders_object_viewer() {
+        let html = render_embed_html(&media("stl"), &[variant("stlkey", "model/stl", None)]);
+        assert!(html.contains("<object class=\"stl-view"), "{html}");
+        assert!(html.contains("data-filename=\"/media/file/stlkey\""), "{html}");
+    }
 }

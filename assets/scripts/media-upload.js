@@ -59,4 +59,38 @@
       );
     });
   });
+
+  // "+ add encode": append another variant (another codec, or an image → poster)
+  // to an existing item. Fixes needing all encodes in one simultaneous drop.
+  document.querySelectorAll(".add-encode-input").forEach((inp) => {
+    inp.addEventListener("change", () => {
+      const id = inp.dataset.mediaId;
+      const files = Array.from(inp.files || []);
+      if (!files.length) return;
+      const fd = new FormData();
+      for (const f of files) fd.append("file", f, f.name);
+      setStatus("Adding encode…");
+      fetch("/admin/media/" + id + "/encode", { method: "POST", body: fd })
+        .then((r) =>
+          r.ok ? location.reload() : r.text().then((t) => Promise.reject(t || r.status))
+        )
+        .catch((e) => setStatus("Add failed: " + e));
+    });
+  });
+
+  // Rename the display title (the ref stays fixed so embeds don't break).
+  document.querySelectorAll(".rename-media").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.mediaId;
+      const next = window.prompt("Rename media (display title):", btn.dataset.title || "");
+      if (next === null) return;
+      fetch("/admin/media/" + id + "/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ title: next }),
+      })
+        .then((r) => (r.ok ? location.reload() : Promise.reject(r.status)))
+        .catch((e) => setStatus("Rename failed: " + e));
+    });
+  });
 })();
