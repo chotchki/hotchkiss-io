@@ -21,6 +21,11 @@ set -euo pipefail
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 WORK_ROOT="$HOME/.cache/hotchkiss-io-build"
+# Per-deploy build logs (the build's combined stdout+stderr) land here, pruned to
+# the most recent KEEP_LOGS per profile — so a failed deploy stays debuggable after
+# the push window closes (the build also still streams live to the pushing client).
+LOG_DIR="$HOME/Library/Logs/hio-deploy"
+KEEP_LOGS=5
 
 # deploy <newsha> <profile> <app_dst> <launch_label>
 #
@@ -41,11 +46,20 @@ deploy() {
 
     cd "$src_dir"
 
+    # Per-deploy build log: combined stdout+stderr, kept to the most recent
+    # KEEP_LOGS per profile. A failed deploy can then be read back here long after
+    # the push disconnected (the build still streams live to the client too).
+    mkdir -p "$LOG_DIR"
+    local logfile="$LOG_DIR/${profile}-$(date +%Y%m%d-%H%M%S).log"
+    ls -1t "$LOG_DIR/${profile}-"*.log 2>/dev/null | tail -n "+$((KEEP_LOGS + 1))" | xargs rm -f 2>/dev/null || true
+    echo "=== deploy $profile $newsha @ $(date) ===" > "$logfile"
+
     # build.sh prints BUILT_APP=<absolute-path> on success. Declare first so the
     # command-substitution's exit status isn't masked by `local` (set -e + the
-    # pipefail above then abort the deploy if the build fails).
+    # pipefail above then abort the deploy if the build fails). `2>&1` folds cargo's
+    # stderr — where compile errors print — into the tee'd log + client stream.
     local built
-    built=$(./build/macos/build.sh --profile "$profile" | tee /dev/stderr | awk -F= '/^BUILT_APP=/ {print $2}')
+    built=$(./build/macos/build.sh --profile "$profile" 2>&1 | tee -a "$logfile" /dev/stderr | awk -F= '/^BUILT_APP=/ {print $2}')
     if [[ -z "$built" || ! -d "$built" ]]; then
         echo "post-receive: build.sh did not produce a usable app bundle for $profile" >&2
         exit 1
