@@ -90,6 +90,8 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 
 See SPEC.md Pillar 3. The substance and the long pole: making less-visible work credible, not just recording it.
 
+## Backlog (not yet phased)
+
 ### Tech debt
 - **Routing model is "too clever" (the `special_page` fallout).** `content_pages` is a self-referential tree that simultaneously (a) serves nested rendered-Markdown content, (b) carries `special_page` rows whose `page_markdown` is a *redirect target URL*, not content, and (c) is dispatched by a top-level router that special-cases the redirect rows while *also* breaking out to dedicated application routers (`/login`, `/projects`, soon `/admin`). Three concerns — content node / routing redirect / dedicated app page — conflated in one table + one dispatch path. A cleaner design separates them (content pages stay a tree; "special"/app routes become plain axum routes, not DB rows). Touches `redirect_to_first_page`, `pages/mod.rs` dispatch, `ContentPageDao::find_by_path`, the `0007` seed migration, `projects.rs`.
 - **Authorization is per-handler and inconsistent.** Two idioms in the tree: `if !session_data.auth_state.is_admin() { return FORBIDDEN }` (`preview.rs`, `attachments.rs`) and `if let AuthenticationState::Authenticated(u) = … && u.role != Role::Admin { return FORBIDDEN }` (`pages/mod.rs::delete_page_path`). No route-group enforcement anywhere. Phase 7 introduces a `require_admin` layer for the new `/admin` nest; the follow-up is to audit every existing mutating route and either move it behind a layer or a uniform `AdminUser` extractor, and converge on one idiom. (CLAUDE.md explicitly warns: audit every route first.)
@@ -135,7 +137,7 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [ ] BZ.2 - HTTP range-capable streaming route (206/Accept-Ranges) serving from the store off-disk
 - [ ] BZ.3 - Backup/ops: media dir excluded from the beta snapshot, added to daily backup + Backblaze; tests + docs
 
-## Backlog (not yet phased)
+
 
 - **Add Biome for first-party JS/CSS lint (augment Prettier)** — added 2026-06-24.
 - **Richer interactive analytics dashboard (port recon-gen's d3 pipeline)** — added 2026-06-25.
