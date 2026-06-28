@@ -1,10 +1,6 @@
-use axum::{
-    extract::Request,
-    http::{Method, StatusCode},
-    middleware::Next,
-    response::Response,
-};
+use axum::{extract::Request, http::Method, middleware::Next, response::Response};
 
+use crate::web::error_page::forbidden_response;
 use crate::web::session::SessionData;
 
 /// Fail-closed, site-wide authorization (Phase E). The site's default is
@@ -33,22 +29,22 @@ pub async fn require_admin_for_mutations(
     session_data: SessionData,
     req: Request,
     next: Next,
-) -> Result<Response, (StatusCode, &'static str)> {
+) -> Response {
     // Reads are public site-wide.
     if matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS) {
-        return Ok(next.run(req).await);
+        return next.run(req).await;
     }
 
     // The only non-GET endpoints a non-admin may reach: the anonymous auth
     // ceremony (exact path + method, never a prefix).
     if is_anonymous_auth_endpoint(req.method(), req.uri().path()) {
-        return Ok(next.run(req).await);
+        return next.run(req).await;
     }
 
     if session_data.auth_state.is_admin() {
-        Ok(next.run(req).await)
+        next.run(req).await
     } else {
-        Err((StatusCode::FORBIDDEN, "Admin only"))
+        forbidden_response(req.headers())
     }
 }
 

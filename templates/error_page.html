@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="/styles/main.css?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" rel="stylesheet" />
+    <link href="/vendor/fontawesome/css/fontawesome.css?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" rel="stylesheet" />
+    <link href="/vendor/fontawesome/css/solid.css?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" rel="stylesheet" />
+    <link href="/images/favicon.ico?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" rel="shortcut icon" />
+    <meta name="theme-color" content="#14213d" />
+    <title>{{ heading }}</title>
+</head>
+
+<body class="bg-body-grey min-h-screen flex items-center justify-center p-6">
+    <main class="max-w-xl text-center">
+        <i class="{{ icon }} text-6xl text-navy/70 mb-6"></i>
+        <h1 class="font-display text-4xl sm:text-6xl text-navy uppercase mb-4">{{ heading }}</h1>
+        <p class="text-lg text-navy/80 mb-6">{{ subtext }}</p>
+        {% if let Some(trace) = trace_id %}
+        <p class="text-xs text-navy/50 font-mono mb-6 break-all">trace id: {{ trace }}</p>
+        {% endif %}
+        <a href="{{ link_href }}"
+            class="inline-block px-6 py-3 bg-navy text-div-grey rounded-md font-display uppercase tracking-wide hover:bg-navy/90">{{
+            link_label }}</a>
+    </main>
+</body>
+
+</html>

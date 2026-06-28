@@ -1,6 +1,7 @@
 pub mod app_error;
 pub mod app_state;
 pub mod authentication_state;
+pub mod error_page;
 pub mod features;
 pub mod html_template;
 pub mod htmx_responses;

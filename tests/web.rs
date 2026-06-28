@@ -737,6 +737,46 @@ async fn mutation_layer_gates_all_nests_and_allows_auth_ceremony() {
     );
 }
 
+/// The auth 403 is a styled "How about NO!" page on a full-page navigation (e.g.
+/// hitting an admin page after the session died), with a login link.
+#[tokio::test]
+async fn forbidden_full_nav_renders_styled_page() {
+    let server = spawn_test_server().await.expect("spawn");
+    let anon = client();
+    let resp = anon
+        .get(server.url("/admin/analytics"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("How about NO!"), "styled 403 page: {body}");
+    assert!(body.contains("/login"), "403 offers a login link: {body}");
+}
+
+/// An HTMX mutation that 403s (session died mid-edit) gets an HX-Redirect to
+/// /login instead of a full HTML doc swapped into a fragment target.
+#[tokio::test]
+async fn forbidden_htmx_request_gets_hx_redirect() {
+    let server = spawn_test_server().await.expect("spawn");
+    let anon = client();
+    let resp = anon
+        .post(server.url("/pages/anything"))
+        .header("HX-Request", "true")
+        .form(&[("page_title", "x")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        resp.headers()
+            .get("HX-Redirect")
+            .and_then(|v| v.to_str().ok()),
+        Some("/login"),
+        "an HTMX mutation 403 redirects to login"
+    );
+}
+
 /// Phase F authoring flow: create-by-title auto-slugs the URL; an admin lands on
 /// the clean reader view with an Edit toggle; ?edit reveals the editor; anon sees
 /// neither.
