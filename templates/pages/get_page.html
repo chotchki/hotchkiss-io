@@ -69,11 +69,11 @@
       {% endif %}
     </label>
     <label class="flex flex-col gap-1">
-      <span class="text-sm font-display text-navy uppercase">Cover Attachment Id</span>
-      {% if let Some(cover_attachment_id) = page.page_cover_attachment_id %}
-      <input class="border border-navy/30 rounded px-3 py-2" id="page_cover_attachment_id" name="page_cover_attachment_id" value="{{cover_attachment_id}}" type="number" />
+      <span class="text-sm font-display text-navy uppercase">Cover (media ref)</span>
+      {% if let Some(cover_ref) = cover_media_ref %}
+      <input class="border border-navy/30 rounded px-3 py-2" name="page_cover_media_ref" value="{{cover_ref}}" placeholder="paste a media ref" type="text" />
       {% else %}
-      <input class="border border-navy/30 rounded px-3 py-2" id="page_cover_attachment_id" name="page_cover_attachment_id" type="number" />
+      <input class="border border-navy/30 rounded px-3 py-2" name="page_cover_media_ref" placeholder="paste a media ref" type="text" />
       {% endif %}
     </label>
     <label class="flex flex-col gap-1">
@@ -82,13 +82,6 @@
     </label>
   </div>
 </form>
-
-<div class="mt-6">
-  <h3 class="text-lg font-display text-navy mb-2">Attachments</h3>
-  <div hx-get="/attachments/{{page.page_id}}" hx-trigger="load">
-    <p class="text-navy/60 text-sm">Loading…</p>
-  </div>
-</div>
 
 <div class="mt-6">
   <h3 class="text-lg font-display text-navy mb-2">Child pages</h3>

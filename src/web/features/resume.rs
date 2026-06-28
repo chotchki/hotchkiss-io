@@ -76,6 +76,8 @@ pub async fn show_resume(
         prev_post: None,
         next_post: None,
         pdf_url: Some("/resume.pdf".to_string()),
+        cover_media_ref: crate::web::features::media::cover_ref_for(&state.pool, child.page_id)
+            .await,
     };
     Ok(HtmlTemplate(gpt).into_response())
 }

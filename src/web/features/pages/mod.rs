@@ -87,6 +87,9 @@ pub struct GetPageTemplate {
     /// `/resume.pdf` download link — Some only on the résumé page (the template
     /// shows the button when set); None on /pages and /blog.
     pub pdf_url: Option<String>,
+    /// Current cover's media ref (token), pre-filling the editor's cover field
+    /// (BZ.8 — covers are media now, not `page_cover_attachment_id`).
+    pub cover_media_ref: Option<String>,
 }
 
 /// `?edit` (any value) toggles the admin editor on a page view; absent = the
@@ -130,6 +133,11 @@ pub async fn get_page_path(
                 prev_post: None,
                 next_post: None,
                 pdf_url: None,
+                cover_media_ref: crate::web::features::media::cover_ref_for(
+                    &state.pool,
+                    lp.page_id,
+                )
+                .await,
             };
 
             Ok(HtmlTemplate(gpt).into_response())
@@ -176,8 +184,8 @@ pub struct PutPageForm {
     #[serde(deserialize_with = "empty_string_as_none")]
     pub page_category: Option<String>,
     pub page_markdown: String,
-    #[serde(deserialize_with = "empty_string_as_none")]
-    pub page_cover_attachment_id: Option<String>,
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub page_cover_media_ref: Option<String>,
     pub page_order: i64,
 }
 
@@ -186,8 +194,12 @@ pub async fn put_page_path(
     Path(page_path): Path<String>,
     Form(put_page_form): Form<PutPageForm>,
 ) -> Result<Response, AppError> {
-    let page_cover_attachment_id: Option<i64> = match put_page_form.page_cover_attachment_id {
-        Some(e) => Some(e.parse::<i64>()?),
+    // The cover is now a media ref (BZ.8); resolve it → media_id. An empty or
+    // unknown ref clears the cover.
+    let cover_media_id: Option<i64> = match &put_page_form.page_cover_media_ref {
+        Some(r) => crate::db::dao::media::MediaDao::find_by_ref(&state.pool, r)
+            .await?
+            .map(|m| m.media_id),
         None => None,
     };
 
@@ -200,9 +212,16 @@ pub async fn put_page_path(
             lp.page_title = put_page_form.page_title;
             lp.page_category = put_page_form.page_category;
             lp.page_markdown = rewrite_site_links(&put_page_form.page_markdown, &state.site_host)?;
-            lp.page_cover_attachment_id = page_cover_attachment_id;
             lp.page_order = put_page_form.page_order;
             lp.update(&state.pool).await?;
+
+            sqlx::query!(
+                r#"UPDATE content_pages SET page_cover_media_id = ?1 WHERE page_id = ?2"#,
+                cover_media_id,
+                lp.page_id
+            )
+            .execute(&state.pool)
+            .await?;
 
             Ok(htmx_refresh())
         }

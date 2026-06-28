@@ -12,6 +12,9 @@ pub struct AttachmentDao {
 }
 
 impl AttachmentDao {
+    // Retained for tests; the write/list handlers were retired in BZ.8 Stage 2.
+    // The whole DAO + table go away in Stage 3.
+    #[allow(dead_code)]
     pub async fn create(
         executor: impl SqliteExecutor<'_>,
         page_id: i64,
@@ -53,6 +56,7 @@ impl AttachmentDao {
         })
     }
 
+    #[allow(dead_code)] // retired in BZ.8 Stage 2; DAO drops in Stage 3
     pub async fn delete(&self, executor: impl SqliteExecutor<'_>) -> Result<()> {
         query!(
             r#"
@@ -70,6 +74,7 @@ impl AttachmentDao {
         Ok(())
     }
 
+    #[allow(dead_code)] // list handler retired in BZ.8 Stage 2; DAO drops in Stage 3
     pub async fn find_attachments_by_page_id(
         executor: impl SqliteExecutor<'_>,
         page_id: i64,

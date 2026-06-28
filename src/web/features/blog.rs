@@ -215,6 +215,7 @@ pub async fn show_post(
         prev_post,
         next_post,
         pdf_url: None,
+        cover_media_ref: crate::web::features::media::cover_ref_for(&state.pool, lp.page_id).await,
     };
     Ok(HtmlTemplate(gpt).into_response())
 }

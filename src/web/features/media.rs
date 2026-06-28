@@ -201,6 +201,21 @@ pub(crate) async fn cover_url_for(pool: &sqlx::SqlitePool, page_id: i64) -> Opti
     .map(|k| format!("/media/file/{k}"))
 }
 
+/// The current cover's media REF (token) for a page, for the editor's cover field
+/// pre-fill. `None` when no cover is set.
+pub(crate) async fn cover_ref_for(pool: &sqlx::SqlitePool, page_id: i64) -> Option<String> {
+    sqlx::query_scalar!(
+        r#"SELECT m.media_ref FROM content_pages c
+           JOIN media m ON m.media_id = c.page_cover_media_id
+           WHERE c.page_id = ?1"#,
+        page_id
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+}
+
 /// `<source>` ordering preference by hardware-decode likelihood (lower first):
 /// HEVC (Apple HW) → AV1 (royalty-free, but software-decoded on most devices) →
 /// H.264 → unknown. The browser plays the first source it can decode, so this
