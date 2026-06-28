@@ -16,7 +16,10 @@ use uuid::Uuid;
 use webauthn_rs::WebauthnBuilder;
 
 use crate::{
-    db::{dao::content_pages::ContentPageDao, database_handle::DatabaseHandle},
+    db::{
+        dao::{api_keys::ApiKeyDao, content_pages::ContentPageDao, roles::Role, users::UserDao},
+        database_handle::DatabaseHandle,
+    },
     media::MediaStore,
     web::{app_state::AppState, router::create_router},
 };
@@ -45,6 +48,21 @@ impl TestServer {
         let ip = local_ip_address::local_ip()
             .map_err(|e| anyhow::anyhow!("could not resolve host LAN IP: {e}"))?;
         Ok(format!("http://{ip}:{port}{path}", ip = ip, port = self.port))
+    }
+
+    /// Seed an Admin user and mint an API key for it; returns the plaintext key.
+    /// The first user in a fresh DB is auto-promoted to Admin, so the key delegates
+    /// Admin — for exercising `Authorization: Bearer hio_…` auth.
+    pub async fn seed_admin_api_key(&self, label: &str) -> Result<String> {
+        let mut user = UserDao {
+            display_name: "api-tester".to_string(),
+            id: Uuid::now_v7(),
+            keys: sqlx::types::Json(vec![]),
+            role: Role::Registered,
+        };
+        user.create(&self.pool).await?; // first user → Admin (enforced in create)
+        let (key, _) = ApiKeyDao::create(&self.pool, &user.id, label).await?;
+        Ok(key)
     }
 
     /// Seed a top-level content page. Returns the created page so the caller can

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}API Keys{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <div class="flex flex-row items-center justify-between mb-4">
+        <h1 class="text-2xl font-display text-navy">API Keys</h1>
+        <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/pages">← Admin</a>
+    </div>
+    <p class="text-sm text-navy/70 mb-4">A key authenticates as you (your full access) via
+        <code>Authorization: Bearer &lt;key&gt;</code> — for scripts or delegating access. It's shown
+        <strong>once</strong> at creation; store it then. Revoke instantly below.</p>
+
+    {% if let Some(key) = new_key %}
+    <div class="border-2 border-yellow bg-yellow/10 rounded-lg p-4 mb-6">
+        <p class="text-sm font-display text-navy uppercase mb-2">New key — copy it now, it won't be shown again</p>
+        <code class="block break-all bg-white border border-navy/20 rounded p-2 text-sm text-navy">{{ key }}</code>
+    </div>
+    {% endif %}
+
+    <form method="post" action="/admin/api-keys" class="flex flex-row gap-2 mb-6">
+        <input class="border border-navy/30 rounded px-3 py-2 grow" name="label" type="text"
+            placeholder="Label (e.g. laptop, ci, claude)" required />
+        <button class="px-4 py-2 bg-navy text-div-grey rounded font-display uppercase hover:bg-navy/90"
+            type="submit">Generate</button>
+    </form>
+
+    {% if keys.is_empty() %}
+    <p class="text-navy/60 text-sm">No keys yet.</p>
+    {% else %}
+    <ul class="flex flex-col gap-2 list-none p-0">
+        {% for k in keys %}
+        <li class="border border-navy/20 rounded-lg p-3 flex flex-row items-center justify-between {% if k.revoked.is_some() %}opacity-50{% endif %}">
+            <div>
+                <p class="font-display text-navy">{{ k.label }}</p>
+                <p class="text-xs text-navy/60">created {{ k.created }} · last used {{ k.last_used }}</p>
+            </div>
+            {% if let Some(revoked) = k.revoked %}
+            <span class="text-xs text-navy/50 uppercase">revoked {{ revoked }}</span>
+            {% else %}
+            <button class="text-xs text-red-700 border border-red-700 rounded px-3 py-1 hover:bg-red-700 hover:text-white uppercase"
+                hx-delete="/admin/api-keys/{{ k.id }}"
+                hx-confirm="Revoke this key? Anything using it stops working immediately.">Revoke</button>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+{% endblock %}

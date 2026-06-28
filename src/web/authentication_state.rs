@@ -20,6 +20,15 @@ impl AuthenticationState {
         }
     }
 
+    /// The authenticated user, if any — for handlers that need the current user
+    /// (e.g. scoping API keys to their owner).
+    pub fn user(&self) -> Option<&UserDao> {
+        match self {
+            AuthenticationState::Authenticated(user) => Some(user),
+            _ => None,
+        }
+    }
+
     /// The logged-in user's display name, if authenticated — drives the nav's
     /// login-state indicator (`Some` ⇒ show the name + a logout link).
     pub fn display_name(&self) -> Option<&str> {

@@ -323,3 +323,22 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] CA.4 - Pure-Tailwind tap-to-blame reveal (native <details> + group-open:, NO JS, NO custom CSS); chris's real quips inline with a clear edit spot
 - [x] CA.5 - Integration tests: both 404 paths (unmatched route + /pages/<missing>) → 404 + cat/quip markers; CLAUDE.md updated. (Reveal is native <details> — no custom JS to e2e.)
 
+---
+
+## 2026-06-28
+
+## Phase BZ - Self-hosted large-media store (disk + HTTP range)
+- [x] BZ.0 - Phase exit: UNIFIED media — disk content store + media/variant schema; uniform ![](/media/<ref>) authoring + render-time polymorphic dispatch (img/video/stl); range route; ffprobe-typed media library UI; existing attachments migrated off BLOBs + /attachments retired; backup-correct; beta→prod verified
+- [x] BZ.1 - MediaStore content-addressed disk primitive (sharded ab/cd/<sha>, atomic write, dedup, traversal-guarded) + Settings.media_path
+- [x] BZ.2 - Range byte route /media/file/<url_key> (206/Accept-Ranges, immutable cache, HMAC token, mime from variant)
+- [x] BZ.3 - Backup/ops: media dir excluded from the beta snapshot, added to daily backup + Backblaze; tests + docs
+- [x] BZ.4 - media + media_variant schema (migration) + typed MediaDao (kind enum, variants); unit tests
+- [x] BZ.5 - Ingest: ffprobe-derive codec/mime/dims/duration per upload, store variants; auto-poster (ffmpeg frame→AVIF)
+- [x] BZ.6 - Transformer dispatch: ![](/media/<ref>) → /media/embed HTMX swap → <img>/<video multi-source>/<object stl> (diagram-style, low-risk vs transform() refactor)
+- [x] BZ.7 - Central media library /admin/media (drag-drop grouped upload, codec chips, copy-ref, delete; admin-gated; JSON ingest endpoint)
+- [x] BZ.8 - One-shot migration: attachment BLOBs → store + media rows + rewrite page refs /attachments→/media + re-home page_cover_attachment_id → media; verify on beta; retire /attachments + drop table
+- [x] BZ.9 - Inline editor media upload (async drag-drop onto the textarea + toolbar button, insert ![](/media/ref) at cursor, NO refresh — fixes the save_attachments lose-edits bug)
+- [x] BZ.10 - Merge / add-encode: associate a separately-uploaded video encode into an EXISTING media item (today merge needs all encodes in one simultaneous drop). Per-video "add encode" action and/or prompt-to-merge on video upload.
+- [x] BZ.11 - Thumbnails / posters: auto frame-grab a video poster (ffmpeg → AVIF) shown on the library card AND as <video poster=…>; a real thumbnail for every kind in the library grid.
+- [x] BZ.12 - Rename media: edit title freely; ref rename is riskier (breaks existing ![](/media/oldref) embeds) — gate it (ref editable only until referenced, or rewrite references like the BZ.8 migration).
+

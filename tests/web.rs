@@ -777,6 +777,53 @@ async fn forbidden_htmx_request_gets_hx_redirect() {
     );
 }
 
+/// Phase CA: an `Authorization: Bearer hio_…` API key authenticates as its user,
+/// so the fail-closed layer lets a mutation through; anon + bogus keys still 403.
+#[tokio::test]
+async fn api_key_authenticates_a_mutation() {
+    let server = spawn_test_server().await.expect("spawn");
+    let key = server.seed_admin_api_key("ci").await.expect("seed key");
+    let c = client();
+
+    // Anon mutation → blocked by the fail-closed layer.
+    let resp = c
+        .post(server.url("/pages/nope"))
+        .form(&[("page_title", "x")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN, "anon mutation blocked");
+
+    // Same mutation WITH the key → the layer lets it through (reaches the handler,
+    // which 404s on the missing parent — the point is it is NOT the 403).
+    let resp = c
+        .post(server.url("/pages/nope"))
+        .header("Authorization", format!("Bearer {key}"))
+        .form(&[("page_title", "x")])
+        .send()
+        .await
+        .unwrap();
+    assert_ne!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "the API key authorizes the mutation"
+    );
+
+    // A bogus key injects nothing → still blocked.
+    let resp = c
+        .post(server.url("/pages/nope"))
+        .header("Authorization", "Bearer hio_bogus")
+        .form(&[("page_title", "x")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "a bogus key is not authorized"
+    );
+}
+
 /// Phase F authoring flow: create-by-title auto-slugs the URL; an admin lands on
 /// the clean reader view with an Edit toggle; ?edit reveals the editor; anon sees
 /// neither.

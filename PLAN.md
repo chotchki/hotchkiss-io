@@ -89,21 +89,11 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 ## Phase 16 - Resume / background capture
 
 See SPEC.md Pillar 3. The substance and the long pole: making less-visible work credible, not just recording it.
-
-## Phase BZ - Self-hosted large-media store (disk + HTTP range)
-- [ ] BZ.0 - Phase exit: UNIFIED media — disk content store + media/variant schema; uniform ![](/media/<ref>) authoring + render-time polymorphic dispatch (img/video/stl); range route; ffprobe-typed media library UI; existing attachments migrated off BLOBs + /attachments retired; backup-correct; beta→prod verified
-- [x] BZ.1 - MediaStore content-addressed disk primitive (sharded ab/cd/<sha>, atomic write, dedup, traversal-guarded) + Settings.media_path
-- [x] BZ.2 - Range byte route /media/file/<url_key> (206/Accept-Ranges, immutable cache, HMAC token, mime from variant)
-- [ ] BZ.3 - Backup/ops: media dir excluded from the beta snapshot, added to daily backup + Backblaze; tests + docs
-- [x] BZ.4 - media + media_variant schema (migration) + typed MediaDao (kind enum, variants); unit tests
-- [x] BZ.5 - Ingest: ffprobe-derive codec/mime/dims/duration per upload, store variants; auto-poster (ffmpeg frame→AVIF)
-- [x] BZ.6 - Transformer dispatch: ![](/media/<ref>) → /media/embed HTMX swap → <img>/<video multi-source>/<object stl> (diagram-style, low-risk vs transform() refactor)
-- [x] BZ.7 - Central media library /admin/media (drag-drop grouped upload, codec chips, copy-ref, delete; admin-gated; JSON ingest endpoint)
-- [ ] BZ.8 - One-shot migration: attachment BLOBs → store + media rows + rewrite page refs /attachments→/media + re-home page_cover_attachment_id → media; verify on beta; retire /attachments + drop table
-- [x] BZ.9 - Inline editor media upload (async drag-drop onto the textarea + toolbar button, insert ![](/media/ref) at cursor, NO refresh — fixes the save_attachments lose-edits bug)
-- [x] BZ.10 - Merge / add-encode: associate a separately-uploaded video encode into an EXISTING media item (today merge needs all encodes in one simultaneous drop). Per-video "add encode" action and/or prompt-to-merge on video upload.
-- [x] BZ.11 - Thumbnails / posters: auto frame-grab a video poster (ffmpeg → AVIF) shown on the library card AND as <video poster=…>; a real thumbnail for every kind in the library grid.
-- [x] BZ.12 - Rename media: edit title freely; ref rename is riskier (breaks existing ![](/media/oldref) embeds) — gate it (ref editable only until referenced, or rewrite references like the BZ.8 migration).
+## Phase CA - API key authentication
+- [ ] CA.0 - Phase exit: a user can generate/revoke API keys in /admin; an `Authorization: Bearer hio_…` key authenticates as that user (HMAC-pepper hashed) across all routes; tested + documented
+- [x] CA.1 - api_keys schema + ApiKeyDao + HMAC-pepper hashing (crypto_keys id 3) + key generation (hio_<base64url>); unit tests
+- [x] CA.2 - Auth resolution in SessionData extractor: Authorization: Bearer (axum-extra TypedHeader) → live-key lookup → Authenticated(user) + stamp last_used; session fallback; integration test
+- [x] CA.3 - Admin UI /admin/api-keys: generate (label → key shown ONCE), list (label/created/last-used), revoke; admin-gated; CLAUDE.md docs
 
 ## Backlog (not yet phased)
 
@@ -151,5 +141,3 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - **Add Biome for first-party JS/CSS lint (augment Prettier)** — added 2026-06-24.
 - **Richer interactive analytics dashboard (port recon-gen's d3 pipeline)** — added 2026-06-25.
 - **Embed widgets: live-demo iframe + source-code iframe (deep-link line ranges, no copy-paste)** — added 2026-06-26. Two forms. (1) **Page iframe** embeds a live demo app inline (e.g. `recon-gen-spec.hotchkiss.io`) so a project page shows the REAL thing, not a screenshot — surfaced from the recon-gen draft's "I'd really like an Iframe to the demo app instead" note. (2) **Source-code iframe** takes a deep-link WITH a line range (the recon-gen page already links `…/schema.py#L2934-L2953`) and renders the actual source at those lines inline, so a snippet is never copy-pasted into a page. DRY — the repo is the single source, the pasted copy is what drifts (the recon-gen draft today pastes the SQL AND deep-links it, exactly the duplication this kills). Both reusable across every project page (extends the "deep-link + show the snippet" pattern). Open Qs: render target (GitHub's own embed vs raw-fetch + highlight.js into our own block vs an iframe to a `/source/<repo>/<path>?lines=` route on the site), pinning the ref so line ranges don't rot, caching and private-repo handling.
-- **Cheeky styled 403 "No!" page — reuse base.html (like the 404 cat page) instead of the plain (FORBIDDEN, "...") from require_admin / require_admin_for_mutations. Surfaces when a session dies (e.g. beta redeploy) and you hit an admin page. Mind HTMX-mutation 403 vs full-page-nav 403 (full nav wants the styled page).** — added 2026-06-28.
-- **Styled 500 error page — AppError returns plain text + a trace UUID today; render a styled page (base.html, same family as the 403 + 404 cat page) that KEEPS the visible trace id for support.** — added 2026-06-28.

@@ -8,7 +8,7 @@ use crate::{
             pages::{pages_router, projects::projects_router, redirect_to_first_page},
         },
         middleware::{
-            request_log::log_requests,
+            api_key_auth::api_key_auth, request_log::log_requests,
             require_admin_for_mutations::require_admin_for_mutations,
         },
     },
@@ -45,6 +45,9 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
 
     debug!("Making router");
     let log_pool = app_state.pool.clone();
+    // API-key middleware needs the full state (the pool) — clone before app_state
+    // is moved into `.with_state`.
+    let api_key_state = app_state.clone();
     let router = Router::new()
         .route("/", get(redirect_to_first_page))
         .nest("/login", login_router())
@@ -94,6 +97,14 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
                     .on_response(()),
             )
             .layer(session_layer)
+            // API-key auth (Phase CA): resolve `Authorization: Bearer hio_…` and
+            // inject an Authenticated SessionData. OUTER to the authz layer so the
+            // injection is present when SessionData is read; a key thus delegates
+            // its user's role with no cookie.
+            .layer(axum::middleware::from_fn_with_state(
+                api_key_state,
+                api_key_auth,
+            ))
             // Fail-closed authz (Phase E): GET/HEAD/OPTIONS public; every other
             // method requires admin by default (except the anonymous auth
             // ceremony). INNER to session_layer so SessionData is populated.

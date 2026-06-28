@@ -1,4 +1,5 @@
 pub mod acme_account;
+pub mod api_keys;
 pub mod certificate;
 pub mod content_pages;
 pub mod crypto_key;

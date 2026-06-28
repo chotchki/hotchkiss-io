@@ -15,7 +15,7 @@ pub struct SessionData {
 }
 
 impl SessionData {
-    const SESSION_DATA_KEY: &str = "session_data";
+    pub(crate) const SESSION_DATA_KEY: &str = "session_data";
 
     pub async fn update_session(session: &Session, session_data: &SessionData) -> Result<()> {
         Ok(session
@@ -31,6 +31,14 @@ where
     type Rejection = (http::StatusCode, &'static str);
 
     async fn from_request_parts(req: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        // The `api_key_auth` middleware (which has the DB pool) injects an
+        // Authenticated SessionData into extensions for a valid
+        // `Authorization: Bearer hio_…` key — use it if present, so a key
+        // authenticates with no cookie. Otherwise fall back to the cookie session.
+        if let Some(injected) = req.extensions.get::<SessionData>() {
+            return Ok(injected.clone());
+        }
+
         let session = Session::from_request_parts(req, state).await?;
 
         debug!("Found session! {:?}", session.id());

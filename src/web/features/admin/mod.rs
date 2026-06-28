@@ -8,6 +8,7 @@ use axum::{
 use crate::web::{app_state::AppState, middleware::require_admin::require_admin};
 
 pub mod analytics;
+pub mod api_keys;
 pub mod media;
 pub mod pages;
 
@@ -31,5 +32,11 @@ pub fn admin_router() -> Router<AppState> {
         .route("/media/{media_id}/rename", post(media::rename_media))
         .route("/media/variant/{variant_id}", delete(media::delete_variant))
         .route("/media/{media_id}", delete(media::delete_media))
+        // API keys (Phase CA): generate (shown once) / list / revoke your own.
+        .route(
+            "/api-keys",
+            get(api_keys::show_api_keys).post(api_keys::create_api_key),
+        )
+        .route("/api-keys/{id}", delete(api_keys::revoke_api_key))
         .layer(from_fn(require_admin))
 }
