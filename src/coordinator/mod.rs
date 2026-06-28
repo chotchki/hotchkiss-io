@@ -2,6 +2,7 @@ mod acme;
 mod acme_provider_service;
 mod backup;
 pub mod dns;
+mod migrate_media;
 mod dns_provider_service;
 mod endpoints_provider_service;
 pub mod ip;
