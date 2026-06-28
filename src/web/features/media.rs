@@ -149,7 +149,11 @@ role=\"button\" aria-label=\"Zoom image\" src=\"/media/file/{}\" alt=\"{alt}\" /
                 _ => String::new(),
             };
             format!(
-                "<video class=\"media-video mx-auto my-4 block max-w-full h-auto rounded-md border-4 border-navy\" \
+                // Cap the inline player at a comfortable width (centered, aspect
+                // preserved via the width/height attrs) so a big source doesn't
+                // dominate the page; `controls` gives a native fullscreen button
+                // for anyone who wants it larger. Mirrors the 480px image cap.
+                "<video class=\"media-video mx-auto my-4 block w-full max-w-2xl h-auto rounded-md border-4 border-navy\" \
 controls preload=\"metadata\" playsinline{poster}{dims}>{sources}\
 Your browser can't play this video.</video>"
             )
