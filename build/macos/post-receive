@@ -87,14 +87,17 @@ deploy() {
 # snapshot_prod_db_into_beta
 #
 # Replace beta's SQLite DB with a consistent online snapshot of LIVE prod, then:
-#   - reset beta's session state (drop crypto_keys rows so beta regenerates its
-#     own signing key on boot, and the library-owned tower_sessions table) so
-#     prod's sessions don't cross to beta;
+#   - reset beta's session state (drop the session signing key — crypto_keys id 1
+#     — so beta regenerates its own, plus the library-owned tower_sessions table)
+#     so prod's sessions don't cross to beta, while PRESERVING the media-URL HMAC
+#     key (id 2) so beta's media url_keys match prod's;
 #   - drop prod's visitor log (request_log) and prod's Let's Encrypt ACME account
 #     key (instant_acme_domains) — neither belongs on a public beta;
 #   - preserve beta's OWN cert + ACME account (captured before the overwrite,
 #     restored after) so beta never re-orders beta.hotchkiss.io from LE prod (the
-#     5/week duplicate-cert limit) nor re-mints its ACME account on every push.
+#     5/week duplicate-cert limit) nor re-mints its ACME account on every push;
+#   - sync prod's media store into beta's own media dir (content-addressed rsync)
+#     so beta can serve the media its snapshotted rows reference.
 # Users/passkeys carry over intact, so chris's prod passkey authenticates on beta
 # (beta's WebAuthn rp_id is the registrable parent hotchkiss.io — see 12.1/12.6).
 #
@@ -132,8 +135,11 @@ snapshot_prod_db_into_beta() {
 
     # 3. Scrub prod secrets/state that must not live on the public beta: session
     #    key (beta regenerates its own), visitor log (privacy), prod's LE ACME
-    #    account key, and sessions.
-    sqlite3 "$beta_db" "DELETE FROM crypto_keys;"
+    #    account key, and sessions. PRESERVE the media-URL HMAC key (crypto_keys
+    #    id 2) — beta serves prod's snapshotted media rows (whose url_keys were
+    #    HMAC'd with prod's key) + the rsync'd files (step 5), so matching the key
+    #    keeps beta a true mirror; only the session signing key (id 1) is dropped.
+    sqlite3 "$beta_db" "DELETE FROM crypto_keys WHERE id <> 2;"
     sqlite3 "$beta_db" "DELETE FROM request_log;"
     sqlite3 "$beta_db" "DELETE FROM instant_acme_domains;"
     sqlite3 "$beta_db" "DELETE FROM tower_sessions;" 2>/dev/null || true
@@ -147,7 +153,22 @@ snapshot_prod_db_into_beta() {
         sqlite3 "$beta_db" < "$acme_dump"
     fi
 
-    echo "post-receive: snapshotted prod DB into beta (sessions reset; beta cert + ACME account preserved; prod LE key scrubbed)" >&2
+    # 5. Sync prod's media store into beta's OWN media dir (separate dirs via the
+    #    beta config's media_path). The DB snapshot carried prod's media ROWS, but
+    #    their bytes live on disk, not in the DB — beta needs the files here to
+    #    serve them. Content-addressed = immutable sha-named files, so
+    #    --ignore-existing copies only what's new (cheap after the first sync). A
+    #    sync failure is non-fatal: beta still boots (some media may 404 until the
+    #    next push retries). Assumes prod uses the default media_path.
+    local prod_media="$HOME/Library/Application Support/io.hotchkiss.web/media"
+    local beta_media="$HOME/Library/Application Support/io.hotchkiss.web.beta/media"
+    if [[ -d "$prod_media" ]]; then
+        mkdir -p "$beta_media"
+        rsync -a --ignore-existing "$prod_media/" "$beta_media/" \
+            || echo "post-receive: media rsync prod->beta failed (non-fatal)" >&2
+    fi
+
+    echo "post-receive: snapshotted prod DB + media into beta (session key reset; media HMAC key + beta cert/ACME preserved; prod LE key scrubbed)" >&2
 }
 
 failed=0
