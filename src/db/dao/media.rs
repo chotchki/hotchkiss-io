@@ -44,7 +44,6 @@ pub struct MediaDao {
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub duration_ms: Option<i64>,
-    pub poster_sha: Option<String>,
     pub created_at: String,
 }
 
@@ -54,7 +53,6 @@ impl MediaDao {
         MediaKind::parse(&self.kind)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         executor: impl SqliteExecutor<'_>,
         media_ref: String,
@@ -63,13 +61,12 @@ impl MediaDao {
         width: Option<i64>,
         height: Option<i64>,
         duration_ms: Option<i64>,
-        poster_sha: Option<String>,
     ) -> Result<MediaDao> {
         let kind_str = kind.as_str();
         let row = query!(
             r#"
-            INSERT INTO media (media_ref, kind, title, width, height, duration_ms, poster_sha)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            INSERT INTO media (media_ref, kind, title, width, height, duration_ms)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
             RETURNING media_id as "media_id!", created_at as "created_at!"
             "#,
             media_ref,
@@ -78,7 +75,6 @@ impl MediaDao {
             width,
             height,
             duration_ms,
-            poster_sha,
         )
         .fetch_one(executor)
         .await?;
@@ -91,7 +87,6 @@ impl MediaDao {
             width,
             height,
             duration_ms,
-            poster_sha,
             created_at: row.created_at,
         })
     }
@@ -105,7 +100,7 @@ impl MediaDao {
             MediaDao,
             r#"
             SELECT media_id as "media_id!", media_ref, kind, title,
-                   width, height, duration_ms, poster_sha, created_at
+                   width, height, duration_ms, created_at
             FROM media
             WHERE media_ref = ?1
             "#,
@@ -124,7 +119,7 @@ impl MediaDao {
             MediaDao,
             r#"
             SELECT media_id as "media_id!", media_ref, kind, title,
-                   width, height, duration_ms, poster_sha, created_at
+                   width, height, duration_ms, created_at
             FROM media
             ORDER BY media_id DESC
             "#
@@ -145,34 +140,39 @@ impl MediaDao {
     }
 }
 
-/// One stored encoding of a media item. `sha256` keys the disk store.
+/// One stored encoding of a media item. `sha256` keys the disk store (never
+/// exposed); `url_key` is the public HMAC token the serve route resolves.
 #[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct MediaVariantDao {
     pub variant_id: i64,
     pub media_id: i64,
     pub sha256: String,
+    pub url_key: String,
     pub mime: String,
     pub codecs: Option<String>,
     pub bytes: i64,
 }
 
 impl MediaVariantDao {
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         executor: impl SqliteExecutor<'_>,
         media_id: i64,
         sha256: String,
+        url_key: String,
         mime: String,
         codecs: Option<String>,
         bytes: i64,
     ) -> Result<MediaVariantDao> {
         let row = query!(
             r#"
-            INSERT INTO media_variant (media_id, sha256, mime, codecs, bytes)
-            VALUES (?1, ?2, ?3, ?4, ?5)
+            INSERT INTO media_variant (media_id, sha256, url_key, mime, codecs, bytes)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
             RETURNING variant_id as "variant_id!"
             "#,
             media_id,
             sha256,
+            url_key,
             mime,
             codecs,
             bytes,
@@ -184,6 +184,7 @@ impl MediaVariantDao {
             variant_id: row.variant_id,
             media_id,
             sha256,
+            url_key,
             mime,
             codecs,
             bytes,
@@ -198,7 +199,7 @@ impl MediaVariantDao {
         let variants = query_as!(
             MediaVariantDao,
             r#"
-            SELECT variant_id as "variant_id!", media_id, sha256, mime, codecs, bytes
+            SELECT variant_id as "variant_id!", media_id, sha256, url_key, mime, codecs, bytes
             FROM media_variant
             WHERE media_id = ?1
             ORDER BY variant_id
@@ -209,6 +210,29 @@ impl MediaVariantDao {
         .await?;
 
         Ok(variants)
+    }
+
+    /// The serve route's lookup: public HMAC token → the variant (mime + sha).
+    /// Not unique (dedup'd content shares a url_key), so take the first.
+    #[allow(dead_code)] // wired by the range serve route (BZ.2)
+    pub async fn find_by_url_key(
+        executor: impl SqliteExecutor<'_>,
+        url_key: &str,
+    ) -> Result<Option<MediaVariantDao>> {
+        let variant = query_as!(
+            MediaVariantDao,
+            r#"
+            SELECT variant_id as "variant_id!", media_id, sha256, url_key, mime, codecs, bytes
+            FROM media_variant
+            WHERE url_key = ?1
+            LIMIT 1
+            "#,
+            url_key
+        )
+        .fetch_optional(executor)
+        .await?;
+
+        Ok(variant)
     }
 }
 
@@ -225,10 +249,9 @@ mod tests {
             "skylander-intro".to_string(),
             MediaKind::Video,
             Some("Skylander intro".to_string()),
-            Some(1920),
-            Some(1080),
-            Some(42_000),
-            Some("postersha".to_string()),
+            Some(1728),
+            Some(1116),
+            Some(44_908),
         )
         .await?;
         assert_eq!(media.kind()?, MediaKind::Video);
@@ -237,8 +260,9 @@ mod tests {
             &pool,
             media.media_id,
             "av1sha".to_string(),
+            "av1urlkey".to_string(),
             "video/mp4".to_string(),
-            Some("av01.0.05M.08".to_string()),
+            Some("av01.0.12M.08".to_string()),
             1_000,
         )
         .await?;
@@ -246,6 +270,7 @@ mod tests {
             &pool,
             media.media_id,
             "hevcsha".to_string(),
+            "hevcurlkey".to_string(),
             "video/mp4".to_string(),
             Some("hvc1".to_string()),
             900,
@@ -258,7 +283,12 @@ mod tests {
 
         // Both encodes come back, in insert order → <source> order.
         let variants = MediaVariantDao::find_by_media_id(&pool, media.media_id).await?;
-        assert_eq!(variants, vec![av1, hevc]);
+        assert_eq!(variants, vec![av1.clone(), hevc]);
+
+        // Serve route resolves the public token → the right variant (never the sha).
+        let by_key = MediaVariantDao::find_by_url_key(&pool, "av1urlkey").await?.unwrap();
+        assert_eq!(by_key, av1);
+        assert!(MediaVariantDao::find_by_url_key(&pool, "nope").await?.is_none());
 
         // CASCADE: deleting the media drops its variants.
         media.delete(&pool).await?;
@@ -272,13 +302,12 @@ mod tests {
 
     #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
     async fn media_ref_is_unique(pool: SqlitePool) -> Result<()> {
-        MediaDao::create(&pool, "dup".to_string(), MediaKind::Image, None, None, None, None, None)
+        MediaDao::create(&pool, "dup".to_string(), MediaKind::Image, None, None, None, None)
             .await?;
         let second = MediaDao::create(
             &pool,
             "dup".to_string(),
             MediaKind::Image,
-            None,
             None,
             None,
             None,

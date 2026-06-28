@@ -17,6 +17,7 @@ use webauthn_rs::WebauthnBuilder;
 
 use crate::{
     db::{dao::content_pages::ContentPageDao, database_handle::DatabaseHandle},
+    media::MediaStore,
     web::{app_state::AppState, router::create_router},
 };
 
@@ -155,6 +156,9 @@ pub async fn spawn_test_server() -> Result<TestServer> {
         session_store,
         webauthn,
         site_host: "hotchkiss.io".to_string(),
+        media_store: MediaStore::new(
+            std::env::temp_dir().join(format!("hotchkiss-test-media-{}", Uuid::new_v4())),
+        ),
     };
     let router = create_router(app_state).await?;
 

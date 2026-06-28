@@ -1,5 +1,6 @@
 use crate::coordinator::backup;
 use crate::db::dao::request_log::RequestLogDao;
+use crate::media::MediaStore;
 use crate::settings::Settings;
 use crate::web::{app_state::AppState, router::create_router};
 use anyhow::{Context, Result, bail};
@@ -37,6 +38,7 @@ pub struct EndpointsProviderService {
     https_port: u16,
     backup_path: PathBuf,
     site_host: String,
+    media_store: MediaStore,
 }
 
 impl EndpointsProviderService {
@@ -69,6 +71,7 @@ impl EndpointsProviderService {
             // The registrable parent (prod: hotchkiss.io; beta also hotchkiss.io,
             // not the served beta.hotchkiss.io) so canonical links relativize on both.
             site_host: settings.webauthn_rp_id.clone(),
+            media_store: MediaStore::new(settings.media_path.clone()),
         })
     }
 
@@ -90,6 +93,7 @@ impl EndpointsProviderService {
             pool: self.pool.clone(),
             webauthn: self.webauthn.clone(),
             site_host: self.site_host.clone(),
+            media_store: self.media_store.clone(),
         };
 
         let http_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.http_port);

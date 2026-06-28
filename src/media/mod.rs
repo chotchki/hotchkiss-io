@@ -63,6 +63,25 @@ pub fn hex_sha256(bytes: &[u8]) -> String {
     sha256(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// HMAC-SHA256(`hmac_key`, `sha_hex`) → lowercase hex (64 chars). The PUBLIC
+/// media URL token: unforgeable without the server key, so `/media/file/<token>`
+/// can't be used as an existence oracle (a content hash is guessable by anyone
+/// holding a copy; a raw-sha URL would let them probe whether we host it). The
+/// `hmac_key` is a server secret generated + persisted once (CryptoKey, like the
+/// session signing key). Deterministic in the sha → identical content yields one
+/// stable, cacheable token.
+pub fn media_url_key(hmac_key: &[u8], sha_hex: &str) -> Result<String> {
+    use openssl::hash::MessageDigest;
+    use openssl::pkey::PKey;
+    use openssl::sign::Signer;
+
+    let pkey = PKey::hmac(hmac_key).context("building HMAC key")?;
+    let mut signer = Signer::new(MessageDigest::sha256(), &pkey).context("HMAC signer")?;
+    signer.update(sha_hex.as_bytes()).context("HMAC update")?;
+    let mac = signer.sign_to_vec().context("HMAC sign")?;
+    Ok(mac.iter().map(|b| format!("{b:02x}")).collect())
+}
+
 /// True iff `s` is exactly 64 lowercase hex chars — i.e. a well-formed SHA-256.
 /// The serve route gates the URL path segment on this so a request can't slip a
 /// `../` or a short slice past [`MediaStore::path_for`]'s indexing.
@@ -98,6 +117,23 @@ mod tests {
 
         // different content → different hash
         assert_ne!(sha, store.store(b"different bytes").unwrap());
+    }
+
+    #[test]
+    fn media_url_key_is_deterministic_keyed_and_unforgeable() {
+        let key = b"a-64-byte-ish-server-secret-from-the-crypto-keys-table-xxxxxxxxxx";
+        let sha = "a".repeat(64);
+        let token = media_url_key(key, &sha).unwrap();
+
+        // deterministic + 64 lowercase hex (HMAC-SHA256 = 32 bytes)
+        assert_eq!(token, media_url_key(key, &sha).unwrap());
+        assert!(is_sha256_hex(&token));
+
+        // a different SERVER KEY → different token (so you can't precompute it
+        // for a known content sha without the secret)
+        assert_ne!(token, media_url_key(b"a-different-server-secret", &sha).unwrap());
+        // different CONTENT → different token
+        assert_ne!(token, media_url_key(key, &"b".repeat(64)).unwrap());
     }
 
     #[test]
