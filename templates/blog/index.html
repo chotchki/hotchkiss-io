@@ -23,9 +23,9 @@
     {% for post in posts %}
     <li class="border-2 border-navy rounded-md overflow-hidden bg-body-grey">
         <a href="/blog/{{post.page_name}}" class="block hover:opacity-90">
-            {% if let Some(cover_id) = post.page_cover_attachment_id %}
+            {% if let Some(cover) = post.cover_url %}
             <div class="h-40 bg-navy">
-                <img src="/attachments/id/{{cover_id}}" alt="" class="w-full h-full object-cover" />
+                <img src="{{cover}}" alt="" class="w-full h-full object-cover" />
             </div>
             {% else %}
             <div class="h-40 bg-navy flex items-center justify-center">

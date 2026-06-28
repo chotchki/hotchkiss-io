@@ -182,6 +182,25 @@ fn error_span(msg: &str) -> String {
     )
 }
 
+/// The cover image URL for a page (Phase BZ.8): its `page_cover_media_id`'s first
+/// image variant — the image itself for an image cover, the poster for a video.
+/// `None` when no cover is set or it has no image variant. Used by the blog +
+/// project card indexes, replacing the old `/attachments/id/<n>` cover render.
+pub(crate) async fn cover_url_for(pool: &sqlx::SqlitePool, page_id: i64) -> Option<String> {
+    sqlx::query_scalar!(
+        r#"SELECT v.url_key FROM content_pages c
+           JOIN media_variant v ON v.media_id = c.page_cover_media_id
+           WHERE c.page_id = ?1 AND v.mime LIKE 'image/%'
+           ORDER BY v.variant_id LIMIT 1"#,
+        page_id
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .map(|k| format!("/media/file/{k}"))
+}
+
 /// `<source>` ordering preference by hardware-decode likelihood (lower first):
 /// HEVC (Apple HW) → AV1 (royalty-free, but software-decoded on most devices) →
 /// H.264 → unknown. The browser plays the first source it can decode, so this

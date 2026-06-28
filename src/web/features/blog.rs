@@ -33,7 +33,7 @@ pub struct BlogPostCard {
     pub page_name: String,
     pub title: String,
     pub page_creation_date: String,
-    pub page_cover_attachment_id: Option<i64>,
+    pub cover_url: Option<String>,
     pub excerpt: String,
 }
 
@@ -60,16 +60,17 @@ pub async fn show_index(
         ContentPageDao::find_by_parent_newest_first(&state.pool, Some(blog_page.page_id), None)
             .await?;
 
-    let posts: Vec<BlogPostCard> = raw_posts
-        .into_iter()
-        .map(|p| BlogPostCard {
+    let mut posts: Vec<BlogPostCard> = Vec::with_capacity(raw_posts.len());
+    for p in raw_posts {
+        let cover_url = crate::web::features::media::cover_url_for(&state.pool, p.page_id).await;
+        posts.push(BlogPostCard {
             title: p.display_title(),
             page_name: p.page_name,
             page_creation_date: p.page_creation_date.format("%B %-d, %Y").to_string(),
-            page_cover_attachment_id: p.page_cover_attachment_id,
+            cover_url,
             excerpt: excerpt(&p.page_markdown),
-        })
-        .collect();
+        });
+    }
 
     let template = BlogIndexTemplate {
         top_bar: TopBar::create(&state.pool, "blog").await?,

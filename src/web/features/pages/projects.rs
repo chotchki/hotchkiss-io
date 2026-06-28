@@ -25,7 +25,7 @@ pub fn projects_router() -> Router<AppState> {
 pub struct ProjectCard {
     pub page_name: String,
     pub title: String,
-    pub page_cover_attachment_id: Option<i64>,
+    pub cover_url: Option<String>,
     pub excerpt: String,
 }
 
@@ -48,17 +48,18 @@ pub async fn show_all_projects(
         );
     };
 
-    let projects: Vec<ProjectCard> =
-        ContentPageDao::find_by_parent(&state.pool, Some(project_page.page_id))
-            .await?
-            .into_iter()
-            .map(|p| ProjectCard {
-                title: p.display_title(),
-                page_name: p.page_name,
-                page_cover_attachment_id: p.page_cover_attachment_id,
-                excerpt: excerpt(&p.page_markdown),
-            })
-            .collect();
+    let raw_projects =
+        ContentPageDao::find_by_parent(&state.pool, Some(project_page.page_id)).await?;
+    let mut projects: Vec<ProjectCard> = Vec::with_capacity(raw_projects.len());
+    for p in raw_projects {
+        let cover_url = crate::web::features::media::cover_url_for(&state.pool, p.page_id).await;
+        projects.push(ProjectCard {
+            title: p.display_title(),
+            page_name: p.page_name,
+            cover_url,
+            excerpt: excerpt(&p.page_markdown),
+        });
+    }
 
     let lpt = ListProjectsTemplate {
         top_bar: TopBar::create(&state.pool, "projects").await?,
