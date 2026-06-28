@@ -6,6 +6,7 @@ use crate::{
 };
 use anyhow::Result;
 use rustls::ServerConfig;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use sqlx::SqlitePool;
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::broadcast::Sender, time::sleep};
@@ -74,17 +75,10 @@ impl AcmeProviderService {
         *current_certificate = new_cert;
 
         if let Some(cl) = current_certificate {
-            let mut server_config = ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(cl.certificate_chain.clone(), cl.private_key.clone_key())?;
-            // Advertise HTTP/2 (then HTTP/1.1 fallback) via ALPN. axum-server
-            // already serves h2 over hyper, but without ALPN nothing selects it —
-            // so every visitor was stuck on HTTP/1.1, serializing the page's many
-            // small vendored assets (Font Awesome, htmx, KaTeX, highlight.js, …)
-            // over the 6-connection cap with no multiplexing. h1 stays for clients
-            // that can't do h2.
-            server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-            let server_config = Arc::new(server_config);
+            let server_config = Arc::new(build_server_config(
+                cl.certificate_chain.clone(),
+                cl.private_key.clone_key(),
+            )?);
 
             // Broadcast the renewable ServerConfig; the endpoints service owns
             // the live RustlsConfig handle and reloads it (so a renewed cert is
@@ -117,5 +111,54 @@ impl AcmeProviderService {
             cd.save(&self.pool).await?;
         }
         Ok(())
+    }
+}
+
+/// Build the HTTPS `ServerConfig` for a loaded cert, advertising HTTP/2 (then
+/// HTTP/1.1) via ALPN. Factored out so the ALPN policy is unit-testable:
+/// `axum-server` serves h2 over hyper, but WITHOUT this ALPN nothing selects it
+/// and the server silently stays HTTP/1.1 (the pre-v0.0.69 behavior — every
+/// page's many small vendored assets serialized over the 6-connection cap).
+fn build_server_config(
+    certificate_chain: Vec<CertificateDer<'static>>,
+    private_key: PrivateKeyDer<'static>,
+) -> Result<ServerConfig> {
+    let mut config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certificate_chain, private_key)?;
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    Ok(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_server_config;
+    use rcgen::{CertificateParams, DistinguishedName, KeyPair};
+    use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+
+    /// Regression guard for the HTTP/2 win (v0.0.69): the served TLS config must
+    /// advertise `h2` first, then `http/1.1`. Drop or reorder the ALPN and
+    /// axum-server silently falls back to HTTP/1.1 — this catches that.
+    #[test]
+    fn server_config_advertises_h2_then_http11() {
+        // A dev-dependency pulls in `ring` alongside the app's `aws-lc-rs`, so the
+        // test profile can't auto-pick a rustls provider (the release binary has
+        // only aws-lc-rs). Install it explicitly; idempotent across tests.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let key_pair = KeyPair::generate().expect("keypair");
+        let mut params = CertificateParams::new(vec!["localhost".to_string()]).expect("params");
+        params.distinguished_name = DistinguishedName::new();
+        let cert = params.self_signed(&key_pair).expect("self-signed cert");
+
+        let chain = vec![cert.der().clone()];
+        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_pair.serialize_der()));
+
+        let config = build_server_config(chain, key).expect("server config");
+        assert_eq!(
+            config.alpn_protocols,
+            vec![b"h2".to_vec(), b"http/1.1".to_vec()],
+            "HTTPS must offer HTTP/2 first with an HTTP/1.1 fallback"
+        );
     }
 }
