@@ -84,7 +84,7 @@ pub async fn show_resume_pdf(State(state): State<AppState>) -> Result<Response, 
     let Some(child) = newest_resume_child(&state.pool).await? else {
         return Ok((StatusCode::NOT_FOUND, "Résumé not published yet").into_response());
     };
-    let pdf = render_resume_pdf(&child)?;
+    let pdf = render_resume_pdf(&child, &state.site_host)?;
     Ok((
         [
             (header::CONTENT_TYPE, "application/pdf"),
@@ -103,7 +103,7 @@ pub async fn show_resume_pdf(State(state): State<AppState>) -> Result<Response, 
 static PDF_CACHE: LazyLock<Mutex<HashMap<String, Vec<u8>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-fn render_resume_pdf(child: &ContentPageDao) -> Result<Vec<u8>> {
+fn render_resume_pdf(child: &ContentPageDao, site_host: &str) -> Result<Vec<u8>> {
     // Key the cache on the ACTUAL PDF inputs (title + body), NOT markdown alone:
     // editing the title (the `page_title` column) leaves `page_markdown` unchanged,
     // so a markdown-only key kept serving a stale PDF after a title edit.
@@ -118,16 +118,30 @@ fn render_resume_pdf(child: &ContentPageDao) -> Result<Vec<u8>> {
     }
     let body = transform(&strip_leading_h1(&child.page_markdown))?;
     let title = html_escape(&title);
-    let html = format!(
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>{title}</title>\
-<style>{RESUME_PRINT_CSS}</style></head><body><h1 class=\"resume-name\">{title}</h1>{body}</body></html>"
-    );
+    let html = resume_html(&title, &body, site_host);
     let pdf = weasyprint(&html)?;
     PDF_CACHE
         .lock()
         .expect("resume pdf cache poisoned")
         .insert(hash, pdf.clone());
     Ok(pdf)
+}
+
+/// Assemble the print HTML. The `<base href>` is the canonical PUBLIC site —
+/// `site_host` is the WebAuthn rp-id (`hotchkiss.io` on BOTH prod and beta, NOT
+/// the served domain) — so the root-relative links `rewrite_site_links` stores
+/// resolve to ABSOLUTE, clickable URLs in the downloaded PDF. Without it
+/// weasyprint emits dead `file:///path` link annotations (verified). Using the
+/// rp-id host (not the served domain) means a résumé downloaded from beta still
+/// points recruiters at the real `hotchkiss.io`, never ephemeral beta. The same
+/// base lets a root-relative image src resolve against the public site too.
+fn resume_html(title_escaped: &str, body: &str, site_host: &str) -> String {
+    format!(
+        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+<base href=\"https://{site_host}/\"><title>{title_escaped}</title>\
+<style>{RESUME_PRINT_CSS}</style></head>\
+<body><h1 class=\"resume-name\">{title_escaped}</h1>{body}</body></html>"
+    )
 }
 
 /// Resolved once: `$WEASYPRINT_BIN`, then brew locations, then PATH (the mini's
@@ -226,5 +240,19 @@ mod tests {
         assert_ne!(pdf_cache_key("T", "a"), pdf_cache_key("T", "b"));
         // Identical inputs -> same key (so the cache actually hits).
         assert_eq!(pdf_cache_key("T", md), pdf_cache_key("T", md));
+    }
+
+    #[test]
+    fn resume_html_sets_canonical_base() {
+        // The <base> is what makes weasyprint resolve the root-relative links
+        // `rewrite_site_links` stores into absolute, clickable PDF URLs (verified:
+        // without it they become dead `file:///path`). It must be the rp-id host
+        // (canonical, public) — not the served domain — so a beta-generated PDF
+        // still points at hotchkiss.io.
+        let html = resume_html("Chris", "<p><a href=\"/projects/x\">x</a></p>", "hotchkiss.io");
+        assert!(
+            html.contains("<base href=\"https://hotchkiss.io/\">"),
+            "PDF HTML must carry the canonical base: {html}"
+        );
     }
 }
