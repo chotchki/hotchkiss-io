@@ -126,7 +126,10 @@
   <a href="{{pdf}}" class="px-3 py-1.5 bg-navy hover:bg-navy/90 rounded text-div-grey text-sm">Download PDF <i class="fa-solid fa-file-pdf" aria-hidden="true"></i></a>
 </div>
 {% endif %}
-<h1 class="font-display text-3xl md:text-4xl font-bold text-navy leading-tight mt-2 mb-4">{{page.display_title()}}</h1>
+<h1 class="font-display text-3xl md:text-4xl font-bold text-navy leading-tight mt-2 mb-1">{{page.display_title()}}</h1>
+{% if let Some(posted) = posted_date %}
+<p class="text-sm text-navy/60 mb-4">{{posted}}</p>
+{% endif %}
 <div class="prose max-w-none" id="rendered">
   {{rendered_markdown|safe}}
 </div>

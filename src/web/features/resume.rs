@@ -88,6 +88,7 @@ pub async fn show_resume(
         cover_media_ref: crate::web::features::media::cover_ref_for(&state.pool, child.page_id)
             .await,
         meta,
+        posted_date: None,
     };
     Ok(HtmlTemplate(gpt).into_response())
 }

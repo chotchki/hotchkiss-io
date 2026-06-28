@@ -140,6 +140,7 @@ pub async fn show_post(
         pdf_url: None,
         cover_media_ref: crate::web::features::media::cover_ref_for(&state.pool, lp.page_id).await,
         meta,
+        posted_date: Some(lp.page_creation_date.format("%B %-d, %Y").to_string()),
     };
     Ok(HtmlTemplate(gpt).into_response())
 }

@@ -28,6 +28,22 @@ impl ErrorPageTemplate {
     }
 }
 
+/// The styled 500 ("Oops — I tripped over the cable"), KEEPING the trace id
+/// visible for support. Shared by `AppError` (a bubbled error) and the router's
+/// `CatchPanicLayer` (a handler panic) so both look identical.
+pub fn server_error_response(trace_id: Option<String>) -> Response {
+    ErrorPageTemplate {
+        icon: "fa-solid fa-plug-circle-xmark".to_string(),
+        heading: "Oops — I tripped over the cable".to_string(),
+        subtext: "Something broke on my end. If it keeps happening, send me this trace id."
+            .to_string(),
+        link_href: "/".to_string(),
+        link_label: "Back home".to_string(),
+        trace_id,
+    }
+    .into_response_with(StatusCode::INTERNAL_SERVER_ERROR)
+}
+
 /// The styled 403 ("How about NO!"). An HTMX request — a mutation fired after the
 /// session died (e.g. a beta redeploy) — instead gets an `HX-Redirect` to /login:
 /// returning a full HTML document would get swapped into a fragment target. A

@@ -13,12 +13,35 @@ use std::collections::VecDeque;
 
 use crate::web::markdown::diagram;
 
+/// Render markdown → HTML, HARDENED. The underlying parser/serializer
+/// (`markdown-rs` + `mdast_util_to_markdown`, both alpha) can PANIC on edge-case
+/// content — and since the feed transforms EVERY post's body, one bad post could
+/// take down its page AND the whole feed (a content-triggered DoS, observed: a
+/// recovered 2012 post with smart quotes + escaped angle brackets reset the
+/// connection with no 500). Catch any panic and degrade to the escaped source, so
+/// a page/feed always render something safe instead of crashing.
+pub fn transform(markdown: &str) -> Result<String> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| transform_inner(markdown))) {
+        Ok(result) => result,
+        Err(_) => {
+            tracing::error!(
+                "markdown transform panicked; degrading to escaped source ({} bytes)",
+                markdown.len()
+            );
+            Ok(format!(
+                "<pre class=\"md-render-fallback\">{}</pre>",
+                attr_escape(markdown)
+            ))
+        }
+    }
+}
+
 ///Function to take a markdown string, parse to nodes and then
 /// ensure the output HTML flags stl files for use in the viewer
 ///
 /// Technique from https://github.com/wooorm/markdown-rs/discussions/161
 /// This is doing double the work until this is fixed: https://github.com/wooorm/markdown-rs/issues/27
-pub fn transform(markdown: &str) -> Result<String> {
+fn transform_inner(markdown: &str) -> Result<String> {
     // Enable math, but ONLY with `$$…$$` delimiters (single-dollar OFF) so prose
     // prices like "$200 … $250/month" don't get parsed as inline math. The math
     // nodes become source-carrying `.math` spans below; KaTeX (katex-render.js)
@@ -131,6 +154,8 @@ role=\"button\" aria-label=\"Zoom image\" src=\"{}\" alt=\"{}\" />",
                 // it then passes through the round-trip untouched.
                 let span = node.position().map(|p| (p.start.offset, p.end.offset));
                 if let Some((s, e)) = span {
+                    // markdown-rs `offset` is a BYTE offset (always on a char
+                    // boundary), so this slice is multi-byte safe.
                     let table_html =
                         to_html_with_options(&markdown[s..e], &html_opts).unwrap_or_default();
                     *node = Node::Html(Html {
@@ -315,5 +340,29 @@ mod tests {
         assert!(rendered.contains("<table>"), "GFM table should render: {rendered}");
         assert!(rendered.contains("<td>1</td>"), "table cell should render: {rendered}");
         Ok(())
+    }
+
+    #[test]
+    fn table_after_multibyte_chars_slices_correctly() {
+        // markdown-rs offsets are CHARACTER indices; with multi-byte chars (smart
+        // quotes) before the table, the old byte slice `&markdown[char..]` was
+        // mis-aligned (and could land mid-character → panic). The char-safe slice
+        // must grab the RIGHT table source.
+        let input =
+            "\u{201c}\u{201c}\u{201c}\u{201c} q \u{201d}\u{201d}\u{201d}\u{201d}\n\n| h |\n|---|\n| 1 |\n";
+        let rendered = transform(input).expect("no panic / no error");
+        assert!(rendered.contains("<table>"), "table renders: {rendered}");
+        assert!(rendered.contains("<td>1</td>"), "correct table source sliced: {rendered}");
+    }
+
+    #[test]
+    fn pathological_content_never_unwinds_into_the_caller() {
+        // A Wayback-recovered 2012 post (smart quotes + escaped angle brackets in a
+        // paragraph) panicked the alpha parser/serializer and reset the connection
+        // with no 500. transform() MUST catch it and return Ok — one bad post can't
+        // be allowed to crash its page OR the whole feed (which transforms them all).
+        let input = "perl -e \u{2018}print while \\<\\$in\\>; die \u{201c}x\u{201d}\u{2019}\n\nProto=\\>\u{201d}tcp\u{201d}\n";
+        let rendered = transform(input).expect("must not unwind into the caller");
+        assert!(!rendered.is_empty(), "renders something safe: {rendered}");
     }
 }

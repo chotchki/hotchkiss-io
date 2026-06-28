@@ -93,6 +93,9 @@ pub struct GetPageTemplate {
     /// Per-page SEO/social metadata (description, canonical, OpenGraph) rendered
     /// into `<head>` via the `{% block meta %}` override.
     pub meta: crate::web::features::seo::Meta,
+    /// The post date as a human string, shown under the title — `Some` only for
+    /// blog posts (`None` on `/pages` + `/resume`, which aren't dated).
+    pub posted_date: Option<String>,
 }
 
 /// `?edit` (any value) toggles the admin editor on a page view; absent = the
@@ -153,6 +156,7 @@ pub async fn get_page_path(
                 )
                 .await,
                 meta,
+                posted_date: None,
             };
 
             Ok(HtmlTemplate(gpt).into_response())

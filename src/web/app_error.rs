@@ -1,9 +1,8 @@
 use axum::response::{IntoResponse, Response};
-use http::StatusCode;
 use tracing::error;
 use uuid::Uuid;
 
-use crate::web::error_page::ErrorPageTemplate;
+use crate::web::error_page::server_error_response;
 
 // Example used to wrap our errors sanely: https://github.com/tokio-rs/axum/blob/main/examples/anyhow-error-response/src/main.rs
 
@@ -17,16 +16,7 @@ impl IntoResponse for AppError {
         // Styled, on-brand 500 that KEEPS the trace id visible for support. (An
         // HTMX request that errors won't swap a non-2xx by default, so this mainly
         // serves full-page navigations — the trace id is the point either way.)
-        ErrorPageTemplate {
-            icon: "fa-solid fa-plug-circle-xmark".to_string(),
-            heading: "Oops — I tripped over the cable".to_string(),
-            subtext: "Something broke on my end. If it keeps happening, send me this trace id."
-                .to_string(),
-            link_href: "/".to_string(),
-            link_label: "Back home".to_string(),
-            trace_id: Some(id.to_string()),
-        }
-        .into_response_with(StatusCode::INTERNAL_SERVER_ERROR)
+        server_error_response(Some(id.to_string()))
     }
 }
 

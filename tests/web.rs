@@ -1666,3 +1666,42 @@ async fn admin_can_backdate_a_page() {
             .get("page_creation_date");
     assert!(date.starts_with("2014-03-15"), "empty override must keep the date, got {date}");
 }
+
+// ───────────────────── Phase CG: panic hardening ─────────────────────
+
+#[tokio::test]
+async fn handler_panic_becomes_a_500_not_a_dropped_connection() {
+    // A handler panic must surface as a styled 500 via the CatchPanicLayer — NOT a
+    // reset connection (the `000` an uncaught panic gives, which also took the feed
+    // down when one post's content crashed the markdown transform).
+    let server = spawn_test_server().await.expect("spawn");
+    let resp = client()
+        .get(server.url("/test/panic"))
+        .send()
+        .await
+        .expect("a panic must yield a response, not a dropped connection");
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        resp.text().await.unwrap().contains("tripped over the cable"),
+        "the styled 500 should render"
+    );
+}
+
+#[tokio::test]
+async fn blog_post_page_shows_its_date() {
+    // The post detail page (not just the index card) must show the post date.
+    let server = spawn_test_server().await.expect("spawn");
+    server.seed_blog_post("dated-post", "the body").await.expect("seed");
+    // Backdate it so the rendered date is deterministic.
+    sqlx::query("UPDATE content_pages SET page_creation_date = '2014-03-15 10:00:00' WHERE page_name = 'dated-post'")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+    let body = reqwest::get(server.url("/blog/dated-post"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("March 15, 2014"), "post page must show its date: {body}");
+}

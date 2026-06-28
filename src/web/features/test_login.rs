@@ -8,7 +8,7 @@ use axum::{
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
     Router,
 };
 use serde::Deserialize;
@@ -25,7 +25,16 @@ use crate::{
 };
 
 pub fn test_router() -> Router<AppState> {
-    Router::new().route("/login", post(login_as))
+    Router::new()
+        .route("/login", post(login_as))
+        // Exercises the CatchPanicLayer: a handler panic must surface as a styled
+        // 500, NOT a dropped connection.
+        .route("/panic", get(trigger_panic))
+}
+
+/// Always panics — for the CatchPanicLayer integration test only.
+async fn trigger_panic() -> Response {
+    panic!("intentional test panic (CatchPanicLayer)")
 }
 
 #[derive(Deserialize)]

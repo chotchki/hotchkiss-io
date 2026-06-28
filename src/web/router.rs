@@ -18,6 +18,7 @@ use build_time::build_time_utc;
 use time::Duration;
 use tower::ServiceBuilder;
 use tower_http::{
+    catch_panic::CatchPanicLayer,
     compression::{
         predicate::{DefaultPredicate, NotForContentType, Predicate},
         CompressionLayer,
@@ -102,7 +103,13 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
 
     let router = router.layer(
         ServiceBuilder::new()
-            // Outermost: see every request + the final response status.
+            // Outermost: turn ANY handler panic into a styled 500 instead of a
+            // dropped connection (an uncaught panic resets the connection — a
+            // `000`, no response). Belt-and-suspenders behind transform()'s own
+            // catch_unwind: no content or handler bug should crash a request or,
+            // via the feed (which transforms every post), blank the whole feed.
+            .layer(CatchPanicLayer::custom(handle_panic))
+            // See every request + the final response status.
             .layer(axum::middleware::from_fn_with_state(log_pool, log_requests))
             .layer(
                 TraceLayer::new_for_http()
@@ -147,4 +154,17 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
     );
 
     Ok(router)
+}
+
+/// `CatchPanicLayer` responder: any panic that escapes a handler becomes a styled
+/// 500 (with a trace id for support) rather than a reset connection.
+fn handle_panic(err: Box<dyn std::any::Any + Send + 'static>) -> axum::response::Response {
+    let id = uuid::Uuid::new_v4();
+    let detail = err
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| err.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "<non-string panic>".to_string());
+    tracing::error!("handler panicked (trace {id}): {detail}");
+    crate::web::error_page::server_error_response(Some(id.to_string()))
 }

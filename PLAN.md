@@ -94,10 +94,10 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] CA.1 - api_keys schema + ApiKeyDao + HMAC-pepper hashing (crypto_keys id 3) + key generation (hio_<base64url>); unit tests
 - [x] CA.2 - Auth resolution in SessionData extractor: Authorization: Bearer (axum-extra TypedHeader) → live-key lookup → Authenticated(user) + stamp last_used; session fallback; integration test
 - [x] CA.3 - Admin UI /admin/api-keys: generate (label → key shown ONCE), list (label/created/last-used), revoke; admin-gated; CLAUDE.md docs
-## Phase CE - Editable post date (backdating)
-- [ ] CE.0 - Phase exit: a page's post date (page_creation_date) is editable in the editor + over the API, so a Wayback-recovered post can be backdated 10+ years and lands at its real chronological spot on /blog with its real date; modified-date stays auto; tested; beta→prod
-- [x] CE.1 - Make page_creation_date editable: ContentPageDao::update writes page_creation_date (+ creation_date_input() helper formatting it for datetime-local); PutPageForm gains optional page_creation_date (parse YYYY-MM-DDTHH:MM:SS, empty/unparseable → keep existing); put_page_path applies it before update. Integration test: a PUT backdates a page (and reorders /blog)
-- [ ] CE.2 - Editor UI: a "Posted" datetime-local input (step=1) in get_page.html prefilled with the current creation date; CLAUDE.md note that post date is editable (backdating); deploy beta→prod
+## Phase CG - Harden against content-triggered panics
+- [ ] CG.0 - Phase exit: content can't crash a request or the feed — transform() catches panics + degrades to escaped source; the markdown table-slice is char-boundary-safe (markdown-rs offsets are CHAR offsets, not bytes); a CatchPanicLayer turns any handler panic into a 500 (not a 000 connection reset); regression tests; beta→prod
+- [x] CG.1 - transform() hardening: char-safe table slice (markdown.chars().skip(s).take(e-s), NOT byte &markdown[s..e]) + wrap transform in catch_unwind → on panic, log + return escaped-source fallback so a page/feed degrades, never crashes. Regression tests: a table after a smart-quote line + the netcat perl content → transform returns Ok
+- [ ] CG.2 - CatchPanicLayer on the router (outermost) → any handler panic returns a 500 (styled if cheap) instead of a dropped connection; integration test (a debug-only panic route → 500, not a reset). CLAUDE.md note. Deploy beta→prod
 
 ## Backlog (not yet phased)
 

@@ -376,3 +376,21 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] CD.2 - Project detail URL fix: feed + sitemap link project entries at /pages/projects/<slug> (the real route), NOT /projects/<slug> (404); blog stays /blog/<slug>, /projects index stays. Fix the two CB tests that enshrined the wrong URL
 - [x] CD.3 - Verify + deploy: full test suite green; ship beta→prod (vX); confirm on prod over BOTH --http1.1 and --http2 that sitemap/robots/feed emit hotchkiss.io + project links are /pages/projects/<slug> + 200; CLAUDE.md note on the h2 :authority gotcha
 
+---
+
+## 2026-06-28
+
+## Phase CE - Editable post date (backdating)
+- [x] CE.0 - Phase exit: a page's post date (page_creation_date) is editable in the editor + over the API, so a Wayback-recovered post can be backdated 10+ years and lands at its real chronological spot on /blog with its real date; modified-date stays auto; tested; beta→prod
+- [x] CE.1 - Make page_creation_date editable: ContentPageDao::update writes page_creation_date (+ creation_date_input() helper formatting it for datetime-local); PutPageForm gains optional page_creation_date (parse YYYY-MM-DDTHH:MM:SS, empty/unparseable → keep existing); put_page_path applies it before update. Integration test: a PUT backdates a page (and reorders /blog)
+- [x] CE.2 - Editor UI: a "Posted" datetime-local input (step=1) in get_page.html prefilled with the current creation date; CLAUDE.md note that post date is editable (backdating); deploy beta→prod
+
+---
+
+## 2026-06-28
+
+## Phase CF - Wayback blog import
+- [x] CF.0 - Phase exit: 16 selected Wayback posts (technical 2,3,7,8,9,11,15,16,17 + personal 1,4,5,6,10,12,13) are live on /blog, each backdated to its REAL byline date (day precision), body converted from the archived HTML to clean markdown; chris polishes text on-site after
+- [x] CF.1 - Scrape + convert: for each selected post, fetch the Wayback raw capture (id_), extract title (h2#single-title), real date (byline "on Month Dayth, Year"), and body (between byline and post-bottom-meta) → pandoc to markdown. Save per-post {title, date, markdown}; validate the netcat sample + the title/date table before publishing
+- [x] CF.2 - Publish each post via the API: POST /pages/blog (title → slug) then PUT /pages/blog/<slug> with the markdown + page_creation_date set to the real byline date (backdated). Verify all 16 land on /blog dated correctly (oldest at the bottom)
+
