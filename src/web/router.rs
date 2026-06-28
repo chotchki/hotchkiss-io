@@ -5,10 +5,7 @@ use crate::{
         features::{
             admin::admin_router,
             blog::blog_router,
-            pages::{
-                attachments::attachments_router, pages_router, projects::projects_router,
-                redirect_to_first_page,
-            },
+            pages::{pages_router, projects::projects_router, redirect_to_first_page},
         },
         middleware::{
             request_log::log_requests,
@@ -51,7 +48,6 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
     let router = Router::new()
         .route("/", get(redirect_to_first_page))
         .nest("/login", login_router())
-        .nest("/attachments", attachments_router())
         .nest("/pages", pages_router())
         .nest("/projects", projects_router())
         .nest("/blog", blog_router())

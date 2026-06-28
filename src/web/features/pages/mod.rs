@@ -24,7 +24,6 @@ use tracing::debug;
 
 use super::{not_found, top_bar::TopBar};
 
-pub mod attachments;
 pub mod preview;
 pub mod projects;
 

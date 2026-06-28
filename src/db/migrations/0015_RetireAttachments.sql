@@ -1,0 +1,17 @@
+-- Phase BZ.8 Stage 3: retire the SQLite-BLOB attachments. The prod tag (v0.0.63)
+-- ran the one-shot migration (attachments → disk media store + rewritten refs +
+-- re-homed covers) and it's verified live, so the BLOBs are now redundant. EMPTY
+-- the table to get every binary out of SQLite — the daily VACUUM backup and the
+-- prod→beta snapshot shrink to pure text + metadata.
+--
+-- We KEEP the empty table (and content_pages.page_cover_attachment_id + its FK)
+-- rather than DROP it. content_pages <-> attachments is a CIRCULAR foreign key and
+-- content_pages also self-references via parent_page_id, so a clean drop needs a
+-- full table rebuild with foreign_keys=OFF — which a transactional sqlx migration
+-- can't do (PRAGMA foreign_keys is a no-op inside a transaction). And dropping
+-- attachments while the FK remains makes EVERY content_pages DML fail to prepare
+-- ("no such table: attachments"), since foreign_keys is on — so the table has to
+-- stay for the FK to resolve. The serve route + DAO are already gone, so the empty
+-- table is inert. A later `-- no-transaction` migration can rebuild content_pages
+-- to remove the column + table cleanly if we want them gone.
+DELETE FROM attachments;

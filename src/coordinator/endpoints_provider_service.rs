@@ -61,18 +61,7 @@ impl EndpointsProviderService {
         // (beta sets `hotchkiss.io` so prod passkeys authenticate against beta).
         let webauthn = WebauthnBuilder::new(&settings.webauthn_rp_id, &origin)?.build()?;
 
-        // BZ.8: one-shot attachment → media migration (idempotent; backs up first;
-        // non-fatal — attachments still serve via /attachments if it errors).
         let media_store = MediaStore::new(settings.media_path.clone());
-        if let Err(e) = crate::coordinator::migrate_media::migrate_attachments_to_media(
-            &pool,
-            &media_store,
-            &settings.backup_path,
-        )
-        .await
-        {
-            tracing::error!("BZ.8 attachment→media migration failed (continuing): {e:?}");
-        }
 
         Ok(Self {
             pool,
