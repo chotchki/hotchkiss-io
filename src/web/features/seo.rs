@@ -8,11 +8,16 @@
 
 use crate::{
     db::dao::content_pages::ContentPageDao,
-    web::{app_error::AppError, app_state::AppState, markdown::excerpt::excerpt},
+    web::{
+        app_error::AppError,
+        app_state::AppState,
+        markdown::excerpt::excerpt,
+        util::host::{request_host, request_scheme},
+    },
 };
 use axum::{
     extract::State,
-    http::{HeaderMap, header},
+    http::{HeaderMap, Uri, header},
     response::{IntoResponse, Response},
 };
 use sqlx::types::chrono::{DateTime, Utc};
@@ -90,27 +95,19 @@ impl Meta {
     }
 }
 
-/// (scheme, host) for absolute URLs. Scheme is plain HTTP only in debug (the test
-/// harness / dev server); prod + beta are HTTPS.
-fn scheme_and_host(headers: &HeaderMap) -> (&'static str, String) {
-    let host = headers
-        .get(header::HOST)
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("localhost")
-        .to_string();
-    let scheme = if cfg!(debug_assertions) { "http" } else { "https" };
-    (scheme, host)
-}
-
 /// `GET /sitemap.xml` — every crawlable URL (home, top-level pages, the blog +
 /// project indexes and their children, the résumé). `<lastmod>` comes from each
 /// page's `page_modified_date`, so a crawler can tell what actually changed.
 pub async fn sitemap_xml(
     State(state): State<AppState>,
     headers: HeaderMap,
+    uri: Uri,
 ) -> Result<Response, AppError> {
-    let (scheme, host) = scheme_and_host(&headers);
-    let base = format!("{scheme}://{host}");
+    let base = format!(
+        "{}://{}",
+        request_scheme(),
+        request_host(&headers, &uri)
+    );
 
     // (absolute loc, optional lastmod)
     let mut urls: Vec<(String, Option<DateTime<Utc>>)> = vec![(format!("{base}/"), None)];
@@ -150,9 +147,11 @@ pub async fn sitemap_xml(
         }
     }
     if let Some(id) = projects_id {
+        // Project DETAIL pages are content-tree pages at `/pages/projects/<slug>`
+        // (the `/projects` route is the index only) — NOT `/projects/<slug>`.
         for c in ContentPageDao::find_by_parent(&state.pool, Some(id)).await? {
             urls.push((
-                format!("{base}/projects/{}", c.page_name),
+                format!("{base}/pages/projects/{}", c.page_name),
                 Some(c.page_modified_date),
             ));
         }
@@ -182,8 +181,9 @@ pub async fn sitemap_xml(
 /// crawling, hides the admin/login surfaces, and points at the sitemap. On any
 /// OTHER host (beta) it disallows everything, so the ephemeral beta copy is never
 /// indexed against prod.
-pub async fn robots_txt(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let (scheme, host) = scheme_and_host(&headers);
+pub async fn robots_txt(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -> Response {
+    let scheme = request_scheme();
+    let host = request_host(&headers, &uri);
     let host_only = host.split(':').next().unwrap_or(&host);
 
     // Canonical = the registrable site host (`hotchkiss.io`), its www variant, or

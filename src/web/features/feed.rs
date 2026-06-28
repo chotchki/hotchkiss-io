@@ -14,9 +14,10 @@ use crate::{
         markdown::{excerpt::excerpt, title::strip_leading_h1, transformer::transform},
     },
 };
+use crate::web::util::host::{request_host, request_scheme};
 use axum::{
     extract::State,
-    http::{HeaderMap, header},
+    http::{HeaderMap, Uri, header},
     response::{IntoResponse, Response},
 };
 use sqlx::types::chrono::{DateTime, Utc};
@@ -25,16 +26,28 @@ use sqlx::types::chrono::{DateTime, Utc};
 const PER_SECTION_LIMIT: i64 = 50;
 
 /// One feed entry plus the URL section it links into (`blog` → `/blog/<slug>`,
-/// `projects` → `/projects/<slug>`).
+/// `projects` → `/pages/projects/<slug>` — project detail pages live UNDER the
+/// `/pages` tree, not at `/projects/<slug>`).
 struct FeedEntry {
     section: &'static str,
     page: ContentPageDao,
+}
+
+/// The site path a section's entry links to. Blog posts have a dedicated
+/// `/blog/<slug>` route; project detail pages are content-tree pages served at
+/// `/pages/projects/<slug>` (the `/projects` route is the index only).
+fn entry_path(section: &str, slug: &str) -> String {
+    match section {
+        "projects" => format!("pages/projects/{slug}"),
+        _ => format!("{section}/{slug}"),
+    }
 }
 
 /// `GET /feed.xml` (and `/blog/feed.xml`) — the unified Atom feed.
 pub async fn show_feed(
     State(state): State<AppState>,
     headers: HeaderMap,
+    uri: Uri,
 ) -> Result<Response, AppError> {
     let mut entries = collect_entries(&state).await?;
 
@@ -47,12 +60,11 @@ pub async fn show_feed(
             .then(b.page.page_id.cmp(&a.page.page_id))
     });
 
-    let host = headers
-        .get(header::HOST)
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("localhost");
-    let scheme = if cfg!(debug_assertions) { "http" } else { "https" };
-    let base = format!("{scheme}://{host}");
+    let base = format!(
+        "{}://{}",
+        request_scheme(),
+        request_host(&headers, &uri)
+    );
 
     let updated = entries
         .iter()
@@ -106,7 +118,7 @@ fn render_atom(
     out.push_str("  <author><name>Christopher Hotchkiss</name></author>\n");
     for e in entries {
         let p = &e.page;
-        let url = format!("{base}/{}/{}", e.section, p.page_name);
+        let url = format!("{base}/{}", entry_path(e.section, &p.page_name));
         out.push_str("  <entry>\n");
         out.push_str(&format!(
             "    <title>{}</title>\n",

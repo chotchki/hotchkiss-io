@@ -1253,10 +1253,10 @@ async fn unified_feed_includes_blog_and_project() {
         body.contains("<category term=\"blog\""),
         "blog entry category missing"
     );
-    // Project page entry, linked under /projects — this is the CB.2 ask.
+    // Project page entry, linked at the real /pages/projects/<slug> route.
     assert!(
-        body.contains("/projects/the-widget"),
-        "project entry url missing: {body}"
+        body.contains("/pages/projects/the-widget"),
+        "project entry url must be /pages/projects/<slug>: {body}"
     );
     assert!(
         body.contains("<category term=\"projects\""),
@@ -1281,7 +1281,7 @@ async fn blog_feed_alias_still_serves_unified_feed() {
         .await
         .unwrap();
     assert!(
-        body.contains("/projects/legacy-alias"),
+        body.contains("/pages/projects/legacy-alias"),
         "the /blog/feed.xml alias should carry projects too: {body}"
     );
 }
@@ -1318,7 +1318,7 @@ async fn sitemap_lists_home_pages_blog_and_projects() {
     assert!(body.contains("<loc>http://localhost"), "absolute locs");
     assert!(body.contains("/pages/about-me</loc>"), "content page");
     assert!(body.contains("/blog/hello-world</loc>"), "blog post");
-    assert!(body.contains("/projects/the-widget</loc>"), "project page");
+    assert!(body.contains("/pages/projects/the-widget</loc>"), "project page");
     assert!(body.contains("<lastmod>"), "lastmod present");
     // Special redirect rows are NOT exposed as /pages/<slug>.
     assert!(
