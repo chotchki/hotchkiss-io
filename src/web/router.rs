@@ -16,9 +16,8 @@ use crate::{
         },
     },
 };
-use axum::{http::Uri, routing::get, Router};
+use axum::{routing::get, Router};
 use build_time::build_time_utc;
-use reqwest::StatusCode;
 use time::Duration;
 use tower::ServiceBuilder;
 use tower_http::{
@@ -70,10 +69,12 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
         crate::web::features::test_login::test_router(),
     );
 
+    // `.fallback` BEFORE `.with_state` so the handler can extract
+    // `State<AppState>` (it needs the pool to build the 404's nav).
     let router = router
+        .fallback(crate::web::features::not_found::fallback)
         .with_state(app_state)
-        .merge(static_content())
-        .fallback(fallback);
+        .merge(static_content());
 
     let router = if cfg!(debug_assertions) {
         router.layer(LiveReloadLayer::new())
@@ -100,9 +101,4 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
     );
 
     Ok(router)
-}
-
-//TDOO: We should make our 404s fancy
-async fn fallback(uri: Uri) -> (StatusCode, String) {
-    (StatusCode::NOT_FOUND, format!("No route for {uri}"))
 }

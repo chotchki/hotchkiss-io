@@ -22,7 +22,7 @@ use preview::preview_router;
 use serde::Deserialize;
 use tracing::debug;
 
-use super::top_bar::TopBar;
+use super::{not_found, top_bar::TopBar};
 
 pub mod attachments;
 pub mod preview;
@@ -108,7 +108,10 @@ pub async fn get_page_path(
     let pages_path = ContentPageDao::find_by_path(&state.pool, &page_names).await?;
 
     match pages_path.last() {
-        None => Ok((StatusCode::NOT_FOUND, "No such page").into_response()),
+        // The human "/pages/<slug>" miss (e.g. the dead /pages/Resume link) →
+        // the shared cat 404, not a bare string. The mutation handlers below
+        // keep their plain "No such page" (htmx/admin responses, not nav).
+        None => Ok(not_found::render_not_found(&state.pool, session_data.auth_state).await),
         Some(lp) => {
             if lp.special_page {
                 return Ok(Redirect::temporary(&lp.page_markdown).into_response());

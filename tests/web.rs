@@ -936,3 +936,33 @@ async fn resume_pdf_is_a_real_pdf() {
         bytes.len()
     );
 }
+
+/// CA: the two 404 code-paths — an unmatched route (global fallback) AND a
+/// missing `/pages/<slug>` (the dead `/pages/Resume` link that prompted this) —
+/// both render the shared "blame the cat" page with a real 404 status.
+#[tokio::test]
+async fn not_found_renders_cat_page_on_both_paths() {
+    let server = spawn_test_server().await.expect("spawn");
+
+    for path in [
+        "/definitely-not-a-real-route",
+        "/pages/this-page-does-not-exist",
+    ] {
+        let resp = reqwest::get(server.url(path)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{path} should be a 404");
+        let body = resp.text().await.unwrap();
+        assert!(
+            body.contains("Which one is guilty"),
+            "{path} should render the cat 404: {body}"
+        );
+        assert!(
+            body.contains("blame_hobbes.avif"),
+            "{path} should show the suspect lineup: {body}"
+        );
+        // the orange-cat verdict is the punchline — confirm the quips render
+        assert!(
+            body.contains("Not Guilty Due to Orange Cat"),
+            "{path} should carry the verdicts: {body}"
+        );
+    }
+}

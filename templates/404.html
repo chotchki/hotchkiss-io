@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}404 — Which cat is guilty?{% endblock %}
+
+{% block content %}
+<div class="flex flex-col items-center gap-6 text-center">
+    <div>
+        <p class="font-display text-6xl text-navy">404</p>
+        <h1 class="mt-2 font-display text-2xl text-navy uppercase">One of the cats stole your page</h1>
+        <p class="mt-2 font-content text-lg text-navy">Which one is guilty?!
+            <span class="block text-base text-navy/60">Tap a suspect to interrogate.</span>
+        </p>
+    </div>
+
+    {#
+       SUSPECT LINEUP — each cat's quip + verdict is chris's verbatim copy.
+       To edit a quip: change the blame <span> and the "Verdict:" <span> inside
+       that cat's <details>. The reveal is pure Tailwind, no JS: `group` on the
+       <details> + `group-open:` on the overlay (native <details> toggle, same
+       no-JS approach as the nav hamburger). The overlay lives INSIDE <summary>
+       so tapping the cat toggles it open AND closed.
+    #}
+    <div class="grid w-full max-w-3xl grid-cols-1 gap-4 sm:grid-cols-3">
+        <details class="group relative overflow-hidden rounded-lg border-4 border-navy">
+            <summary
+                class="relative block cursor-pointer list-none [&::-webkit-details-marker]:hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yellow">
+                <img class="block aspect-square w-full object-cover"
+                    src="/images/404/blame_bonnie.avif?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"
+                    alt="Bonnie, a feline suspect" />
+                <span
+                    class="absolute left-2 top-2 rounded bg-navy/90 px-2 py-0.5 font-display text-xs uppercase tracking-wide text-yellow">Bonnie</span>
+                <span aria-hidden="true"
+                    class="absolute bottom-2 right-2 rounded bg-yellow/90 px-2 py-0.5 font-display text-xs uppercase tracking-wide text-navy transition-opacity group-open:opacity-0">Accuse?</span>
+                <span
+                    class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-navy/90 p-4 text-center text-div-grey opacity-0 transition-opacity duration-200 group-open:pointer-events-auto group-open:opacity-100">
+                    <span class="font-content text-sm sm:text-base">Bonnie meows at you like an old 4 pack a day smoker
+                        and licks you with her rough tongue</span>
+                    <span class="font-display text-base uppercase text-yellow">Verdict: Not Guilty</span>
+                </span>
+            </summary>
+        </details>
+
+        <details class="group relative overflow-hidden rounded-lg border-4 border-navy">
+            <summary
+                class="relative block cursor-pointer list-none [&::-webkit-details-marker]:hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yellow">
+                <img class="block aspect-square w-full object-cover"
+                    src="/images/404/blame_puss.avif?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"
+                    alt="Puss, a feline suspect" />
+                <span
+                    class="absolute left-2 top-2 rounded bg-navy/90 px-2 py-0.5 font-display text-xs uppercase tracking-wide text-yellow">Puss</span>
+                <span aria-hidden="true"
+                    class="absolute bottom-2 right-2 rounded bg-yellow/90 px-2 py-0.5 font-display text-xs uppercase tracking-wide text-navy transition-opacity group-open:opacity-0">Accuse?</span>
+                <span
+                    class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-navy/90 p-4 text-center text-div-grey opacity-0 transition-opacity duration-200 group-open:pointer-events-auto group-open:opacity-100">
+                    <span class="font-content text-sm sm:text-base">Puss looks regally up at you and then presses her
+                        stupid flat face into you</span>
+                    <span class="font-display text-base uppercase text-yellow">Verdict: Not Guilty</span>
+                </span>
+            </summary>
+        </details>
+
+        <details class="group relative overflow-hidden rounded-lg border-4 border-navy">
+            <summary
+                class="relative block cursor-pointer list-none [&::-webkit-details-marker]:hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yellow">
+                <img class="block aspect-square w-full object-cover"
+                    src="/images/404/blame_hobbes.avif?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"
+                    alt="Hobbes, a feline suspect" />
+                <span
+                    class="absolute left-2 top-2 rounded bg-navy/90 px-2 py-0.5 font-display text-xs uppercase tracking-wide text-yellow">Hobbes</span>
+                <span aria-hidden="true"
+                    class="absolute bottom-2 right-2 rounded bg-yellow/90 px-2 py-0.5 font-display text-xs uppercase tracking-wide text-navy transition-opacity group-open:opacity-0">Accuse?</span>
+                <span
+                    class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-navy/90 p-4 text-center text-div-grey opacity-0 transition-opacity duration-200 group-open:pointer-events-auto group-open:opacity-100">
+                    <span class="font-content text-sm sm:text-base">Hobbes shares a single brain cell with every other
+                        orange cat in the world, and he never has it. Hobbes screams at you for food and then acts
+                        cute.</span>
+                    <span class="font-display text-base uppercase text-yellow">Verdict: Not Guilty Due to Orange Cat (yes
+                        he did it)</span>
+                </span>
+            </summary>
+        </details>
+    </div>
+
+    <a href="/"
+        class="inline-flex items-center gap-2 rounded bg-navy px-5 py-2.5 font-display text-sm uppercase text-yellow hover:bg-navy/90">
+        <i class="fa-solid fa-house"></i> Back to home
+    </a>
+</div>
+{% endblock %}
