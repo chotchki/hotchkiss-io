@@ -311,3 +311,15 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] BY.1 - post-receive: graceful SIGTERM restart instead of kickstart -k (SIGKILL); re-copy the hook to the mini
 - [x] BY.2 - Verify on the mini; add an app SIGTERM handler if the tray app doesn't exit cleanly
 
+---
+
+## 2026-06-28
+
+## Phase CA - Custom cat 404 page
+- [x] CA.0 - Phase exit: a 404 (unmatched route OR missing /pages/* path) renders the 3-cat "Which one is guilty?!" page; tap-to-blame quip overlay; back-home link; web-optimized AVIF; both paths tested
+- [x] CA.1 - Re-encode the 3 cat photos: resize to a uniform web size + AVIF (avifenc); drop the raw JPEGs from embedded assets
+- [x] CA.2 - templates/404.html: 3 cat cards, "Which one is guilty?!" header, per-cat quip overlay slots, back-to-/ link; mobile-first
+- [x] CA.3 - Shared render_not_found helper; route global fallback (move before with_state) + get_page_path None branch through it
+- [x] CA.4 - Pure-Tailwind tap-to-blame reveal (native <details> + group-open:, NO JS, NO custom CSS); chris's real quips inline with a clear edit spot
+- [x] CA.5 - Integration tests: both 404 paths (unmatched route + /pages/<missing>) → 404 + cat/quip markers; CLAUDE.md updated. (Reveal is native <details> — no custom JS to e2e.)
+
