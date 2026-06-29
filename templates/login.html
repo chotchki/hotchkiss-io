@@ -1,5 +1,5 @@
 {% extends "base.html" %} {% block title %}Login{% endblock %} {% block head %}
-<script src="/scripts/htmx-webauthn.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<script defer src="/scripts/htmx-webauthn.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 {% endblock %} {% block content %}
 <h1 class="text-xl">Login / Register</h1>
 {% match auth_state %} {% when AuthenticationState::Authenticated with (user) %}

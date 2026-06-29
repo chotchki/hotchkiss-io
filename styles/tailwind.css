@@ -15,11 +15,15 @@
 @font-face {
     font-family: 'Oswald';
     src: url(/vendor/fonts/Oswald-Regular.woff2) format('woff2');
+    /* swap: paint text immediately in the fallback, swap in the webfont when it
+       loads — no FOIT (invisible-text) blocking first paint. */
+    font-display: swap;
 }
 
 @font-face {
     font-family: 'Quattrocento';
     src: url(/vendor/fonts/Quattrocento-Regular.woff2) format('woff2');
+    font-display: swap;
 }
 
 /* Inline SVG icons — build.rs generates templates/partials/icons.html from the
