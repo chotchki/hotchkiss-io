@@ -109,6 +109,7 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] CJ.4 - Wire ingest + serve + all path_for callers through resolve_path
 - [x] CJ.5 - Beta mirror: rsync iterates roots
 - [ ] CJ.6 - Tests + docs + deploy
+- [ ] CJ.7 - Storage panel: show media roots + free space
 
 ## Backlog (not yet phased)
 

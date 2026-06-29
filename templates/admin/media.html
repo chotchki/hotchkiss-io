@@ -11,6 +11,30 @@
     <p class="text-sm text-navy/70 mb-4">Upload images, video (drop the AV1 + HEVC encodes
         together), or STL. Copy a reference and paste <code>![](/media/&lt;ref&gt;)</code> into any page.</p>
 
+    <!-- Storage roots + free space (Phase CJ) — so multi-drive placement isn't silent. -->
+    <section class="mb-6 rounded-lg border border-navy/20 bg-white/60 p-3">
+        <h3 class="font-display text-navy text-sm uppercase mb-2">Storage</h3>
+        <ul class="flex flex-col gap-1 text-xs">
+            {% for r in storage %}
+            <li class="flex items-center gap-2 flex-wrap">
+                <span class="font-mono break-all grow min-w-0">{{ r.path }}</span>
+                {% if r.is_write_target %}
+                <span
+                    class="bg-navy text-yellow px-1.5 py-0.5 rounded uppercase font-display whitespace-nowrap">writing here</span>
+                {% endif %}
+                {% if let Some(free) = r.free %}
+                <span class="text-navy/70 whitespace-nowrap">{{ free }} free{% if let Some(total) = r.total %} / {{ total }}{% endif %}</span>
+                {% if r.below_margin %}
+                <span class="text-red-700 whitespace-nowrap">full — skipped</span>
+                {% endif %}
+                {% else %}
+                <span class="text-red-700 whitespace-nowrap">unavailable (unmounted?)</span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+
     <!-- Drop zone (also click-to-select). media-upload.js POSTs to /admin/media/upload. -->
     <label id="media-drop" for="media-file-input"
         class="block border-2 border-dashed border-navy/40 rounded-lg p-8 text-center cursor-pointer mb-6 hover:bg-navy/5">

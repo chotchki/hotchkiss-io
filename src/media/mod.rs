@@ -146,6 +146,46 @@ impl MediaStore {
             committed: false,
         })
     }
+
+    /// Report each configured root + its free space (for the admin storage panel —
+    /// so multi-drive placement isn't silent). Does NOT create dirs: a root that
+    /// can't be statted (not yet created, or an unmounted external drive) is
+    /// reported with `free_bytes: None`. The write target is the first root with
+    /// free space above the margin (matching `pick_write_root`'s choice).
+    pub fn roots_status(&self) -> Vec<RootStatus> {
+        let mut write_target_taken = false;
+        self.roots
+            .iter()
+            .map(|root| {
+                let free = fs4::available_space(root).ok();
+                let total = fs4::total_space(root).ok();
+                let below_margin = free.is_some_and(|f| f <= self.min_free_bytes);
+                let is_write_target =
+                    !write_target_taken && free.is_some_and(|f| f > self.min_free_bytes);
+                if is_write_target {
+                    write_target_taken = true;
+                }
+                RootStatus {
+                    path: root.clone(),
+                    free_bytes: free,
+                    total_bytes: total,
+                    is_write_target,
+                    below_margin,
+                }
+            })
+            .collect()
+    }
+}
+
+/// One row of [`MediaStore::roots_status`] — a configured root + its free/total
+/// space and role. `free_bytes`/`total_bytes` are `None` when the root can't be
+/// statted (missing or unmounted).
+pub struct RootStatus {
+    pub path: PathBuf,
+    pub free_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+    pub is_write_target: bool,
+    pub below_margin: bool,
 }
 
 /// An in-progress streaming write into the [`MediaStore`]. Feed chunks with
@@ -374,6 +414,31 @@ mod tests {
         let full = MediaStore::new(roots, u64::MAX);
         assert!(full.store(b"nope").is_err());
         assert!(full.stage().await.is_err());
+    }
+
+    #[test]
+    fn roots_status_reports_free_space_unavailable_and_write_target() {
+        let a = tempdir().unwrap();
+        let missing = a.path().join("unmounted-drive");
+        // root[0] exists (real free space); root[1] doesn't (simulates unmounted).
+        let store = MediaStore::new(vec![a.path().to_path_buf(), missing], 0);
+        let status = store.roots_status();
+        assert_eq!(status.len(), 2);
+
+        // existing root: free reported, it's the write target (margin 0), not full
+        assert!(status[0].free_bytes.is_some());
+        assert!(status[0].is_write_target);
+        assert!(!status[0].below_margin);
+
+        // missing/unmounted root: unavailable, never a write target
+        assert!(status[1].free_bytes.is_none());
+        assert!(!status[1].is_write_target);
+
+        // an impossibly-high margin → the existing root reads as full + no write target
+        let full = MediaStore::new(vec![a.path().to_path_buf()], u64::MAX);
+        let s = full.roots_status();
+        assert!(s[0].below_margin);
+        assert!(!s[0].is_write_target);
     }
 
     #[test]

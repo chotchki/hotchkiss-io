@@ -38,6 +38,18 @@ pub struct MediaLibraryTemplate {
     pub top_bar: TopBar,
     pub auth_state: AuthenticationState,
     pub cards: Vec<MediaCard>,
+    pub storage: Vec<StorageRow>,
+}
+
+/// A row of the storage panel — a configured media root + its free/total space
+/// (humanized) and role. `free`/`total` are `None` when the root is unavailable
+/// (missing or unmounted).
+pub struct StorageRow {
+    pub path: String,
+    pub free: Option<String>,
+    pub total: Option<String>,
+    pub is_write_target: bool,
+    pub below_margin: bool,
 }
 
 pub struct MediaCard {
@@ -107,10 +119,26 @@ pub async fn show_media_library(
             share_url_key,
         });
     }
+    // Storage panel — each configured root + its free space, so multi-drive
+    // placement isn't silent (which one's being written to, which are full/offline).
+    let storage = state
+        .media_store
+        .roots_status()
+        .into_iter()
+        .map(|s| StorageRow {
+            path: s.path.to_string_lossy().into_owned(),
+            free: s.free_bytes.map(|b| format_bytes(b as i64)),
+            total: s.total_bytes.map(|b| format_bytes(b as i64)),
+            is_write_target: s.is_write_target,
+            below_margin: s.below_margin,
+        })
+        .collect();
+
     Ok(HtmlTemplate(MediaLibraryTemplate {
         top_bar: TopBar::create(&state.pool, "admin").await?,
         auth_state: session_data.auth_state,
         cards,
+        storage,
     })
     .into_response())
 }
