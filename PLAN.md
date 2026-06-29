@@ -51,7 +51,7 @@ Dev-HTTPS strategy: dev runs as a debug build, which already routes ACME at LE s
 
 See SPEC.md "Portfolio — the three pillars". The landing page is the connective tissue: orient a visitor in seconds, route to the three pillars (Software / 3D / Resume).
 
-- [ ] 13.0 - Phase exit: a visitor hitting `/` understands who chotchki is within seconds and can reach all three pillars (Software / 3D / Resume); the layout is clean on a 390px phone.
+- [ ] 13.0 - Phase exit: a visitor grasps chotchki + reaches all three pillars
 - [ ] 13.1 - Decide landing-page IA: hero (name + one-line value prop + what I do), three pillar doors (Software / 3D / Resume), links out (GitHub, contact/email). Wireframe it in SPEC.
 - [ ] 13.2 - Implement the home page: replace the `/`→first-content-page redirect with a real landing template (or designate a landing content_page). Hand-rolled Tailwind, mobile-first.
 - [ ] 13.3 - Top-nav surfaces the three pillars; verify it doesn't overflow at 390px (the Phase-10 dogfood nav fix — confirm it already shipped or land it here).
@@ -115,6 +115,11 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] CK.1 - media-upload.js: XHR upload + progress bar (drop-zone + add-encode)
 - [x] CK.2 - editor-support.js: XHR upload + progress for inline media drop
 - [x] CK.3 - CK tests + docs + deploy
+## Phase CM - CM - Scrub career-private docs + rewrite history for public re-mirror
+- [ ] CM.0 - Phase exit: docs de-personalized + history rewritten clean for public re-mirror
+- [ ] CM.1 - De-personalize SPEC.md + PLAN.md (remove employment-context; keep product spec); commit
+- [ ] CM.2 - Rewrite history (git-filter-repo replace-text + replace-message); verify clean + code unchanged
+- [ ] CM.3 - Push gate: public-mirror branch/tag scope + mini reconciliation (deploy-aware)
 
 ## Backlog (not yet phased)
 

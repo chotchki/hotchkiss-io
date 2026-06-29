@@ -4,7 +4,7 @@ Meta Note: This project delivers the hotchkiss-io website so fundamentally this 
 
 ## Goals
 
-**This is a personal portfolio site.** Its job is to be the curated front door to chotchki's work, rather than a personal playground that happens to present me. Everything below is reprioritized around that reader.
+**This is a personal portfolio site.** Its job is to be the curated front door to chotchki's work — judged in seconds, then minutes — rather than a personal playground that happens to present me. Everything below is reprioritized around that reader.
 
 - **Audience:** a technical visitor evaluating chotchki's work. The landing page orients them fast and routes them to proof.
 - **Thesis:** Much of chotchki's depth comes from work that isn't publicly visible, so it can't be shown directly. The GitHub + 3D **side projects are the tangible, clickable proof of range** that compensates: public deliverables anyone can actually verify. The site's job is to make the two reinforce each other — depth from the background, evidence from the projects. The site itself is just one of those side projects: a decent artifact, not the headline.
