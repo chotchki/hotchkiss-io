@@ -78,25 +78,64 @@ impl MediaStore {
         self.resolve_path(sha_hex, None).is_some()
     }
 
-    /// Pick the write root: the first configured root with more than
-    /// `min_free_bytes` available (fill-in-order, so capacity spans drives). The
-    /// root dir is created if missing (free space is measured on its volume).
-    /// Errors only if EVERY root is below the margin. NOTE: an external root whose
-    /// drive is unmounted will report the underlying fs's space — keeping configured
-    /// roots mounted is the operator's job.
+    /// Probe a configured root WITHOUT creating anything. "Present" iff the root
+    /// directory already exists OR its parent does — a cleanly-unmounted external
+    /// volume is NEITHER (macOS removes the `/Volumes/<name>` entry on eject), so we
+    /// never `create_dir_all` a phantom mountpoint chain onto the boot disk (the M1
+    /// bug). Free/total are measured on the nearest existing path — the root, else
+    /// its parent (the same volume the leaf would be created on). `(present, free,
+    /// total)`.
+    ///
+    /// Residual: an UNCLEAN unmount can leave a stray `/Volumes/<name>` dir on boot,
+    /// which reads as present → writes land on boot until the free-space margin trips
+    /// and falls through. So configure a SUBDIR under each volume (not the mount
+    /// root) and keep the margin sane — the margin is the backstop against filling
+    /// the boot disk.
+    fn probe_root(root: &Path) -> (bool, Option<u64>, Option<u64>) {
+        let target = if root.exists() {
+            Some(root.to_path_buf())
+        } else {
+            root.parent().filter(|p| p.exists()).map(Path::to_path_buf)
+        };
+        match target {
+            Some(t) => (
+                true,
+                fs4::available_space(&t).ok(),
+                fs4::total_space(&t).ok(),
+            ),
+            None => (false, None, None),
+        }
+    }
+
+    /// Pick the write root: the first PRESENT root (its dir or parent exists — i.e.
+    /// the drive is mounted) with more than `min_free_bytes` free (fill-in-order, so
+    /// capacity spans drives). A not-present root (unmounted) or a per-root stat
+    /// failure is SKIPPED — uploads fall through to the next healthy root rather than
+    /// aborting (the L1 fix). The leaf dir is created downstream by the shard/staging
+    /// write, only ever under an existing parent — never here, and never a phantom
+    /// mountpoint. Errors only if NO root is ready with headroom.
     fn pick_write_root(&self) -> Result<PathBuf> {
+        let mut mounted = 0;
         for root in &self.roots {
-            fs::create_dir_all(root).with_context(|| format!("create media root {root:?}"))?;
-            let free =
-                fs4::available_space(root).with_context(|| format!("free space on {root:?}"))?;
-            if free > self.min_free_bytes {
-                return Ok(root.clone());
+            let (present, free, _) = Self::probe_root(root);
+            if !present {
+                tracing::debug!("media root {root:?} not present (drive unmounted?) — skipping");
+                continue;
+            }
+            mounted += 1;
+            match free {
+                Some(f) if f > self.min_free_bytes => return Ok(root.clone()),
+                Some(_) => tracing::debug!(
+                    "media root {root:?} below the {}-byte free margin — falling through",
+                    self.min_free_bytes
+                ),
+                None => tracing::error!("media root {root:?} present but un-statted — skipping"),
             }
         }
         bail!(
-            "all {} media root(s) are below the {}-byte free-space margin",
+            "no media root ready with > {} bytes free ({} configured, {mounted} mounted)",
+            self.min_free_bytes,
             self.roots.len(),
-            self.min_free_bytes
         );
     }
 
@@ -153,24 +192,22 @@ impl MediaStore {
     }
 
     /// Report each configured root + its free space (for the admin storage panel —
-    /// so multi-drive placement isn't silent). Does NOT create dirs: a root that
-    /// can't be statted (not yet created, or an unmounted external drive) is
-    /// reported with `free_bytes: None`. The write target is the first root with
-    /// free space above the margin. NOTE: this does NOT create dirs, whereas
-    /// `pick_write_root` currently `create_dir_all`s a missing root before statting
-    /// — so for a not-yet-created root the panel (here) shows it unavailable while
-    /// the writer would create + use it. Reconciling that (require-root-exists) is
-    /// a known follow-up.
+    /// so multi-drive placement isn't silent). Uses the SAME `probe_root` the writer
+    /// does, so the panel and `pick_write_root` always agree: a not-present root (an
+    /// unmounted external — neither it nor its parent exists) reports
+    /// `free_bytes: None` and is never the write target; the write target is the
+    /// first present root with free space above the margin — exactly what an upload
+    /// would pick. Creates nothing.
     pub fn roots_status(&self) -> Vec<RootStatus> {
         let mut write_target_taken = false;
         self.roots
             .iter()
             .map(|root| {
-                let free = fs4::available_space(root).ok();
-                let total = fs4::total_space(root).ok();
-                let below_margin = free.is_some_and(|f| f <= self.min_free_bytes);
-                let is_write_target =
-                    !write_target_taken && free.is_some_and(|f| f > self.min_free_bytes);
+                let (present, free, total) = Self::probe_root(root);
+                let below_margin = present && free.is_some_and(|f| f <= self.min_free_bytes);
+                let is_write_target = !write_target_taken
+                    && present
+                    && free.is_some_and(|f| f > self.min_free_bytes);
                 if is_write_target {
                     write_target_taken = true;
                 }
@@ -428,8 +465,10 @@ mod tests {
     #[test]
     fn roots_status_reports_free_space_unavailable_and_write_target() {
         let a = tempdir().unwrap();
-        let missing = a.path().join("unmounted-drive");
-        // root[0] exists (real free space); root[1] doesn't (simulates unmounted).
+        // Simulate a cleanly-unmounted external root: BOTH the root and its parent
+        // (the mount point) are absent, so probe_root reports it not-present.
+        let missing = a.path().join("ghost-volume").join("media");
+        // root[0] exists (real free space); root[1] is unmounted.
         let store = MediaStore::new(vec![a.path().to_path_buf(), missing], 0);
         let status = store.roots_status();
         assert_eq!(status.len(), 2);
@@ -448,6 +487,37 @@ mod tests {
         let s = full.roots_status();
         assert!(s[0].below_margin);
         assert!(!s[0].is_write_target);
+    }
+
+    #[test]
+    fn pick_write_root_skips_unmounted_and_never_materializes_a_phantom_root() {
+        let base = tempdir().unwrap();
+        // root[0] = an "unmounted external": the mount point (parent) is absent too,
+        // so the store must NEITHER pick it NOR create it on the host fs (M1).
+        let unmounted = base.path().join("Volumes-Ext").join("media");
+        // root[1] = a not-yet-created LOCAL dir whose PARENT exists (the default
+        // bootstrap case) — present, so it's the fall-through target and is created
+        // on first write.
+        let local_parent = base.path().join("app-support");
+        fs::create_dir_all(&local_parent).unwrap();
+        let local = local_parent.join("media");
+
+        let store = MediaStore::new(vec![unmounted.clone(), local.clone()], 0);
+
+        // L1 + M1: falls through the unmounted root to the local one...
+        let (_sha, root) = store.store(b"bytes").unwrap();
+        assert_eq!(root.as_path(), local.as_path(), "fell through unmounted → local");
+        // ...and NEVER materialized the unmounted mount point on the host fs.
+        assert!(
+            !base.path().join("Volumes-Ext").exists(),
+            "an unmounted root must not be created on the host filesystem"
+        );
+        assert!(local.exists(), "the local fall-through root is auto-created on write");
+
+        // roots_status agrees with the writer: unmounted unavailable, local writes.
+        let st = store.roots_status();
+        assert!(!st[0].is_write_target && st[0].free_bytes.is_none());
+        assert!(st[1].is_write_target && st[1].free_bytes.is_some());
     }
 
     #[test]

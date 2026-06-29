@@ -115,6 +115,12 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] CK.1 - media-upload.js: XHR upload + progress bar (drop-zone + add-encode)
 - [x] CK.2 - editor-support.js: XHR upload + progress for inline media drop
 - [x] CK.3 - CK tests + docs + deploy
+## Phase CL - Media review hardening
+- [ ] CL.0 - CL.0 - Phase exit: media review hardening (M1-M3, L1) shipped beta→prod
+- [x] CL.1 - CL.1 - M2: byte route nosniff + force-download active-content mimes (XSS)
+- [x] CL.2 - CL.2 - M3: resolve_path/pick_write_root off the async runtime (spawn_blocking)
+- [x] CL.3 - CL.3 - M1/L1: pick_write_root readiness (no phantom mountpoint) + per-root fall-through; roots_status shares the probe
+- [ ] CL.4 - CL.4 - Tests + docs + ship beta→prod
 
 ## Backlog (not yet phased)
 

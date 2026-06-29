@@ -133,6 +133,17 @@ registrable parent) so your existing prod passkey authenticates against beta.
    the media-URL HMAC key (`crypto_keys` id 2) so beta's url_keys match prod's
    (BZ.8 Stage 2c).
 
+   **Multi-drive media (`media_paths`):** it's an ordered list (uploads fill the
+   first root with free space, spilling to the next). Point each EXTERNAL root at a
+   **subdirectory** of the volume — `/Volumes/MyDrive/media`, NEVER the bare mount
+   root `/Volumes/MyDrive`. The app treats a root as a write target only when the
+   root or its parent exists, so a subdir lets it tell "drive mounted" from "drive
+   unmounted" (a clean eject removes `/Volumes/MyDrive`): an unmounted root is
+   skipped and uploads fall through to the next root instead of silently writing
+   onto the boot disk. Keep the boot/default media dir as the LAST root so it's the
+   fallback. `media_min_free_bytes` (default 10 GiB) is the per-root headroom and
+   the backstop if a drive is mid-unclean-unmount.
+
    No `static_ip` — beta is public, so (like prod) it discovers the public IP
    itself and its `DnsProviderService` keeps `beta.hotchkiss.io` pointed at it.
    Ports `8080`/`8443` coexist with prod's `80`/`443`. Beta deploys as a
