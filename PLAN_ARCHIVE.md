@@ -413,3 +413,14 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] CH.2 - Search: a GET search box on /blog (?q=) filtering posts by title + markdown. Decide mechanism — LIKE %q% is adequate at this scale (recommend); SQLite FTS5 (virtual table + sync triggers, ranked) is the noted upgrade if the corpus grows. Echo the query + a result count + a clear-search link; results render as the same cards; composes with ?page=N
 - [x] CH.3 - Tests + docs + deploy: integration tests (page boundaries + prev/next presence/omission, search hit/miss/empty-q, ?q=&page=N composition), an e2e mobile check that /blog paginates with no horizontal scroll; CLAUDE.md blog section update; beta→prod
 
+---
+
+## 2026-06-29
+
+## Phase CL - Media review hardening
+- [x] CL.0 - CL.0 - Phase exit: media review hardening (M1-M3, L1) shipped beta→prod
+- [x] CL.1 - CL.1 - M2: byte route nosniff + force-download active-content mimes (XSS)
+- [x] CL.2 - CL.2 - M3: resolve_path/pick_write_root off the async runtime (spawn_blocking)
+- [x] CL.3 - CL.3 - M1/L1: pick_write_root readiness (no phantom mountpoint) + per-root fall-through; roots_status shares the probe
+- [x] CL.4 - CL.4 - Tests + docs + ship beta→prod
+
