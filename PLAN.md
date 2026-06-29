@@ -117,8 +117,8 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] CK.3 - CK tests + docs + deploy
 ## Phase CM - CM - Scrub career-private docs + rewrite history for public re-mirror
 - [ ] CM.0 - Phase exit: docs de-personalized + history rewritten clean for public re-mirror
-- [ ] CM.1 - De-personalize SPEC.md + PLAN.md (remove employment-context; keep product spec); commit
-- [ ] CM.2 - Rewrite history (git-filter-repo replace-text + replace-message); verify clean + code unchanged
+- [x] CM.1 - De-personalize SPEC.md + PLAN.md (remove employment-context; keep product spec); commit
+- [x] CM.2 - Rewrite history (git-filter-repo replace-text + replace-message); verify clean + code unchanged
 - [ ] CM.3 - Push gate: public-mirror branch/tag scope + mini reconciliation (deploy-aware)
 
 ## Backlog (not yet phased)
