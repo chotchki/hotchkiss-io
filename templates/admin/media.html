@@ -60,6 +60,12 @@
             <div class="flex flex-col gap-1 mt-auto">
                 <button type="button" class="copy-ref text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
                     data-ref="{{ c.media_ref }}">Copy <code>![]()</code></button>
+                {% if let Some(key) = c.share_url_key %}
+                <button type="button" class="copy-link text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
+                    data-url-key="{{ key }}"
+                    title="Copy a direct, unguessable link to the file — for private sharing / download">Copy
+                    link</button>
+                {% endif %}
                 <div class="flex gap-1">
                     <button type="button"
                         class="rename-media grow text-xs bg-navy/80 hover:bg-navy text-div-grey px-2 py-1 rounded"

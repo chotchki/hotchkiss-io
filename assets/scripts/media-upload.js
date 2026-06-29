@@ -19,7 +19,7 @@
     if (drop) drop.classList.add("opacity-50", "pointer-events-none");
     fetch("/admin/media/upload", { method: "POST", body: fd })
       .then((r) =>
-        r.ok ? r.json() : r.text().then((t) => Promise.reject(t || r.status))
+        r.ok ? r.json() : r.text().then((t) => Promise.reject(t || r.status)),
       )
       .then(() => location.reload())
       .catch((e) => {
@@ -33,7 +33,9 @@
       e.preventDefault();
       drop.classList.add("bg-navy/10");
     });
-    drop.addEventListener("dragleave", () => drop.classList.remove("bg-navy/10"));
+    drop.addEventListener("dragleave", () =>
+      drop.classList.remove("bg-navy/10"),
+    );
     drop.addEventListener("drop", (e) => {
       e.preventDefault();
       drop.classList.remove("bg-navy/10");
@@ -55,7 +57,27 @@
         },
         () => {
           btn.textContent = "Copy failed";
-        }
+        },
+      );
+    });
+  });
+
+  // "Copy link": the ABSOLUTE /media/file/<url_key> URL — a direct, unguessable
+  // (HMAC-keyed) link to the bytes, for private sharing / download.
+  document.querySelectorAll(".copy-link").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const url = location.origin + "/media/file/" + btn.dataset.urlKey;
+      const original = btn.innerHTML;
+      navigator.clipboard.writeText(url).then(
+        () => {
+          btn.textContent = "Copied!";
+          setTimeout(() => {
+            btn.innerHTML = original;
+          }, 1200);
+        },
+        () => {
+          btn.textContent = "Copy failed";
+        },
       );
     });
   });
@@ -72,7 +94,9 @@
       setStatus("Adding encode…");
       fetch("/admin/media/" + id + "/encode", { method: "POST", body: fd })
         .then((r) =>
-          r.ok ? location.reload() : r.text().then((t) => Promise.reject(t || r.status))
+          r.ok
+            ? location.reload()
+            : r.text().then((t) => Promise.reject(t || r.status)),
         )
         .catch((e) => setStatus("Add failed: " + e));
     });
@@ -82,7 +106,10 @@
   document.querySelectorAll(".rename-media").forEach((btn) => {
     btn.addEventListener("click", () => {
       const id = btn.dataset.mediaId;
-      const next = window.prompt("Rename media (display title):", btn.dataset.title || "");
+      const next = window.prompt(
+        "Rename media (display title):",
+        btn.dataset.title || "",
+      );
       if (next === null) return;
       fetch("/admin/media/" + id + "/rename", {
         method: "POST",

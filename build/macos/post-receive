@@ -178,7 +178,7 @@ snapshot_prod_db_into_beta() {
     local beta_media="$HOME/Library/Application Support/io.hotchkiss.web.beta/media"
     if [[ -d "$prod_media" ]]; then
         mkdir -p "$beta_media"
-        rsync -a --ignore-existing "$prod_media/" "$beta_media/" \
+        rsync -a --ignore-existing --exclude='.staging/' "$prod_media/" "$beta_media/" \
             || echo "post-receive: media rsync prod->beta failed (non-fatal)" >&2
     fi
 

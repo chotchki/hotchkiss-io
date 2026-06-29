@@ -94,11 +94,13 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] CA.1 - api_keys schema + ApiKeyDao + HMAC-pepper hashing (crypto_keys id 3) + key generation (hio_<base64url>); unit tests
 - [x] CA.2 - Auth resolution in SessionData extractor: Authorization: Bearer (axum-extra TypedHeader) → live-key lookup → Authenticated(user) + stamp last_used; session fallback; integration test
 - [x] CA.3 - Admin UI /admin/api-keys: generate (label → key shown ONCE), list (label/created/last-used), revoke; admin-gated; CLAUDE.md docs
-## Phase CH - Blog pagination + search
-- [ ] CH.0 - Phase exit: /blog paginates (N newest per page, prev/next, no-JS, mobile) AND supports text search (?q= over title + body); the two compose (?q=…&page=N); server-rendered; tested; beta→prod
-- [x] CH.1 - Pagination: ContentPageDao gains count_children(parent) + a paged find (LIMIT/OFFSET on find_by_parent_newest_first); /blog?page=N (1-indexed, PAGE_SIZE const ~10); prev/next links at the bottom (no-JS, mobile, omitted at the ends); blog index handler + template. The Atom feed stays full (newest 50) — feed paging is out of scope
-- [x] CH.2 - Search: a GET search box on /blog (?q=) filtering posts by title + markdown. Decide mechanism — LIKE %q% is adequate at this scale (recommend); SQLite FTS5 (virtual table + sync triggers, ranked) is the noted upgrade if the corpus grows. Echo the query + a result count + a clear-search link; results render as the same cards; composes with ?page=N
-- [ ] CH.3 - Tests + docs + deploy: integration tests (page boundaries + prev/next presence/omission, search hit/miss/empty-q, ?q=&page=N composition), an e2e mobile check that /blog paginates with no horizontal scroll; CLAUDE.md blog section update; beta→prod
+## Phase CI - CI - Large-file streaming upload + shareable link
+- [ ] CI.0 - Phase exit: large-file streaming upload + shareable link
+- [x] CI.1 - MediaStore::store_stream (chunks → temp → atomic rename, incremental SHA-256)
+- [x] CI.2 - Stream the upload handlers (drop the Vec<u8> buffering)
+- [x] CI.3 - Graceful generic-file ingest → MediaKind::File
+- [x] CI.4 - Share-link UX in the media library
+- [ ] CI.5 - Tests + docs + deploy
 
 ## Backlog (not yet phased)
 

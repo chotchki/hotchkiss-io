@@ -52,6 +52,9 @@ pub struct MediaCard {
     pub variants: Vec<VariantRow>,
     /// Lowercased "ref title" for the client-side name filter.
     pub search: String,
+    /// First variant's HMAC `url_key` → the absolute `/media/file/<key>` direct
+    /// link, for "Copy link" (a private, unguessable share/download URL).
+    pub share_url_key: Option<String>,
 }
 
 pub struct VariantRow {
@@ -90,6 +93,8 @@ pub async fn show_media_library(
             .collect();
         let title = m.title.clone().unwrap_or_else(|| m.media_ref.clone());
         let search = title.to_lowercase();
+        // First variant's url_key → the absolute /media/file/<key> share link.
+        let share_url_key = variants.first().map(|v| v.url_key.clone());
         cards.push(MediaCard {
             media_id: m.media_id,
             media_ref: m.media_ref,
@@ -99,6 +104,7 @@ pub async fn show_media_library(
             play_html,
             variants: variant_rows,
             search,
+            share_url_key,
         });
     }
     Ok(HtmlTemplate(MediaLibraryTemplate {
@@ -125,25 +131,41 @@ pub async fn upload_media(
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<Response, AppError> {
-    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut ingested: Vec<(String, Probed, i64)> = Vec::new();
     let mut ref_input: Option<String> = None;
     let mut title: Option<String> = None;
+    let mut first_filename: Option<String> = None;
 
-    while let Some(field) = multipart
+    while let Some(mut field) = multipart
         .next_field()
         .await
         .map_err(|e| anyhow!("reading multipart: {e}"))?
     {
-        let name = field.name().unwrap_or("").to_string();
         if let Some(fname) = field.file_name().map(|s| s.to_string()) {
-            let bytes = field
-                .bytes()
+            // Stream the file straight to the content store (O(chunk) memory) —
+            // hashed + written as it arrives, NEVER buffered whole — then ffprobe
+            // the stored file. This is what lets a multi-GB upload work without
+            // OOMing the process (the old path slurped the field into a Vec<u8>).
+            let mut staged = state.media_store.stage().await?;
+            while let Some(chunk) = field
+                .chunk()
                 .await
-                .map_err(|e| anyhow!("reading uploaded file: {e}"))?;
-            if !bytes.is_empty() {
-                files.push((fname, bytes.to_vec()));
+                .map_err(|e| anyhow!("reading uploaded file: {e}"))?
+            {
+                staged.write_chunk(&chunk).await?;
             }
+            if staged.is_empty() {
+                continue; // empty part → drop it (the staged temp self-cleans)
+            }
+            let (sha, len) = staged.commit(&state.media_store).await?;
+            let probed =
+                probe_stored(state.media_store.clone(), sha.clone(), fname.clone()).await?;
+            if first_filename.is_none() {
+                first_filename = Some(fname);
+            }
+            ingested.push((sha, probed, len as i64));
         } else {
+            let name = field.name().unwrap_or("").to_string();
             let value = field.text().await.unwrap_or_default();
             match name.as_str() {
                 "media_ref" if !value.trim().is_empty() => ref_input = Some(value),
@@ -153,7 +175,7 @@ pub async fn upload_media(
         }
     }
 
-    if files.is_empty() {
+    if ingested.is_empty() {
         return Ok((StatusCode::BAD_REQUEST, "No files in the upload").into_response());
     }
 
@@ -164,18 +186,12 @@ pub async fn upload_media(
     let media_ref = uuid::Uuid::now_v7().simple().to_string();
     let title = title
         .or(ref_input)
-        .or_else(|| Some(strip_media_suffixes(&files[0].0)))
+        .or_else(|| first_filename.as_deref().map(strip_media_suffixes))
         .filter(|s| !s.trim().is_empty());
 
     let hmac_key = CryptoKey::get_or_create(&state.pool, MEDIA_HMAC_KEY_ID)
         .await?
         .key_value;
-
-    // Store + probe every file (off the runtime).
-    let mut ingested: Vec<(String, Probed, i64)> = Vec::with_capacity(files.len());
-    for (fname, bytes) in files {
-        ingested.push(store_and_probe(state.media_store.clone(), fname, bytes).await?);
-    }
 
     // The media row takes its kind + dims/duration from the first file.
     let first = &ingested[0].1;
@@ -229,28 +245,41 @@ pub async fn add_encode(
     let existing = MediaVariantDao::find_by_media_id(&state.pool, media_id).await?;
 
     let mut saw_file = false;
-    while let Some(field) = multipart
+    while let Some(mut field) = multipart
         .next_field()
         .await
         .map_err(|e| anyhow!("reading multipart: {e}"))?
     {
         if let Some(fname) = field.file_name().map(|s| s.to_string()) {
-            let bytes = field
-                .bytes()
+            let mut staged = state.media_store.stage().await?;
+            while let Some(chunk) = field
+                .chunk()
                 .await
-                .map_err(|e| anyhow!("reading uploaded file: {e}"))?;
-            if bytes.is_empty() {
+                .map_err(|e| anyhow!("reading uploaded file: {e}"))?
+            {
+                staged.write_chunk(&chunk).await?;
+            }
+            if staged.is_empty() {
                 continue;
             }
             saw_file = true;
-            let (sha, probed, len) =
-                store_and_probe(state.media_store.clone(), fname, bytes.to_vec()).await?;
-            // Dedup: the same bytes are already an encode of this item → no-op.
+            let (sha, len) = staged.commit(&state.media_store).await?;
+            // Dedup: the same bytes are already an encode of this item → no-op
+            // (commit already deduped the blob on disk; skip the metadata row).
             if existing.iter().any(|v| v.sha256 == sha) {
                 continue;
             }
-            create_variant(&state.pool, &hmac_key, media_id, sha, probed.mime, probed.codecs, len)
-                .await?;
+            let probed = probe_stored(state.media_store.clone(), sha.clone(), fname).await?;
+            create_variant(
+                &state.pool,
+                &hmac_key,
+                media_id,
+                sha,
+                probed.mime,
+                probed.codecs,
+                len as i64,
+            )
+            .await?;
         }
     }
 
@@ -293,21 +322,13 @@ pub async fn rename_media(
     Ok(htmx_refresh())
 }
 
-/// Store bytes content-addressed + ffprobe the stored file, off the async runtime.
-async fn store_and_probe(
-    store: MediaStore,
-    filename: String,
-    bytes: Vec<u8>,
-) -> Result<(String, Probed, i64)> {
-    let len = bytes.len() as i64;
-    let (sha, probed) = tokio::task::spawn_blocking(move || -> Result<_> {
-        let sha = store.store(&bytes)?;
-        let probed = probe(&store.path_for(&sha), &filename)?;
-        Ok((sha, probed))
-    })
-    .await
-    .map_err(|e| anyhow!("ingest task panicked: {e}"))??;
-    Ok((sha, probed, len))
+/// ffprobe an ALREADY-stored file (its bytes are on disk — storing now happens via
+/// streaming, [`MediaStore::stage`]). Just the typed-facts probe over the stored
+/// path, off the async runtime.
+async fn probe_stored(store: MediaStore, sha: String, filename: String) -> Result<Probed> {
+    tokio::task::spawn_blocking(move || probe(&store.path_for(&sha), &filename))
+        .await
+        .map_err(|e| anyhow!("probe task panicked: {e}"))?
 }
 
 async fn create_variant(

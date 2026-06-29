@@ -1217,6 +1217,82 @@ async fn media_upload_serve_and_embed_vertical() {
     assert_eq!(bad.status(), StatusCode::NOT_FOUND);
 }
 
+/// Phase CI: a LARGE, non-A/V upload streams to disk (multi-chunk, never buffered
+/// whole), ingests as `MediaKind::File` (ffprobe can't type it → graceful fallback,
+/// not a rejection), and serves back BYTE-FOR-BYTE from the HMAC share link. The
+/// ~3 MB size just exercises the chunked path — the RAM ceiling is the same code at
+/// any size. Needs ffprobe (the ingest probes); skips where absent.
+#[tokio::test]
+async fn media_streams_large_generic_file_and_serves_it_back() {
+    let has_ffprobe = std::process::Command::new("ffprobe")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !has_ffprobe {
+        eprintln!("skipping streaming-upload test: ffprobe not found");
+        return;
+    }
+
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // ~3 MB of deterministic non-media bytes — not an image/video/STL, so ffprobe
+    // can't type it and it must ingest as a generic File.
+    let payload: Vec<u8> = (0..3_000_000u32)
+        .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+        .collect();
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(payload.clone())
+            .file_name("demo-build.bin")
+            .mime_str("application/octet-stream")
+            .unwrap(),
+    );
+    let resp = admin
+        .post(server.url("/admin/media/upload"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "streaming upload should succeed");
+    let j: serde_json::Value = resp.json().await.unwrap();
+    let media_ref = j["media_ref"].as_str().expect("media_ref").to_string();
+
+    // It ingested as a generic File → the embed is a download <a>, not an img/video.
+    let embed = reqwest::get(server.url(&format!("/media/embed/{media_ref}")))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(embed.contains("<a "), "generic file embeds a download link: {embed}");
+    let url_key = embed
+        .split("/media/file/")
+        .nth(1)
+        .expect("embed carries a file url")
+        .split('"')
+        .next()
+        .unwrap()
+        .to_string();
+
+    // The share link serves the bytes back BYTE-FOR-BYTE (streaming write +
+    // ServeFile round-trip).
+    let served = reqwest::get(server.url(&format!("/media/file/{url_key}"))).await.unwrap();
+    assert_eq!(served.status(), StatusCode::OK);
+    let got = served.bytes().await.unwrap();
+    assert_eq!(got.len(), payload.len(), "served length matches uploaded");
+    assert_eq!(got.as_ref(), payload.as_slice(), "served bytes identical to uploaded");
+
+    // The library offers a "Copy link" affordance carrying that share url_key.
+    let lib = admin.get(server.url("/admin/media")).send().await.unwrap().text().await.unwrap();
+    assert!(lib.contains("copy-link"), "library offers a copy-link button");
+    assert!(lib.contains(&url_key), "library card carries the share url_key");
+}
+
 // ───────────────────────── Phase CB: unified feed + SEO ─────────────────────────
 
 #[tokio::test]

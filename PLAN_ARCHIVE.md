@@ -403,3 +403,13 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] CG.1 - transform() hardening: char-safe table slice (markdown.chars().skip(s).take(e-s), NOT byte &markdown[s..e]) + wrap transform in catch_unwind → on panic, log + return escaped-source fallback so a page/feed degrades, never crashes. Regression tests: a table after a smart-quote line + the netcat perl content → transform returns Ok
 - [x] CG.2 - CatchPanicLayer on the router (outermost) → any handler panic returns a 500 (styled if cheap) instead of a dropped connection; integration test (a debug-only panic route → 500, not a reset). CLAUDE.md note. Deploy beta→prod
 
+---
+
+## 2026-06-28
+
+## Phase CH - Blog pagination + search
+- [x] CH.0 - Phase exit: /blog paginates (N newest per page, prev/next, no-JS, mobile) AND supports text search (?q= over title + body); the two compose (?q=…&page=N); server-rendered; tested; beta→prod
+- [x] CH.1 - Pagination: ContentPageDao gains count_children(parent) + a paged find (LIMIT/OFFSET on find_by_parent_newest_first); /blog?page=N (1-indexed, PAGE_SIZE const ~10); prev/next links at the bottom (no-JS, mobile, omitted at the ends); blog index handler + template. The Atom feed stays full (newest 50) — feed paging is out of scope
+- [x] CH.2 - Search: a GET search box on /blog (?q=) filtering posts by title + markdown. Decide mechanism — LIKE %q% is adequate at this scale (recommend); SQLite FTS5 (virtual table + sync triggers, ranked) is the noted upgrade if the corpus grows. Echo the query + a result count + a clear-search link; results render as the same cards; composes with ?page=N
+- [x] CH.3 - Tests + docs + deploy: integration tests (page boundaries + prev/next presence/omission, search hit/miss/empty-q, ?q=&page=N composition), an e2e mobile check that /blog paginates with no horizontal scroll; CLAUDE.md blog section update; beta→prod
+

@@ -2375,7 +2375,7 @@ dependencies = [
 
 [[package]]
 name = "hotchkiss-io"
-version = "0.0.75"
+version = "0.0.76"
 dependencies = [
  "anyhow",
  "askama",
@@ -2407,6 +2407,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
+ "sha2",
  "sqlx",
  "strum",
  "tempfile",

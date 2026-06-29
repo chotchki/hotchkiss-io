@@ -78,10 +78,35 @@ pub fn probe(path: &Path, original_name: &str) -> Result<Probed> {
         .arg(path)
         .output()
         .map_err(|e| anyhow!("failed to spawn ffprobe ({bin}): {e}"))?;
+    // ffprobe RAN but couldn't read it as media (non-zero exit) → a generic file
+    // (zip / app / binary / …): store it as a downloadable MediaKind::File rather
+    // than rejecting the upload. (A missing or un-spawnable ffprobe still errors
+    // loudly above — that's a deploy misconfig, not a non-media file.)
     if !out.status.success() {
-        bail!("ffprobe failed: {}", String::from_utf8_lossy(&out.stderr).trim());
+        return Ok(generic_file(original_name));
     }
-    parse_ffprobe(&String::from_utf8_lossy(&out.stdout))
+    // Parsed, but no usable A/V stream / an unsupported codec → also a generic file.
+    Ok(parse_ffprobe(&String::from_utf8_lossy(&out.stdout))
+        .unwrap_or_else(|_| generic_file(original_name)))
+}
+
+/// A non-A/V upload (ffprobe can't type it) → a downloadable generic file. The mime
+/// is guessed from the filename extension (octet-stream fallback) so the byte route
+/// serves a sensible Content-Type — the browser downloads an archive, inlines a PDF,
+/// etc. — instead of the upload being rejected.
+fn generic_file(original_name: &str) -> Probed {
+    let mime = mime_guess::from_path(original_name)
+        .first_raw()
+        .unwrap_or("application/octet-stream")
+        .to_string();
+    Probed {
+        kind: MediaKind::File,
+        mime,
+        codecs: None,
+        width: None,
+        height: None,
+        duration_ms: None,
+    }
 }
 
 #[derive(Deserialize)]
@@ -211,6 +236,21 @@ mod tests {
         assert_eq!(p.kind, MediaKind::Image);
         assert_eq!(p.mime, "image/png");
         assert_eq!(p.codecs, None);
+    }
+
+    #[test]
+    fn generic_file_is_downloadable_file_kind_with_guessed_mime() {
+        // A non-A/V upload → MediaKind::File, mime guessed from the extension.
+        let zip = generic_file("demo-build.zip");
+        assert_eq!(zip.kind, MediaKind::File);
+        assert_eq!(zip.mime, "application/zip");
+        assert!(zip.codecs.is_none());
+        assert_eq!((zip.width, zip.height, zip.duration_ms), (None, None, None));
+
+        // Unknown extension → octet-stream (browser downloads it).
+        let unknown = generic_file("mystery.zzz");
+        assert_eq!(unknown.kind, MediaKind::File);
+        assert_eq!(unknown.mime, "application/octet-stream");
     }
 
     #[test]

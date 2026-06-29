@@ -11,8 +11,10 @@ pub mod probe;
 
 use anyhow::{Context, Result};
 use openssl::sha::sha256;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
+use tokio::io::AsyncWriteExt;
 
 #[derive(Clone, Debug)]
 pub struct MediaStore {
@@ -59,6 +61,106 @@ impl MediaStore {
         fs::write(&tmp, bytes).with_context(|| format!("write temp media file {tmp:?}"))?;
         fs::rename(&tmp, &dest).with_context(|| format!("rename media into place {dest:?}"))?;
         Ok(sha_hex)
+    }
+
+    /// Begin a STREAMING store — for uploads too large to hold in memory. Bytes
+    /// are written chunk-by-chunk to a temp file under `<root>/.staging/` (same
+    /// filesystem as the shards, so the final move is an atomic rename) and hashed
+    /// incrementally; [`StagedBlob::commit`] finalizes the SHA-256 and renames into
+    /// the content-addressed slot (or dedupes if already present). Memory stays
+    /// O(chunk) regardless of file size — the fix for the old `store(&[u8])` path
+    /// that buffered the whole upload in RAM.
+    pub async fn stage(&self) -> Result<StagedBlob> {
+        let staging = self.root.join(".staging");
+        tokio::fs::create_dir_all(&staging)
+            .await
+            .with_context(|| format!("create media staging dir {staging:?}"))?;
+        // Random temp name — the SHA isn't known until the stream ends.
+        let tmp = staging.join(format!("up-{}", uuid::Uuid::now_v7().simple()));
+        let file = tokio::fs::File::create(&tmp)
+            .await
+            .with_context(|| format!("create temp media file {tmp:?}"))?;
+        Ok(StagedBlob {
+            tmp,
+            file: Some(file),
+            hasher: Sha256::new(),
+            len: 0,
+            committed: false,
+        })
+    }
+}
+
+/// An in-progress streaming write into the [`MediaStore`]. Feed chunks with
+/// [`write_chunk`](Self::write_chunk), then [`commit`](Self::commit). If it's
+/// dropped WITHOUT committing (a failed/aborted upload), the temp file is
+/// best-effort removed — a partial transfer never lingers in `.staging` or
+/// half-populates the content-addressed store.
+pub struct StagedBlob {
+    tmp: PathBuf,
+    file: Option<tokio::fs::File>,
+    hasher: Sha256,
+    len: u64,
+    committed: bool,
+}
+
+impl StagedBlob {
+    /// Append one chunk: hash it + write it through. O(chunk) memory.
+    pub async fn write_chunk(&mut self, chunk: &[u8]) -> Result<()> {
+        let file = self.file.as_mut().expect("write_chunk after commit");
+        self.hasher.update(chunk);
+        file.write_all(chunk)
+            .await
+            .with_context(|| format!("write temp media file {:?}", self.tmp))?;
+        self.len += chunk.len() as u64;
+        Ok(())
+    }
+
+    /// True until the first byte is written — lets a caller skip an empty file part
+    /// without committing a (zero-byte) blob.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Finalize the SHA-256, fsync, then atomically rename the temp into the
+    /// content-addressed slot — or, if identical content is already stored, drop
+    /// the temp (dedupe). Returns `(sha_hex, total_bytes)`.
+    pub async fn commit(mut self, store: &MediaStore) -> Result<(String, u64)> {
+        if let Some(mut file) = self.file.take() {
+            file.flush().await.context("flush temp media file")?;
+            file.sync_all().await.context("fsync temp media file")?;
+            // `file` drops here → the fd is closed before the rename.
+        }
+        let sha_hex: String = self
+            .hasher
+            .finalize_reset()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let dest = store.path_for(&sha_hex);
+        if dest.is_file() {
+            // identical content already present → dedupe, drop the temp.
+            let _ = tokio::fs::remove_file(&self.tmp).await;
+        } else {
+            let dir = dest.parent().expect("path_for always has a parent");
+            tokio::fs::create_dir_all(dir)
+                .await
+                .with_context(|| format!("create media shard dir {dir:?}"))?;
+            tokio::fs::rename(&self.tmp, &dest)
+                .await
+                .with_context(|| format!("rename media into place {dest:?}"))?;
+        }
+        self.committed = true;
+        Ok((sha_hex, self.len))
+    }
+}
+
+impl Drop for StagedBlob {
+    fn drop(&mut self) {
+        if !self.committed {
+            // Best-effort: an aborted/failed upload leaves nothing behind. Sync fs
+            // here (Drop can't be async) — the temp is tiny to unlink.
+            let _ = std::fs::remove_file(&self.tmp);
+        }
     }
 }
 
@@ -121,6 +223,45 @@ mod tests {
 
         // different content → different hash
         assert_ne!(sha, store.store(b"different bytes").unwrap());
+    }
+
+    #[tokio::test]
+    async fn store_stream_hashes_dedupes_and_cleans_up() {
+        let dir = tempdir().unwrap();
+        let store = MediaStore::new(dir.path().to_path_buf());
+        let staging = dir.path().join(".staging");
+
+        // streamed in chunks → one content-addressed file holding the exact bytes
+        let mut staged = store.stage().await.unwrap();
+        staged.write_chunk(b"hello ").await.unwrap();
+        staged.write_chunk(b"world").await.unwrap();
+        let (sha, len) = staged.commit(&store).await.unwrap();
+
+        assert_eq!(len, 11);
+        // CRITICAL: the streaming sha2 digest equals the openssl one-shot, so
+        // content-addressed dedup is consistent across `store` and `stage`.
+        assert_eq!(sha, hex_sha256(b"hello world"));
+        assert!(store.exists(&sha));
+        assert_eq!(fs::read(store.path_for(&sha)).unwrap(), b"hello world");
+
+        // dedupe: the same content streamed again → same sha, no error
+        let mut again = store.stage().await.unwrap();
+        again.write_chunk(b"hello world").await.unwrap();
+        let (sha_again, _) = again.commit(&store).await.unwrap();
+        assert_eq!(sha, sha_again);
+
+        // committed temps leave nothing in .staging
+        let leftover: Vec<_> = fs::read_dir(&staging).unwrap().filter_map(|e| e.ok()).collect();
+        assert!(leftover.is_empty(), "staging not clean after commit: {leftover:?}");
+
+        // abort: dropping without commit removes the temp
+        {
+            let mut abandoned = store.stage().await.unwrap();
+            abandoned.write_chunk(b"abandoned upload").await.unwrap();
+            // dropped here without commit
+        }
+        let after_abort: Vec<_> = fs::read_dir(&staging).unwrap().filter_map(|e| e.ok()).collect();
+        assert!(after_abort.is_empty(), "aborted temp not cleaned: {after_abort:?}");
     }
 
     #[test]
