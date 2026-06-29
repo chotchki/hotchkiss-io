@@ -10,20 +10,51 @@
     if (status) status.textContent = msg;
   }
 
+  // Drive the <progress> bar + status text from xhrUpload's callback.
+  function showProgress(phase, loaded, total) {
+    const bar = document.getElementById("media-upload-bar");
+    if (phase === "uploading") {
+      const pct = total ? Math.round((loaded / total) * 100) : 0;
+      if (bar) {
+        bar.classList.remove("hidden");
+        bar.value = pct;
+      }
+      setStatus(
+        "Uploading " +
+          pct +
+          "% — " +
+          UploadProgress.fmtBytes(loaded) +
+          " / " +
+          UploadProgress.fmtBytes(total),
+      );
+    } else {
+      if (bar) {
+        bar.classList.remove("hidden");
+        bar.removeAttribute("value"); // indeterminate while the server ingests
+      }
+      setStatus("Processing…");
+    }
+  }
+
+  function hideBar() {
+    const bar = document.getElementById("media-upload-bar");
+    if (bar) {
+      bar.classList.add("hidden");
+      bar.value = 0;
+    }
+  }
+
   function upload(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) return;
     const fd = new FormData();
     for (const f of files) fd.append("file", f, f.name);
-    setStatus("Uploading " + files.length + " file(s)…");
     if (drop) drop.classList.add("opacity-50", "pointer-events-none");
-    fetch("/admin/media/upload", { method: "POST", body: fd })
-      .then((r) =>
-        r.ok ? r.json() : r.text().then((t) => Promise.reject(t || r.status)),
-      )
+    UploadProgress.xhrUpload("/admin/media/upload", fd, showProgress)
       .then(() => location.reload())
       .catch((e) => {
         setStatus("Upload failed: " + e);
+        hideBar();
         if (drop) drop.classList.remove("opacity-50", "pointer-events-none");
       });
   }
@@ -91,14 +122,16 @@
       if (!files.length) return;
       const fd = new FormData();
       for (const f of files) fd.append("file", f, f.name);
-      setStatus("Adding encode…");
-      fetch("/admin/media/" + id + "/encode", { method: "POST", body: fd })
-        .then((r) =>
-          r.ok
-            ? location.reload()
-            : r.text().then((t) => Promise.reject(t || r.status)),
-        )
-        .catch((e) => setStatus("Add failed: " + e));
+      UploadProgress.xhrUpload(
+        "/admin/media/" + id + "/encode",
+        fd,
+        showProgress,
+      )
+        .then(() => location.reload())
+        .catch((e) => {
+          setStatus("Add failed: " + e);
+          hideBar();
+        });
     });
   });
 

@@ -2,6 +2,7 @@
 {% block title %}Media Library{% endblock %}
 
 {% block head %}
+<script defer src="/scripts/upload-progress.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 <script defer src="/scripts/media-upload.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 {% endblock %}
 
@@ -43,6 +44,7 @@
         <p class="text-navy/60 text-xs mt-1">For a video, drop every encode (AV1 + HEVC) in one go so they group into one item.</p>
         <input id="media-file-input" type="file" multiple class="hidden" />
         <p id="media-upload-status" class="text-navy mt-2 text-sm"></p>
+        <progress id="media-upload-bar" max="100" value="0" class="hidden w-full mt-2"></progress>
     </label>
 
     <input id="media-search" type="search" placeholder="Search media by name…" autocomplete="off"

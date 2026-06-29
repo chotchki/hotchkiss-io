@@ -20,6 +20,7 @@
 <script defer src="/vendor/highlightjs/highlight.min.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 <script defer src="/scripts/code-highlight.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 {% if auth_state.is_admin() && edit %}
+<script src="/scripts/upload-progress.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 <script src="/scripts/editor-support.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 {% endif %}
 {% endblock %}
@@ -55,6 +56,7 @@
         <input type="file" id="media-upload-input" class="hidden" multiple />
       </label>
       <span id="media-upload-status" class="text-xs text-navy/50 normal-case font-normal"></span>
+      <progress id="media-upload-bar" max="100" value="0" class="hidden align-middle w-32"></progress>
     </span>
     <textarea hx-patch="/pages/preview" hx-swap="innerHTML" hx-target="#rendered" hx-trigger="keyup,change changed delay:500ms" hx-sync="closest form:abort" id="page_markdown" name="page_markdown"
       class="border border-navy/30 rounded px-3 py-2 w-full min-h-64 font-mono text-sm">{{page.page_markdown}}</textarea>

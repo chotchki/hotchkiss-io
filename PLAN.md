@@ -102,14 +102,19 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] CI.4 - Share-link UX in the media library
 - [x] CI.5 - Tests + docs + deploy
 ## Phase CJ - Multi-drive media storage
-- [ ] CJ.0 - Phase exit: multi-drive media storage
+- [x] CJ.0 - Phase exit: multi-drive media storage
 - [x] CJ.1 - Config: media_paths ordered list + free-space headroom
 - [x] CJ.2 - Schema: media_variant.storage_root hint column (migration 0017)
 - [x] CJ.3 - MediaStore multi-root: resolve (hint+scan), pick-write-root by free space
 - [x] CJ.4 - Wire ingest + serve + all path_for callers through resolve_path
 - [x] CJ.5 - Beta mirror: rsync iterates roots
-- [ ] CJ.6 - Tests + docs + deploy
-- [ ] CJ.7 - Storage panel: show media roots + free space
+- [x] CJ.6 - Tests + docs + deploy
+- [x] CJ.7 - Storage panel: show media roots + free space
+## Phase CK - Upload progress
+- [ ] CK.0 - Phase exit: media uploads show real progress
+- [x] CK.1 - media-upload.js: XHR upload + progress bar (drop-zone + add-encode)
+- [x] CK.2 - editor-support.js: XHR upload + progress for inline media drop
+- [ ] CK.3 - CK tests + docs + deploy
 
 ## Backlog (not yet phased)
 
@@ -158,3 +163,4 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - **Richer interactive analytics dashboard (port recon-gen's d3 pipeline)** — added 2026-06-25.
 - **Embed widgets: live-demo iframe + source-code iframe (deep-link line ranges, no copy-paste)** — added 2026-06-26. Two forms. (1) **Page iframe** embeds a live demo app inline (e.g. `recon-gen-spec.hotchkiss.io`) so a project page shows the REAL thing, not a screenshot — surfaced from the recon-gen draft's "I'd really like an Iframe to the demo app instead" note. (2) **Source-code iframe** takes a deep-link WITH a line range (the recon-gen page already links `…/schema.py#L2934-L2953`) and renders the actual source at those lines inline, so a snippet is never copy-pasted into a page. DRY — the repo is the single source, the pasted copy is what drifts (the recon-gen draft today pastes the SQL AND deep-links it, exactly the duplication this kills). Both reusable across every project page (extends the "deep-link + show the snippet" pattern). Open Qs: render target (GitHub's own embed vs raw-fetch + highlight.js into our own block vs an iframe to a `/source/<repo>/<path>?lines=` route on the site), pinning the ref so line ranges don't rot, caching and private-repo handling.
 - **Optional: re-parallelize the browser e2e via a shared WebAuthn fixture. They currently serialize on E2E_LOCK (test isolation) because concurrent passkey ceremonies race. A pre-registered-credential fixture (one virtual authenticator + seeded admin reused across tests) could let independent assertions run in parallel again. Only worth it if the serial ~6s run becomes a bottleneck.** — added 2026-06-28.
+- **Backlog: client-side source hash (File API) → pre-flight dedup + integrity** — added 2026-06-29.
