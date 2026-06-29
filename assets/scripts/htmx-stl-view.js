@@ -187,7 +187,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
         var stl_objects = content.querySelectorAll(".stl-view");
 
         for (const stl_o of stl_objects) {
-            stl_o.innerHTML = '<p class="text-xl">Loading STL... <i class="fa-solid fa-spinner animate-spin"></i></p>';
+            stl_o.innerHTML = '<p class="text-xl">Loading STL... <span class="stl-spinner"></span></p>';
 
             const stl_url = stl_o.dataset.filename;
 

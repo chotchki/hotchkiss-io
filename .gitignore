@@ -2,6 +2,7 @@
 /target
 .DS_Store
 assets/styles/main.css
+templates/partials/icons.html
 .env
 .claude/plan-bridge-state.json
 .claude/plan-bridge-state.json.lock

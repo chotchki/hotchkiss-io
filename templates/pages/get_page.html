@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "partials/icons.html" as icons %}
 {% block title %}{{page.display_title()}}{% endblock %}
 {% block meta %}{% include "partials/seo_meta.html" %}{% endblock %}
 
@@ -31,9 +32,9 @@
   <h2 class="text-2xl font-display text-navy">Page Editor</h2>
   <div class="grow"></div>
   <button hx-delete="/pages/{{page_path}}" hx-confirm="Are you sure you wish to delete this page?" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 rounded text-div-grey text-sm" type="submit">
-    Delete <i class="fa-solid fa-trash-can"></i></button>
+    Delete {% call icons::trash_can() %}</button>
   <button class="px-3 py-1.5 bg-navy hover:bg-navy/90 rounded text-div-grey text-sm" type="submit" form="update-page">
-    Save <i class="fa-solid fa-floppy-disk"></i></button>
+    Save {% call icons::floppy_disk() %}</button>
 </div>
 
 <form id="update-page" hx-put="/pages/{{page_path}}" class="flex flex-col gap-4 bg-white/60 border border-navy/20 rounded-lg p-4">
@@ -49,10 +50,10 @@
   <label class="flex flex-col gap-1">
     <span class="text-sm font-display text-navy uppercase flex flex-row items-center gap-3">
       Markdown
-      <button type="button" onclick="addLink()" class="text-navy/70 hover:text-navy" title="Insert link"><i class="fa-solid fa-link"></i></button>
-      <button type="button" onclick="addImage()" class="text-navy/70 hover:text-navy" title="Insert image"><i class="fa-solid fa-image"></i></button>
+      <button type="button" onclick="addLink()" class="text-navy/70 hover:text-navy" title="Insert link">{% call icons::link() %}</button>
+      <button type="button" onclick="addImage()" class="text-navy/70 hover:text-navy" title="Insert image">{% call icons::image() %}</button>
       <label class="text-navy/70 hover:text-navy cursor-pointer" title="Upload media (image/video/STL) and insert it — or just drag files onto the box">
-        <i class="fa-solid fa-photo-film"></i>
+        {% call icons::photo_film() %}
         <input type="file" id="media-upload-input" class="hidden" multiple />
       </label>
       <span id="media-upload-status" class="text-xs text-navy/50 normal-case font-normal"></span>
@@ -103,7 +104,7 @@
   {% endif %}
   <form hx-post="/pages/{{page_path}}" class="flex flex-row gap-2 mt-2">
     <input class="border border-navy/30 rounded px-3 py-2 grow" name="page_title" id="page_title" type="text" placeholder="New child page title" required />
-    <button class="px-3 py-2 bg-navy hover:bg-navy/90 rounded text-div-grey text-sm" type="submit"><i class="fa-solid fa-plus"></i> Add</button>
+    <button class="px-3 py-2 bg-navy hover:bg-navy/90 rounded text-div-grey text-sm" type="submit">{% call icons::plus() %} Add</button>
   </form>
 </div>
 
@@ -111,7 +112,7 @@
 <h3 class="text-lg font-display text-navy mb-2">Preview</h3>
 {% else if auth_state.is_admin() %}
 <div class="mb-4 flex flex-row-reverse">
-  <a href="?edit=1" class="px-2 py-1 bg-navy rounded-sm text-div-grey text-sm">Edit this page <i class="fa-solid fa-pen"></i></a>
+  <a href="?edit=1" class="px-2 py-1 bg-navy rounded-sm text-div-grey text-sm">Edit this page {% call icons::pen() %}</a>
 </div>
 {% endif %}
 {% if pages_path.len() > 2 %}
@@ -125,7 +126,7 @@
 {% endif %}
 {% if let Some(pdf) = pdf_url %}
 <div class="mb-3 flex flex-row-reverse">
-  <a href="{{pdf}}" class="px-3 py-1.5 bg-navy hover:bg-navy/90 rounded text-div-grey text-sm">Download PDF <i class="fa-solid fa-file-pdf" aria-hidden="true"></i></a>
+  <a href="{{pdf}}" class="px-3 py-1.5 bg-navy hover:bg-navy/90 rounded text-div-grey text-sm">Download PDF {% call icons::file_pdf() %}</a>
 </div>
 {% endif %}
 <h1 class="font-display text-3xl md:text-4xl font-bold text-navy leading-tight mt-2 mb-1">{{page.display_title()}}</h1>
@@ -139,7 +140,7 @@
 <nav aria-label="Post navigation" class="mt-10 pt-6 border-t border-navy/20 grid grid-cols-1 sm:grid-cols-2 gap-4">
   {% if let Some(prev) = prev_post %}
   <a href="/blog/{{prev.page_name}}" class="block border-2 border-navy rounded-md bg-body-grey p-4 hover:opacity-90">
-    <p class="text-xs uppercase tracking-wide text-navy/60"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Previous</p>
+    <p class="text-xs uppercase tracking-wide text-navy/60">{% call icons::arrow_left() %} Previous</p>
     <p class="text-sm text-navy/70 mt-1">{{prev.page_creation_date}}</p>
     <p class="font-display text-navy underline">{{prev.title}}</p>
   </a>
@@ -148,7 +149,7 @@
   {% endif %}
   {% if let Some(next) = next_post %}
   <a href="/blog/{{next.page_name}}" class="block border-2 border-navy rounded-md bg-body-grey p-4 hover:opacity-90 text-right">
-    <p class="text-xs uppercase tracking-wide text-navy/60">Next <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></p>
+    <p class="text-xs uppercase tracking-wide text-navy/60">Next {% call icons::arrow_right() %}</p>
     <p class="text-sm text-navy/70 mt-1">{{next.page_creation_date}}</p>
     <p class="font-display text-navy underline">{{next.title}}</p>
   </a>

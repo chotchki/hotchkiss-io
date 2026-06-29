@@ -1,3 +1,4 @@
+{% import "partials/icons.html" as icons %}
 {# Shared search box for the /blog + /projects listings. A plain GET form so it
    works with no JS; submits ?q= to `pagination.base_path`. Echoes the active
    query + a result count, with a Clear link back to the unfiltered listing. #}
@@ -5,7 +6,7 @@
     <input class="border border-navy px-2 grow min-w-0 rounded-sm" type="search" name="q"
         value="{{ pagination.search }}" placeholder="Search…" aria-label="Search" />
     <button class="px-3 py-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">
-        <i class="fa-solid fa-magnifying-glass"></i> Search
+        {% call icons::magnifying_glass() %} Search
     </button>
     {% if pagination.is_search() %}
     <a href="{{ pagination.base_path }}" class="px-3 py-2 flex items-center text-navy underline">Clear</a>

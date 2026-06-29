@@ -22,6 +22,38 @@
     src: url(/vendor/fonts/Quattrocento-Regular.woff2) format('woff2');
 }
 
+/* Inline SVG icons — build.rs generates templates/partials/icons.html from the
+ * vendored Font Awesome Free solid SVGs (build/svg-icons/). Sized + colored to
+ * inherit like the old <i> font icons: height 1em, width auto (so a non-square
+ * viewBox keeps its aspect), fill currentColor. Wrap a call in a sized/recolored
+ * <span> for the few bigger icons (text-3xl/text-5xl/text-yellow). */
+.icon {
+    display: inline-block;
+    height: 1em;
+    width: auto;
+    vertical-align: -0.125em;
+    fill: currentColor;
+}
+
+/* STL viewer loading spinner (assets/scripts/htmx-stl-view.js injects a
+ * <span class="stl-spinner">). Self-contained CSS ring so it doesn't depend on
+ * Tailwind scanning JS for animate-spin. */
+.stl-spinner {
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: stl-spin 0.7s linear infinite;
+    vertical-align: -0.15em;
+}
+@keyframes stl-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 /* Diagram click-to-zoom lightbox (assets/scripts/diagram-zoom.js).
  * Pattern stolen from recon-gen's qs-lightbox; site navy/yellow palette. */
 .diagram-lightbox {

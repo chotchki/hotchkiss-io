@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "partials/icons.html" as icons %}
 {% block title %}404 — Which cat is guilty?{% endblock %}
 
 {% block content %}
@@ -82,7 +83,7 @@
 
     <a href="/"
         class="inline-flex items-center gap-2 rounded bg-navy px-5 py-2.5 font-display text-sm uppercase text-yellow hover:bg-navy/90">
-        <i class="fa-solid fa-house"></i> Back to home
+        {% call icons::house() %} Back to home
     </a>
 </div>
 {% endblock %}

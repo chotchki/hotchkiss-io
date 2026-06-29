@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "partials/icons.html" as icons %}
 
 {% block title %}Projects{% endblock %}
 {% block meta %}{% include "partials/seo_meta.html" %}{% endblock %}
@@ -13,7 +14,7 @@
 <form hx-post="/pages/projects" class="mb-4 flex flex-row gap-2">
     <input class="border border-navy px-2 grow min-w-0" name="page_title" type="text"
         placeholder="Project name" required />
-    <button class="px-3 bg-navy border-navy rounded-sm text-div-grey" type="submit"><i class="fa-solid fa-plus"></i> New project</button>
+    <button class="px-3 bg-navy border-navy rounded-sm text-div-grey" type="submit">{% call icons::plus() %} New project</button>
 </form>
 {% endif %}
 
@@ -32,7 +33,7 @@
             </div>
             {% else %}
             <div class="h-40 bg-navy flex items-center justify-center">
-                <i class="text-5xl text-yellow fa-solid fa-cubes-stacked"></i>
+                <span class="text-5xl text-yellow">{% call icons::cubes_stacked() %}</span>
             </div>
             {% endif %}
             <div class="p-4">

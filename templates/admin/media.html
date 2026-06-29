@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "partials/icons.html" as icons %}
 {% block title %}Media Library{% endblock %}
 
 {% block head %}
@@ -39,7 +40,7 @@
     <!-- Drop zone (also click-to-select). media-upload.js POSTs to /admin/media/upload. -->
     <label id="media-drop" for="media-file-input"
         class="block border-2 border-dashed border-navy/40 rounded-lg p-8 text-center cursor-pointer mb-6 hover:bg-navy/5">
-        <i class="fa-solid fa-cloud-arrow-up text-3xl text-navy/60"></i>
+        <span class="text-3xl text-navy/60">{% call icons::cloud_arrow_up() %}</span>
         <p class="text-navy mt-2 font-display uppercase text-sm">Drop files here, or click to select</p>
         <p class="text-navy/60 text-xs mt-1">For a video, drop every encode (AV1 + HEVC) in one go so they group into one item.</p>
         <input id="media-file-input" type="file" multiple class="hidden" />
@@ -63,7 +64,7 @@
             <img src="/media/file/{{ key }}" class="w-full aspect-square object-cover rounded" alt="{{ c.title }}" />
             {% else %}
             <div class="w-full aspect-square rounded bg-navy/10 flex items-center justify-center text-navy/50">
-                <i class="fa-solid {% if c.kind == "stl" %}fa-cube{% else %}fa-file{% endif %} text-3xl"></i>
+                <span class="text-3xl">{% if c.kind == "stl" %}{% call icons::cube() %}{% else %}{% call icons::file() %}{% endif %}</span>
             </div>
             {% endif %}
 
@@ -96,16 +97,16 @@
                     <button type="button"
                         class="rename-media grow text-xs bg-navy/80 hover:bg-navy text-div-grey px-2 py-1 rounded"
                         data-media-id="{{ c.media_id }}" data-title="{{ c.title }}" title="Rename"
-                        aria-label="Rename"><i class="fa-solid fa-pen"></i></button>
+                        aria-label="Rename">{% call icons::pen() %}</button>
                     <label
                         class="grow text-center text-xs bg-navy/80 hover:bg-navy text-div-grey px-2 py-1 rounded cursor-pointer"
                         title="Add another encode (e.g. the HEVC), or an image as the poster">
-                        <i class="fa-solid fa-plus"></i>
+                        {% call icons::plus() %}
                         <input type="file" class="add-encode-input hidden" data-media-id="{{ c.media_id }}" multiple />
                     </label>
                     <button type="button" class="text-xs bg-red-600 hover:bg-red-700 text-div-grey px-2 py-1 rounded"
                         hx-delete="/admin/media/{{ c.media_id }}" hx-confirm="Delete this media item?"
-                        title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can"></i></button>
+                        title="Delete" aria-label="Delete">{% call icons::trash_can() %}</button>
                 </div>
             </div>
         </div>

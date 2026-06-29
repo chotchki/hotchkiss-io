@@ -1,11 +1,10 @@
+{% import "partials/icons.html" as icons %}
 <!doctype html>
 <html lang="en">
 
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="/styles/main.css?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" rel="stylesheet" />
-    <link href="/vendor/fontawesome/css/fontawesome.css?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" rel="stylesheet" />
-    <link href="/vendor/fontawesome/css/solid.css?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" rel="stylesheet" />
     <link href="/images/favicon.ico?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" rel="shortcut icon" />
     <link rel="manifest" href="/manifest.webmanifest?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" />
     <link rel="apple-touch-icon" href="/images/apple-touch-icon.png?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" />
@@ -83,7 +82,7 @@
                         </li>
                         {% if auth_state.is_admin() %}
                         <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 {% if top_bar.active == "admin" %}border-b-yellow{% else %}border-b-transparent{% endif %}">
-                            <a class="text-sm uppercase {% if top_bar.active == "admin" %}text-yellow{% else %}text-div-grey hover:text-yellow{% endif %}" href="/admin/pages" title="New page" aria-label="New page"><i class="fa-solid fa-plus"></i></a>
+                            <a class="text-sm uppercase {% if top_bar.active == "admin" %}text-yellow{% else %}text-div-grey hover:text-yellow{% endif %}" href="/admin/pages" title="New page" aria-label="New page">{% call icons::plus() %}</a>
                         </li>
                         {% endif %}
                     </ul>
@@ -93,7 +92,7 @@
                 <!-- Tablet + mobile (below lg): a hamburger — native <details>, no JS -->
                 <details class="lg:hidden">
                     <summary class="list-none [&::-webkit-details-marker]:hidden cursor-pointer inline-flex items-center gap-2 bg-navy text-div-grey px-4 py-3 rounded-t font-display uppercase text-sm">
-                        <i class="fa-solid fa-bars"></i> Menu
+                        {% call icons::bars() %} Menu
                     </summary>
                     <div class="bg-navy rounded-b overflow-hidden">
                         <ul class="list-none flex flex-col">
@@ -117,7 +116,7 @@
                             {% endif %}
                             <a class="block border-l-4 border-transparent px-4 py-2 text-sm uppercase font-display hover:bg-white/10" href="/login/logout">Logout</a>
                             {% if auth_state.is_admin() %}
-                            <a class="block border-l-4 px-4 py-2 text-sm uppercase font-display {% if top_bar.active == "admin" %}border-yellow text-yellow{% else %}border-transparent hover:bg-white/10{% endif %}" href="/admin/pages"><i class="fa-solid fa-plus"></i> New page</a>
+                            <a class="block border-l-4 px-4 py-2 text-sm uppercase font-display {% if top_bar.active == "admin" %}border-yellow text-yellow{% else %}border-transparent hover:bg-white/10{% endif %}" href="/admin/pages">{% call icons::plus() %} New page</a>
                             {% endif %}
                         </div>
                         {% endif %}

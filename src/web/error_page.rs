@@ -9,7 +9,8 @@ use http::{HeaderMap, StatusCode};
 #[derive(Template)]
 #[template(path = "error_page.html")]
 pub struct ErrorPageTemplate {
-    pub icon: String,
+    /// Icon name matched in error_page.html to an `icons::` macro (inline SVG).
+    pub icon: &'static str,
     pub heading: String,
     pub subtext: String,
     pub link_href: String,
@@ -33,7 +34,7 @@ impl ErrorPageTemplate {
 /// `CatchPanicLayer` (a handler panic) so both look identical.
 pub fn server_error_response(trace_id: Option<String>) -> Response {
     ErrorPageTemplate {
-        icon: "fa-solid fa-plug-circle-xmark".to_string(),
+        icon: "plug-circle-xmark",
         heading: "Oops — I tripped over the cable".to_string(),
         subtext: "Something broke on my end. If it keeps happening, send me this trace id."
             .to_string(),
@@ -53,7 +54,7 @@ pub fn forbidden_response(headers: &HeaderMap) -> Response {
         return (StatusCode::FORBIDDEN, [("HX-Redirect", "/login")]).into_response();
     }
     ErrorPageTemplate {
-        icon: "fa-solid fa-hand".to_string(),
+        icon: "hand",
         heading: "How about NO!".to_string(),
         subtext: "You aren't authorized to do that. Log in if it's you.".to_string(),
         link_href: "/login".to_string(),
