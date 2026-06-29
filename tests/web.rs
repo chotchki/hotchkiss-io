@@ -1369,6 +1369,83 @@ async fn media_records_storage_root_hint() {
     );
 }
 
+/// Phase CJ/CK review fix (M2): the byte route never lets an uploaded file run as
+/// active content on our canonical origin — `X-Content-Type-Options: nosniff`
+/// always, and an executable mime (svg/html/js) is forced to download. Needs
+/// ffprobe.
+#[tokio::test]
+async fn media_serve_neutralizes_active_content() {
+    let has_ffprobe = std::process::Command::new("ffprobe")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !has_ffprobe {
+        eprintln!("skipping active-content test: ffprobe not found");
+        return;
+    }
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // An SVG carrying a script — ffprobe can't type it → MediaKind::File, mime
+    // guessed from the .svg extension = image/svg+xml (an executable type).
+    let svg =
+        b"<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>".to_vec();
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(svg)
+            .file_name("evil.svg")
+            .mime_str("image/svg+xml")
+            .unwrap(),
+    );
+    let resp = admin
+        .post(server.url("/admin/media/upload"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let j: serde_json::Value = resp.json().await.unwrap();
+    let media_ref = j["media_ref"].as_str().unwrap().to_string();
+
+    let embed = reqwest::get(server.url(&format!("/media/embed/{media_ref}")))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let url_key = embed
+        .split("/media/file/")
+        .nth(1)
+        .expect("file url")
+        .split('"')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let served = reqwest::get(server.url(&format!("/media/file/{url_key}"))).await.unwrap();
+    assert_eq!(served.status(), StatusCode::OK);
+    assert_eq!(
+        served
+            .headers()
+            .get("x-content-type-options")
+            .map(|h| h.to_str().unwrap()),
+        Some("nosniff"),
+        "every served file gets nosniff",
+    );
+    assert!(
+        served
+            .headers()
+            .get("content-disposition")
+            .map(|h| h.to_str().unwrap().contains("attachment"))
+            .unwrap_or(false),
+        "an executable mime (svg) must be forced to download, not rendered inline",
+    );
+}
+
 // ───────────────────────── Phase CB: unified feed + SEO ─────────────────────────
 
 #[tokio::test]

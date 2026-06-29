@@ -111,10 +111,10 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] CJ.6 - Tests + docs + deploy
 - [x] CJ.7 - Storage panel: show media roots + free space
 ## Phase CK - Upload progress
-- [ ] CK.0 - Phase exit: media uploads show real progress
+- [x] CK.0 - Phase exit: media uploads show real progress
 - [x] CK.1 - media-upload.js: XHR upload + progress bar (drop-zone + add-encode)
 - [x] CK.2 - editor-support.js: XHR upload + progress for inline media drop
-- [ ] CK.3 - CK tests + docs + deploy
+- [x] CK.3 - CK tests + docs + deploy
 
 ## Backlog (not yet phased)
 

@@ -52,17 +52,28 @@ async fn serve_media_file(
             return (StatusCode::INTERNAL_SERVER_ERROR, "media lookup failed").into_response();
         }
     };
-    let path = match state
-        .media_store
-        .resolve_path(&variant.sha256, variant.storage_root.as_deref())
+    // Resolve the on-disk path OFF the async runtime: a hint hit is one stat, a
+    // NULL/stale hint scans every root, and a stat to an asleep/wedged external
+    // drive can block for seconds — that must not pin a tokio worker (would
+    // head-of-line-block unrelated requests). The admin upload path already
+    // spawn_blocking's this; the serve hot path was the gap.
+    let store = state.media_store.clone();
+    let sha = variant.sha256.clone();
+    let hint = variant.storage_root.clone();
+    let path = match tokio::task::spawn_blocking(move || store.resolve_path(&sha, hint.as_deref()))
+        .await
     {
-        Some(p) => p,
-        None => {
+        Ok(Some(p)) => p,
+        Ok(None) => {
             tracing::warn!(
                 "media variant {} resolves to no mounted root (drive offline?)",
                 variant.variant_id
             );
             return (StatusCode::NOT_FOUND, "Not found").into_response();
+        }
+        Err(e) => {
+            tracing::error!("media resolve task panicked: {e:?}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "media resolve failed").into_response();
         }
     };
     let mime: mime_guess::mime::Mime = variant
@@ -73,10 +84,28 @@ async fn serve_media_file(
     match ServeFile::new_with_mime(&path, &mime).oneshot(req).await {
         Ok(r) => {
             let mut resp = r.into_response();
-            resp.headers_mut().insert(
+            let headers = resp.headers_mut();
+            headers.insert(
                 header::CACHE_CONTROL,
                 HeaderValue::from_static("public, max-age=31536000, immutable"),
             );
+            // Never let an uploaded file run as active content on our canonical
+            // origin: the byte route is public + same-origin, and a generic
+            // `MediaKind::File` carries an uploader-influenced mime (guessed from
+            // the filename). `nosniff` always; force-download the executable types
+            // (an admin-sourced .svg/.html would otherwise be stored-XSS). The
+            // probe-verified image/video/stl kinds never hit `is_active_content_mime`
+            // so they still render inline via the embed's own elements.
+            headers.insert(
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            );
+            if is_active_content_mime(&variant.mime) {
+                headers.insert(
+                    header::CONTENT_DISPOSITION,
+                    HeaderValue::from_static("attachment"),
+                );
+            }
             resp
         }
         Err(e) => {
@@ -84,6 +113,30 @@ async fn serve_media_file(
             (StatusCode::INTERNAL_SERVER_ERROR, "serve failed").into_response()
         }
     }
+}
+
+/// Mimes a browser would EXECUTE in our origin if served inline — force these to
+/// download so an uploaded file can't run as same-origin script. Only a generic
+/// `MediaKind::File` (mime guessed from the upload filename) ever carries one; the
+/// probe-verified image/video/stl kinds don't.
+fn is_active_content_mime(mime: &str) -> bool {
+    let m = mime
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        m.as_str(),
+        "text/html"
+            | "application/xhtml+xml"
+            | "image/svg+xml"
+            | "application/xml"
+            | "text/xml"
+            | "application/javascript"
+            | "text/javascript"
+            | "application/ecmascript"
+    ) || m.ends_with("+xml")
 }
 
 /// HTMX swap target: resolve a media ref to its rendered element.

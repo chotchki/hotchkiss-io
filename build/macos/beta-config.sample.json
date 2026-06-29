@@ -5,7 +5,7 @@
   "http_port": 8080,
   "https_port": 8443,
   "database_path": "/Users/chotchki/Library/Application Support/io.hotchkiss.web.beta/data/database.sqlite",
-  "media_path": "/Users/chotchki/Library/Application Support/io.hotchkiss.web.beta/media",
+  "media_paths": ["/Users/chotchki/Library/Application Support/io.hotchkiss.web.beta/media"],
   "backup_path": "/Users/chotchki/Library/Application Support/io.hotchkiss.web.beta/backups",
   "log_path": "/Users/chotchki/Library/Logs/io.hotchkiss.web.beta",
   "cache_path": "/Users/chotchki/Library/Caches/io.hotchkiss.web.beta"

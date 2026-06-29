@@ -11,7 +11,7 @@
 pub mod poster;
 pub mod probe;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use openssl::sha::sha256;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -127,7 +127,12 @@ impl MediaStore {
     /// is `EXDEV`). Hashes incrementally; [`StagedBlob::commit`] finalizes the SHA
     /// and renames into the slot (or dedupes across all roots). O(chunk) memory.
     pub async fn stage(&self) -> Result<StagedBlob> {
-        let write_root = self.pick_write_root()?;
+        // pick_write_root does blocking fs (create_dir_all + statvfs per root) —
+        // keep it off the async runtime so an asleep drive can't pin a worker.
+        let this = self.clone();
+        let write_root = tokio::task::spawn_blocking(move || this.pick_write_root())
+            .await
+            .map_err(|e| anyhow!("pick_write_root task panicked: {e}"))??;
         let staging = write_root.join(".staging");
         tokio::fs::create_dir_all(&staging)
             .await
@@ -151,7 +156,11 @@ impl MediaStore {
     /// so multi-drive placement isn't silent). Does NOT create dirs: a root that
     /// can't be statted (not yet created, or an unmounted external drive) is
     /// reported with `free_bytes: None`. The write target is the first root with
-    /// free space above the margin (matching `pick_write_root`'s choice).
+    /// free space above the margin. NOTE: this does NOT create dirs, whereas
+    /// `pick_write_root` currently `create_dir_all`s a missing root before statting
+    /// — so for a not-yet-created root the panel (here) shows it unavailable while
+    /// the writer would create + use it. Reconciling that (require-root-exists) is
+    /// a known follow-up.
     pub fn roots_status(&self) -> Vec<RootStatus> {
         let mut write_target_taken = false;
         self.roots

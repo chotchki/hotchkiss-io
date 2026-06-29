@@ -126,7 +126,7 @@ registrable parent) so your existing prod passkey authenticates against beta.
    # then edit: cloudflare_token
    ```
 
-   The sample sets `media_path` + `backup_path` to `io.hotchkiss.web.beta/`
+   The sample sets `media_paths` + `backup_path` to `io.hotchkiss.web.beta/`
    explicitly: `app_support` is hardcoded to `io.hotchkiss.web` in the binary, so
    without them beta would default both into PROD's dirs (shared store + backups).
    The `post-receive` snapshot then rsyncs prod's media → beta's own dir and keeps
