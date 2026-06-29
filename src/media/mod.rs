@@ -1,7 +1,9 @@
 //! Content-addressed disk store for large media (video, big STLs) — files keyed
-//! by SHA-256 under `Settings.media_path`, sharded so one directory never holds
-//! thousands of entries. Kept OUT of SQLite so the daily backup + prod→beta
-//! snapshot don't copy gigabytes (only the small metadata rows live in the DB).
+//! by SHA-256 under the configured `Settings.media_paths` roots (uploads fill
+//! in order across drives), sharded so one directory never holds thousands of
+//! entries. Kept OUT of SQLite so the daily backup + prod→beta snapshot don't
+//! copy gigabytes (only the small metadata rows live in the DB; Backblaze covers
+//! the drives at the filesystem level).
 //! Content-addressed buys three things: identical bytes dedupe, the hash IS the
 //! cache key, and a stored file is immutable — safe to serve with a far-future
 //! cache header and a `206` range response.
@@ -9,69 +11,124 @@
 pub mod poster;
 pub mod probe;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use openssl::sha::sha256;
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 
 #[derive(Clone, Debug)]
 pub struct MediaStore {
-    root: PathBuf,
+    /// Ordered media roots (primary first). Reads check each for the SHA; writes
+    /// fill in order — the first root with headroom.
+    roots: Vec<PathBuf>,
+    /// Don't write to a root with less than this much free space — fall to the
+    /// next instead (the upload size isn't known up front when streaming).
+    min_free_bytes: u64,
 }
 
 impl MediaStore {
-    pub fn new(root: PathBuf) -> Self {
-        Self { root }
+    pub fn new(roots: Vec<PathBuf>, min_free_bytes: u64) -> Self {
+        assert!(!roots.is_empty(), "MediaStore needs at least one root");
+        Self {
+            roots,
+            min_free_bytes,
+        }
     }
 
-    /// `<root>/ab/cd/<full-64-hex>` — two levels of one-byte sharding keep any
-    /// single directory small even with thousands of files. Caller MUST pass a
-    /// validated hash (see [`is_sha256_hex`]); `store` always does, and the serve
-    /// route validates the URL path segment before calling.
-    pub fn path_for(&self, sha_hex: &str) -> PathBuf {
-        self.root
-            .join(&sha_hex[0..2])
+    /// `<root>/ab/cd/<full-64-hex>` for a GIVEN root — two levels of one-byte
+    /// sharding keep any single directory small. Callers MUST pass a validated hash
+    /// (see [`is_sha256_hex`]); the serve route validates the URL segment, and the
+    /// store paths always hash internally.
+    fn shard_path(root: &Path, sha_hex: &str) -> PathBuf {
+        root.join(&sha_hex[0..2])
             .join(&sha_hex[2..4])
             .join(sha_hex)
     }
 
-    #[allow(dead_code)] // store API; used by the BZ.8 orphan sweep
-    pub fn exists(&self, sha_hex: &str) -> bool {
-        self.path_for(sha_hex).is_file()
+    /// Resolve the on-disk path for a stored SHA across the configured roots: try
+    /// the `hint` root first (the recorded `storage_root` → O(1), no scan), then
+    /// first-found across all roots (self-healing if the file moved or the hint is
+    /// stale). `None` if no mounted root holds it.
+    pub fn resolve_path(&self, sha_hex: &str, hint: Option<&str>) -> Option<PathBuf> {
+        if let Some(h) = hint {
+            let p = Self::shard_path(Path::new(h), sha_hex);
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+        self.roots
+            .iter()
+            .map(|r| Self::shard_path(r, sha_hex))
+            .find(|p| p.is_file())
     }
 
-    /// Store bytes content-addressed; returns the SHA-256 hex. Idempotent: if the
-    /// content is already present it's a no-op (dedupe). Writes to a temp file in
-    /// the same shard dir then renames into place, so a concurrent reader never
-    /// sees a half-written file. Sync fs IO — callers in an async context should
-    /// wrap large writes in `spawn_blocking`.
-    pub fn store(&self, bytes: &[u8]) -> Result<String> {
-        let sha_hex = hex_sha256(bytes);
-        let dest = self.path_for(&sha_hex);
-        if dest.is_file() {
-            return Ok(sha_hex); // already stored → dedupe
+    /// The root currently holding `sha_hex`, if any — for the `storage_root` hint
+    /// on a dedup hit. Scan order = config order.
+    fn root_containing(&self, sha_hex: &str) -> Option<&Path> {
+        self.roots
+            .iter()
+            .find(|r| Self::shard_path(r, sha_hex).is_file())
+            .map(|r| r.as_path())
+    }
+
+    #[allow(dead_code)] // store API; used by the BZ.8 orphan sweep
+    pub fn exists(&self, sha_hex: &str) -> bool {
+        self.resolve_path(sha_hex, None).is_some()
+    }
+
+    /// Pick the write root: the first configured root with more than
+    /// `min_free_bytes` available (fill-in-order, so capacity spans drives). The
+    /// root dir is created if missing (free space is measured on its volume).
+    /// Errors only if EVERY root is below the margin. NOTE: an external root whose
+    /// drive is unmounted will report the underlying fs's space — keeping configured
+    /// roots mounted is the operator's job.
+    fn pick_write_root(&self) -> Result<PathBuf> {
+        for root in &self.roots {
+            fs::create_dir_all(root).with_context(|| format!("create media root {root:?}"))?;
+            let free =
+                fs4::available_space(root).with_context(|| format!("free space on {root:?}"))?;
+            if free > self.min_free_bytes {
+                return Ok(root.clone());
+            }
         }
-        let dir = dest.parent().expect("path_for always has a parent");
+        bail!(
+            "all {} media root(s) are below the {}-byte free-space margin",
+            self.roots.len(),
+            self.min_free_bytes
+        );
+    }
+
+    /// Store small IN-MEMORY bytes (e.g. a generated poster) content-addressed.
+    /// Dedups across ALL roots; otherwise writes to the picked write root via an
+    /// atomic temp+rename within it. Returns `(sha_hex, root)` — `root` is the
+    /// `storage_root` hint. Sync fs IO — wrap large writes in `spawn_blocking`.
+    pub fn store(&self, bytes: &[u8]) -> Result<(String, PathBuf)> {
+        let sha_hex = hex_sha256(bytes);
+        if let Some(root) = self.root_containing(&sha_hex) {
+            return Ok((sha_hex, root.to_path_buf())); // dedupe (possibly another root)
+        }
+        let root = self.pick_write_root()?;
+        let dest = Self::shard_path(&root, &sha_hex);
+        let dir = dest.parent().expect("shard_path always has a parent");
         fs::create_dir_all(dir).with_context(|| format!("create media shard dir {dir:?}"))?;
-        // temp + atomic rename within the same shard dir (same filesystem) so a
-        // reader never observes a partial file.
+        // temp + atomic rename WITHIN the chosen root (same filesystem) so a reader
+        // never observes a partial file.
         let tmp = dir.join(format!(".tmp-{sha_hex}"));
         fs::write(&tmp, bytes).with_context(|| format!("write temp media file {tmp:?}"))?;
         fs::rename(&tmp, &dest).with_context(|| format!("rename media into place {dest:?}"))?;
-        Ok(sha_hex)
+        Ok((sha_hex, root))
     }
 
-    /// Begin a STREAMING store — for uploads too large to hold in memory. Bytes
-    /// are written chunk-by-chunk to a temp file under `<root>/.staging/` (same
-    /// filesystem as the shards, so the final move is an atomic rename) and hashed
-    /// incrementally; [`StagedBlob::commit`] finalizes the SHA-256 and renames into
-    /// the content-addressed slot (or dedupes if already present). Memory stays
-    /// O(chunk) regardless of file size — the fix for the old `store(&[u8])` path
-    /// that buffered the whole upload in RAM.
+    /// Begin a STREAMING store — for uploads too large to hold in memory. Picks the
+    /// write root UP FRONT (by free space) and stages a temp under that root's
+    /// `.staging/`, so the commit rename stays intra-volume (a cross-volume rename
+    /// is `EXDEV`). Hashes incrementally; [`StagedBlob::commit`] finalizes the SHA
+    /// and renames into the slot (or dedupes across all roots). O(chunk) memory.
     pub async fn stage(&self) -> Result<StagedBlob> {
-        let staging = self.root.join(".staging");
+        let write_root = self.pick_write_root()?;
+        let staging = write_root.join(".staging");
         tokio::fs::create_dir_all(&staging)
             .await
             .with_context(|| format!("create media staging dir {staging:?}"))?;
@@ -81,6 +138,7 @@ impl MediaStore {
             .await
             .with_context(|| format!("create temp media file {tmp:?}"))?;
         Ok(StagedBlob {
+            write_root,
             tmp,
             file: Some(file),
             hasher: Sha256::new(),
@@ -96,6 +154,9 @@ impl MediaStore {
 /// best-effort removed — a partial transfer never lingers in `.staging` or
 /// half-populates the content-addressed store.
 pub struct StagedBlob {
+    /// The root picked at stage time — the temp lives under its `.staging/`, and
+    /// the commit rename targets a shard under it (intra-volume, atomic).
+    write_root: PathBuf,
     tmp: PathBuf,
     file: Option<tokio::fs::File>,
     hasher: Sha256,
@@ -121,10 +182,12 @@ impl StagedBlob {
         self.len == 0
     }
 
-    /// Finalize the SHA-256, fsync, then atomically rename the temp into the
-    /// content-addressed slot — or, if identical content is already stored, drop
-    /// the temp (dedupe). Returns `(sha_hex, total_bytes)`.
-    pub async fn commit(mut self, store: &MediaStore) -> Result<(String, u64)> {
+    /// Finalize the SHA-256, fsync, then atomically rename the temp into the slot
+    /// on the write root — or, if identical content is already on ANY root, drop the
+    /// temp (dedupe). Returns `(sha_hex, total_bytes, root)`, where `root` is where
+    /// the bytes live (the write root, or the existing root on a dedup hit) — the
+    /// `storage_root` hint.
+    pub async fn commit(mut self, store: &MediaStore) -> Result<(String, u64, PathBuf)> {
         if let Some(mut file) = self.file.take() {
             file.flush().await.context("flush temp media file")?;
             file.sync_all().await.context("fsync temp media file")?;
@@ -136,21 +199,24 @@ impl StagedBlob {
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
-        let dest = store.path_for(&sha_hex);
-        if dest.is_file() {
-            // identical content already present → dedupe, drop the temp.
+        // Dedupe across ALL roots — identical content shouldn't double up on a
+        // second drive.
+        if let Some(root) = store.root_containing(&sha_hex) {
+            let root = root.to_path_buf();
             let _ = tokio::fs::remove_file(&self.tmp).await;
-        } else {
-            let dir = dest.parent().expect("path_for always has a parent");
-            tokio::fs::create_dir_all(dir)
-                .await
-                .with_context(|| format!("create media shard dir {dir:?}"))?;
-            tokio::fs::rename(&self.tmp, &dest)
-                .await
-                .with_context(|| format!("rename media into place {dest:?}"))?;
+            self.committed = true;
+            return Ok((sha_hex, self.len, root));
         }
+        let dest = MediaStore::shard_path(&self.write_root, &sha_hex);
+        let dir = dest.parent().expect("shard_path always has a parent");
+        tokio::fs::create_dir_all(dir)
+            .await
+            .with_context(|| format!("create media shard dir {dir:?}"))?;
+        tokio::fs::rename(&self.tmp, &dest)
+            .await
+            .with_context(|| format!("rename media into place {dest:?}"))?;
         self.committed = true;
-        Ok((sha_hex, self.len))
+        Ok((sha_hex, self.len, self.write_root.clone()))
     }
 }
 
@@ -190,7 +256,7 @@ pub fn media_url_key(hmac_key: &[u8], sha_hex: &str) -> Result<String> {
 
 /// True iff `s` is exactly 64 lowercase hex chars — i.e. a well-formed SHA-256.
 /// The serve route gates the URL path segment on this so a request can't slip a
-/// `../` or a short slice past [`MediaStore::path_for`]'s indexing.
+/// `../` or a short slice past the shard-path indexing.
 pub fn is_sha256_hex(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
@@ -203,51 +269,54 @@ mod tests {
     #[test]
     fn store_is_content_addressed_shards_and_dedupes() {
         let dir = tempdir().unwrap();
-        let store = MediaStore::new(dir.path().to_path_buf());
+        let store = MediaStore::new(vec![dir.path().to_path_buf()], 0);
 
-        let sha = store.store(b"hello video").unwrap();
+        let (sha, _root) = store.store(b"hello video").unwrap();
         assert_eq!(sha.len(), 64);
         assert!(is_sha256_hex(&sha));
         assert!(store.exists(&sha));
 
         // sharded path: <root>/<2>/<2>/<full hash>, holding the exact bytes
-        let p = store.path_for(&sha);
+        let p = store.resolve_path(&sha, None).unwrap();
         assert!(p.is_file());
         assert!(p.ends_with(&sha));
         assert_eq!(p.parent().unwrap().file_name().unwrap(), &sha[2..4]);
         assert_eq!(fs::read(&p).unwrap(), b"hello video");
 
         // idempotent: same content → same hash, no second file, no temp left over
-        let sha_again = store.store(b"hello video").unwrap();
+        let (sha_again, _) = store.store(b"hello video").unwrap();
         assert_eq!(sha, sha_again);
 
         // different content → different hash
-        assert_ne!(sha, store.store(b"different bytes").unwrap());
+        assert_ne!(sha, store.store(b"different bytes").unwrap().0);
     }
 
     #[tokio::test]
     async fn store_stream_hashes_dedupes_and_cleans_up() {
         let dir = tempdir().unwrap();
-        let store = MediaStore::new(dir.path().to_path_buf());
+        let store = MediaStore::new(vec![dir.path().to_path_buf()], 0);
         let staging = dir.path().join(".staging");
 
         // streamed in chunks → one content-addressed file holding the exact bytes
         let mut staged = store.stage().await.unwrap();
         staged.write_chunk(b"hello ").await.unwrap();
         staged.write_chunk(b"world").await.unwrap();
-        let (sha, len) = staged.commit(&store).await.unwrap();
+        let (sha, len, _root) = staged.commit(&store).await.unwrap();
 
         assert_eq!(len, 11);
         // CRITICAL: the streaming sha2 digest equals the openssl one-shot, so
         // content-addressed dedup is consistent across `store` and `stage`.
         assert_eq!(sha, hex_sha256(b"hello world"));
         assert!(store.exists(&sha));
-        assert_eq!(fs::read(store.path_for(&sha)).unwrap(), b"hello world");
+        assert_eq!(
+            fs::read(store.resolve_path(&sha, None).unwrap()).unwrap(),
+            b"hello world"
+        );
 
         // dedupe: the same content streamed again → same sha, no error
         let mut again = store.stage().await.unwrap();
         again.write_chunk(b"hello world").await.unwrap();
-        let (sha_again, _) = again.commit(&store).await.unwrap();
+        let (sha_again, _, _) = again.commit(&store).await.unwrap();
         assert_eq!(sha, sha_again);
 
         // committed temps leave nothing in .staging
@@ -262,6 +331,49 @@ mod tests {
         }
         let after_abort: Vec<_> = fs::read_dir(&staging).unwrap().filter_map(|e| e.ok()).collect();
         assert!(after_abort.is_empty(), "aborted temp not cleaned: {after_abort:?}");
+    }
+
+    #[tokio::test]
+    async fn multi_root_resolve_hint_scan_dedup_and_full() {
+        let a = tempdir().unwrap();
+        let b = tempdir().unwrap();
+        let roots = vec![a.path().to_path_buf(), b.path().to_path_buf()];
+
+        // min_free 0 → writes fill the FIRST root; resolve finds it there.
+        let store = MediaStore::new(roots.clone(), 0);
+        let (sha_a, root_a) = store.store(b"primary bytes").unwrap();
+        assert_eq!(root_a.as_path(), a.path(), "first write lands on the primary");
+        assert!(store.resolve_path(&sha_a, None).unwrap().starts_with(a.path()));
+
+        // Content living on the SECOND root (placed via a b-only store).
+        let only_b = MediaStore::new(vec![b.path().to_path_buf()], 0);
+        let (sha_b, _) = only_b.store(b"secondary bytes").unwrap();
+        // resolved by SCAN (no hint) ...
+        assert!(store.resolve_path(&sha_b, None).unwrap().starts_with(b.path()));
+        // ... by correct HINT (O(1)) ...
+        assert!(store
+            .resolve_path(&sha_b, Some(b.path().to_str().unwrap()))
+            .unwrap()
+            .starts_with(b.path()));
+        // ... and a STALE hint (points at a, where it isn't) falls back to scan.
+        assert!(store
+            .resolve_path(&sha_b, Some(a.path().to_str().unwrap()))
+            .unwrap()
+            .starts_with(b.path()));
+
+        // dedup ACROSS roots: streaming bytes already on b returns b as the hint and
+        // does NOT duplicate onto a.
+        let mut staged = store.stage().await.unwrap();
+        staged.write_chunk(b"secondary bytes").await.unwrap();
+        let (sha2, _len, hint_root) = staged.commit(&store).await.unwrap();
+        assert_eq!(sha2, sha_b);
+        assert_eq!(hint_root.as_path(), b.path(), "deduped to the existing root");
+        assert!(!MediaStore::shard_path(a.path(), &sha_b).is_file());
+
+        // every root below the headroom margin → a clear error, not a silent misfile
+        let full = MediaStore::new(roots, u64::MAX);
+        assert!(full.store(b"nope").is_err());
+        assert!(full.stage().await.is_err());
     }
 
     #[test]

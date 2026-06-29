@@ -171,6 +171,10 @@ pub struct MediaVariantDao {
     pub mime: String,
     pub codecs: Option<String>,
     pub bytes: i64,
+    /// Which configured media root holds the bytes — a HINT the serve route tries
+    /// first (O(1)) before falling back to a first-found scan across all roots.
+    /// `None` for legacy rows / unknown → always resolved by scan.
+    pub storage_root: Option<String>,
 }
 
 impl MediaVariantDao {
@@ -183,11 +187,12 @@ impl MediaVariantDao {
         mime: String,
         codecs: Option<String>,
         bytes: i64,
+        storage_root: Option<String>,
     ) -> Result<MediaVariantDao> {
         let row = query!(
             r#"
-            INSERT INTO media_variant (media_id, sha256, url_key, mime, codecs, bytes)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO media_variant (media_id, sha256, url_key, mime, codecs, bytes, storage_root)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             RETURNING variant_id as "variant_id!"
             "#,
             media_id,
@@ -196,6 +201,7 @@ impl MediaVariantDao {
             mime,
             codecs,
             bytes,
+            storage_root,
         )
         .fetch_one(executor)
         .await?;
@@ -208,6 +214,7 @@ impl MediaVariantDao {
             mime,
             codecs,
             bytes,
+            storage_root,
         })
     }
 
@@ -219,7 +226,7 @@ impl MediaVariantDao {
         let variants = query_as!(
             MediaVariantDao,
             r#"
-            SELECT variant_id as "variant_id!", media_id, sha256, url_key, mime, codecs, bytes
+            SELECT variant_id as "variant_id!", media_id, sha256, url_key, mime, codecs, bytes, storage_root
             FROM media_variant
             WHERE media_id = ?1
             ORDER BY variant_id
@@ -255,7 +262,7 @@ impl MediaVariantDao {
         let variant = query_as!(
             MediaVariantDao,
             r#"
-            SELECT variant_id as "variant_id!", media_id, sha256, url_key, mime, codecs, bytes
+            SELECT variant_id as "variant_id!", media_id, sha256, url_key, mime, codecs, bytes, storage_root
             FROM media_variant
             WHERE url_key = ?1
             LIMIT 1
@@ -297,6 +304,7 @@ mod tests {
             "video/mp4".to_string(),
             Some("av01.0.12M.08".to_string()),
             1_000,
+            None,
         )
         .await?;
         let hevc = MediaVariantDao::create(
@@ -307,6 +315,7 @@ mod tests {
             "video/mp4".to_string(),
             Some("hvc1".to_string()),
             900,
+            Some("/Volumes/big/media".to_string()),
         )
         .await?;
 

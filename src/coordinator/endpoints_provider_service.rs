@@ -61,7 +61,8 @@ impl EndpointsProviderService {
         // (beta sets `hotchkiss.io` so prod passkeys authenticate against beta).
         let webauthn = WebauthnBuilder::new(&settings.webauthn_rp_id, &origin)?.build()?;
 
-        let media_store = MediaStore::new(settings.media_path.clone());
+        let media_store =
+            MediaStore::new(settings.media_paths.clone(), settings.media_min_free_bytes);
 
         Ok(Self {
             pool,

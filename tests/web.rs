@@ -1293,6 +1293,82 @@ async fn media_streams_large_generic_file_and_serves_it_back() {
     assert!(lib.contains(&url_key), "library card carries the share url_key");
 }
 
+/// Phase CJ: an uploaded variant records WHICH media root holds its bytes
+/// (the storage_root hint), and the serve route resolves through it end-to-end.
+/// The multi-root resolve / dedup / free-space-fallback logic is unit-tested in
+/// src/media; this checks the hint is persisted + served. Needs ffprobe.
+#[tokio::test]
+async fn media_records_storage_root_hint() {
+    let has_ffprobe = std::process::Command::new("ffprobe")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !has_ffprobe {
+        eprintln!("skipping storage_root hint test: ffprobe not found");
+        return;
+    }
+
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(b"storage-root hint bytes".to_vec())
+            .file_name("hint.bin")
+            .mime_str("application/octet-stream")
+            .unwrap(),
+    );
+    let resp = admin
+        .post(server.url("/admin/media/upload"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let j: serde_json::Value = resp.json().await.unwrap();
+    let media_id = j["media_id"].as_i64().unwrap();
+    let media_ref = j["media_ref"].as_str().unwrap().to_string();
+
+    // The variant carries a non-NULL storage_root pointing at a real media root dir.
+    let row = sqlx::query("SELECT storage_root FROM media_variant WHERE media_id = ?1")
+        .bind(media_id)
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+    let storage_root: Option<String> = row.get("storage_root");
+    let root = storage_root.expect("storage_root hint persisted on the variant");
+    assert!(
+        std::path::Path::new(&root).is_dir(),
+        "storage_root hint points at a real media root dir: {root}"
+    );
+
+    // And it serves back through that hint.
+    let embed = reqwest::get(server.url(&format!("/media/embed/{media_ref}")))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let url_key = embed
+        .split("/media/file/")
+        .nth(1)
+        .expect("embed carries a file url")
+        .split('"')
+        .next()
+        .unwrap()
+        .to_string();
+    let served = reqwest::get(server.url(&format!("/media/file/{url_key}"))).await.unwrap();
+    assert_eq!(served.status(), StatusCode::OK);
+    assert_eq!(
+        served.bytes().await.unwrap().as_ref(),
+        b"storage-root hint bytes"
+    );
+}
+
 // ───────────────────────── Phase CB: unified feed + SEO ─────────────────────────
 
 #[tokio::test]

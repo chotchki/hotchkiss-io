@@ -52,7 +52,19 @@ async fn serve_media_file(
             return (StatusCode::INTERNAL_SERVER_ERROR, "media lookup failed").into_response();
         }
     };
-    let path = state.media_store.path_for(&variant.sha256);
+    let path = match state
+        .media_store
+        .resolve_path(&variant.sha256, variant.storage_root.as_deref())
+    {
+        Some(p) => p,
+        None => {
+            tracing::warn!(
+                "media variant {} resolves to no mounted root (drive offline?)",
+                variant.variant_id
+            );
+            return (StatusCode::NOT_FOUND, "Not found").into_response();
+        }
+    };
     let mime: mime_guess::mime::Mime = variant
         .mime
         .parse()
@@ -267,6 +279,7 @@ mod tests {
             mime: mime.to_string(),
             codecs: codecs.map(|c| c.to_string()),
             bytes: 100,
+            storage_root: None,
         }
     }
 

@@ -94,13 +94,21 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] CA.1 - api_keys schema + ApiKeyDao + HMAC-pepper hashing (crypto_keys id 3) + key generation (hio_<base64url>); unit tests
 - [x] CA.2 - Auth resolution in SessionData extractor: Authorization: Bearer (axum-extra TypedHeader) → live-key lookup → Authenticated(user) + stamp last_used; session fallback; integration test
 - [x] CA.3 - Admin UI /admin/api-keys: generate (label → key shown ONCE), list (label/created/last-used), revoke; admin-gated; CLAUDE.md docs
-## Phase CI - CI - Large-file streaming upload + shareable link
-- [ ] CI.0 - Phase exit: large-file streaming upload + shareable link
+## Phase CI - Large-file streaming upload + shareable link
+- [x] CI.0 - Phase exit: large-file streaming upload + shareable link
 - [x] CI.1 - MediaStore::store_stream (chunks → temp → atomic rename, incremental SHA-256)
 - [x] CI.2 - Stream the upload handlers (drop the Vec<u8> buffering)
 - [x] CI.3 - Graceful generic-file ingest → MediaKind::File
 - [x] CI.4 - Share-link UX in the media library
-- [ ] CI.5 - Tests + docs + deploy
+- [x] CI.5 - Tests + docs + deploy
+## Phase CJ - Multi-drive media storage
+- [ ] CJ.0 - Phase exit: multi-drive media storage
+- [x] CJ.1 - Config: media_paths ordered list + free-space headroom
+- [x] CJ.2 - Schema: media_variant.storage_root hint column (migration 0017)
+- [x] CJ.3 - MediaStore multi-root: resolve (hint+scan), pick-write-root by free space
+- [x] CJ.4 - Wire ingest + serve + all path_for callers through resolve_path
+- [x] CJ.5 - Beta mirror: rsync iterates roots
+- [ ] CJ.6 - Tests + docs + deploy
 
 ## Backlog (not yet phased)
 

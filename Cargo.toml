@@ -1,7 +1,7 @@
 [package]
 name = "hotchkiss-io"
 description = "Christopher Hotchkiss's Web Home"
-version = "0.0.76"
+version = "0.0.77"
 edition = "2024"
 
 [features]
@@ -110,6 +110,9 @@ openssl = { version = "0.10", features = ["vendored"] }
 #be held across an .await in the async ingest loop; sha2's is. Same digest as the
 #openssl one-shot, so content-addressed dedup stays consistent across both paths.
 sha2 = "0.10"
+#Free-space probe for multi-drive media storage — pick the write root by available
+#space (fill-in-order across drives). statvfs under the hood.
+fs4 = "0.13"
 
 #Editor work
 markdown = "1.0.0-alpha.22"

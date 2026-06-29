@@ -131,7 +131,7 @@ pub async fn upload_media(
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<Response, AppError> {
-    let mut ingested: Vec<(String, Probed, i64)> = Vec::new();
+    let mut ingested: Vec<(String, Probed, i64, String)> = Vec::new();
     let mut ref_input: Option<String> = None;
     let mut title: Option<String> = None;
     let mut first_filename: Option<String> = None;
@@ -157,13 +157,19 @@ pub async fn upload_media(
             if staged.is_empty() {
                 continue; // empty part → drop it (the staged temp self-cleans)
             }
-            let (sha, len) = staged.commit(&state.media_store).await?;
-            let probed =
-                probe_stored(state.media_store.clone(), sha.clone(), fname.clone()).await?;
+            let (sha, len, root) = staged.commit(&state.media_store).await?;
+            let root = root.to_string_lossy().into_owned();
+            let probed = probe_stored(
+                state.media_store.clone(),
+                sha.clone(),
+                fname.clone(),
+                Some(root.clone()),
+            )
+            .await?;
             if first_filename.is_none() {
                 first_filename = Some(fname);
             }
-            ingested.push((sha, probed, len as i64));
+            ingested.push((sha, probed, len as i64, root));
         } else {
             let name = field.name().unwrap_or("").to_string();
             let value = field.text().await.unwrap_or_default();
@@ -207,7 +213,7 @@ pub async fn upload_media(
     )
     .await?;
 
-    for (sha, probed, len) in &ingested {
+    for (sha, probed, len, root) in &ingested {
         create_variant(
             &state.pool,
             &hmac_key,
@@ -216,6 +222,7 @@ pub async fn upload_media(
             probed.mime.clone(),
             probed.codecs.clone(),
             *len,
+            Some(root.clone()),
         )
         .await?;
     }
@@ -263,13 +270,20 @@ pub async fn add_encode(
                 continue;
             }
             saw_file = true;
-            let (sha, len) = staged.commit(&state.media_store).await?;
+            let (sha, len, root) = staged.commit(&state.media_store).await?;
             // Dedup: the same bytes are already an encode of this item → no-op
             // (commit already deduped the blob on disk; skip the metadata row).
             if existing.iter().any(|v| v.sha256 == sha) {
                 continue;
             }
-            let probed = probe_stored(state.media_store.clone(), sha.clone(), fname).await?;
+            let root = root.to_string_lossy().into_owned();
+            let probed = probe_stored(
+                state.media_store.clone(),
+                sha.clone(),
+                fname,
+                Some(root.clone()),
+            )
+            .await?;
             create_variant(
                 &state.pool,
                 &hmac_key,
@@ -278,6 +292,7 @@ pub async fn add_encode(
                 probed.mime,
                 probed.codecs,
                 len as i64,
+                Some(root),
             )
             .await?;
         }
@@ -323,14 +338,25 @@ pub async fn rename_media(
 }
 
 /// ffprobe an ALREADY-stored file (its bytes are on disk — storing now happens via
-/// streaming, [`MediaStore::stage`]). Just the typed-facts probe over the stored
-/// path, off the async runtime.
-async fn probe_stored(store: MediaStore, sha: String, filename: String) -> Result<Probed> {
-    tokio::task::spawn_blocking(move || probe(&store.path_for(&sha), &filename))
-        .await
-        .map_err(|e| anyhow!("probe task panicked: {e}"))?
+/// streaming, [`MediaStore::stage`]). Resolves the path across the media roots
+/// (the `hint` is the just-written root → O(1)), off the async runtime.
+async fn probe_stored(
+    store: MediaStore,
+    sha: String,
+    filename: String,
+    hint: Option<String>,
+) -> Result<Probed> {
+    tokio::task::spawn_blocking(move || {
+        let path = store
+            .resolve_path(&sha, hint.as_deref())
+            .ok_or_else(|| anyhow!("just-stored media {sha} not found in any media root"))?;
+        probe(&path, &filename)
+    })
+    .await
+    .map_err(|e| anyhow!("probe task panicked: {e}"))?
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn create_variant(
     pool: &SqlitePool,
     hmac_key: &[u8],
@@ -339,9 +365,10 @@ async fn create_variant(
     mime: String,
     codecs: Option<String>,
     bytes: i64,
+    storage_root: Option<String>,
 ) -> Result<()> {
     let url_key = media_url_key(hmac_key, &sha)?;
-    MediaVariantDao::create(pool, media_id, sha, url_key, mime, codecs, bytes).await?;
+    MediaVariantDao::create(pool, media_id, sha, url_key, mime, codecs, bytes, storage_root).await?;
     Ok(())
 }
 
@@ -349,24 +376,37 @@ async fn create_variant(
 /// a failure is logged, not surfaced — the video plays fine without a poster.
 async fn maybe_add_poster(state: &AppState, hmac_key: &[u8], media_id: i64, video_sha: String) {
     let store = state.media_store.clone();
-    let result: Result<(String, i64)> = async {
+    let result: Result<(String, i64, std::path::PathBuf)> = async {
         let path_store = store.clone();
-        let avif = tokio::task::spawn_blocking(move || generate_poster(&path_store.path_for(&video_sha)))
-            .await
-            .map_err(|e| anyhow!("poster task panicked: {e}"))??;
+        let avif = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+            let path = path_store
+                .resolve_path(&video_sha, None)
+                .ok_or_else(|| anyhow!("poster source {video_sha} not found in any media root"))?;
+            generate_poster(&path)
+        })
+        .await
+        .map_err(|e| anyhow!("poster task panicked: {e}"))??;
         let len = avif.len() as i64;
-        let sha = tokio::task::spawn_blocking(move || store.store(&avif))
+        let (sha, root) = tokio::task::spawn_blocking(move || store.store(&avif))
             .await
             .map_err(|e| anyhow!("poster store task panicked: {e}"))??;
-        Ok((sha, len))
+        Ok((sha, len, root))
     }
     .await;
 
     match result {
-        Ok((sha, len)) => {
-            if let Err(e) =
-                create_variant(&state.pool, hmac_key, media_id, sha, "image/avif".to_string(), None, len)
-                    .await
+        Ok((sha, len, root)) => {
+            if let Err(e) = create_variant(
+                &state.pool,
+                hmac_key,
+                media_id,
+                sha,
+                "image/avif".to_string(),
+                None,
+                len,
+                Some(root.to_string_lossy().into_owned()),
+            )
+            .await
             {
                 tracing::warn!("auto-poster variant insert failed (media {media_id}): {e:?}");
             }

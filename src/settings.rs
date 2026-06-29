@@ -7,6 +7,10 @@ use std::{
 };
 use tracing::info;
 
+/// Default media-root free-space headroom: don't write to a root with less than
+/// 10 GiB free — fall to the next root instead. Overridable via `media_min_free_bytes`.
+const DEFAULT_MEDIA_MIN_FREE_BYTES: u64 = 10 * 1024 * 1024 * 1024;
+
 #[derive(Clone, Debug)]
 pub struct Settings {
     pub cloudflare_token: String,
@@ -22,11 +26,17 @@ pub struct Settings {
     /// Directory the daily SQLite snapshots (`database-YYYY-MM-DD.sqlite`) are
     /// written to. Defaults under Application Support; created if missing.
     pub backup_path: PathBuf,
-    /// Root of the content-addressed large-media store (video, big STLs) — files
-    /// sharded by SHA-256 under here, served via the range route. Kept OUT of the
-    /// SQLite DB so backups/snapshots don't copy gigabytes. Defaults under
-    /// Application Support; created on first store.
-    pub media_path: PathBuf,
+    /// Ordered roots of the content-addressed media store (primary first). Uploads
+    /// fill IN ORDER — each lands on the first root with more than
+    /// `media_min_free_bytes` free — so capacity spans drives; serving checks each
+    /// root for the SHA. Kept OUT of SQLite so backups/snapshots don't copy
+    /// gigabytes (Backblaze covers the drives at the filesystem level). Defaults to
+    /// one dir under Application Support; created on first store.
+    pub media_paths: Vec<PathBuf>,
+    /// Skip a media root whose free space is below this — fall to the next root
+    /// instead. The upload size isn't known up front (streaming), so this headroom
+    /// margin stands in for "will this fit?".
+    pub media_min_free_bytes: u64,
     pub http_port: u16,
     pub https_port: u16,
     pub static_ip: Option<IpAddr>,
@@ -41,7 +51,8 @@ struct RawSettings {
     log_path: Option<String>,
     cache_path: Option<String>,
     backup_path: Option<String>,
-    media_path: Option<String>,
+    media_paths: Option<Vec<String>>,
+    media_min_free_bytes: Option<u64>,
     http_port: Option<u16>,
     https_port: Option<u16>,
     static_ip: Option<IpAddr>,
@@ -97,10 +108,14 @@ impl Settings {
                 .backup_path
                 .map(PathBuf::from)
                 .unwrap_or_else(|| app_support.join("backups")),
-            media_path: raw
-                .media_path
-                .map(PathBuf::from)
-                .unwrap_or_else(|| app_support.join("media")),
+            media_paths: raw
+                .media_paths
+                .filter(|v| !v.is_empty())
+                .map(|v| v.into_iter().map(PathBuf::from).collect())
+                .unwrap_or_else(|| vec![app_support.join("media")]),
+            media_min_free_bytes: raw
+                .media_min_free_bytes
+                .unwrap_or(DEFAULT_MEDIA_MIN_FREE_BYTES),
             http_port: raw.http_port.unwrap_or(80),
             https_port: raw.https_port.unwrap_or(443),
             static_ip: raw.static_ip,
@@ -217,7 +232,8 @@ mod test {
             log_path: None,
             cache_path: None,
             backup_path: None,
-            media_path: None,
+            media_paths: None,
+            media_min_free_bytes: None,
             http_port: None,
             https_port: None,
             static_ip: None,
@@ -246,12 +262,47 @@ mod test {
             PathBuf::from("/Users/test/Library/Application Support/io.hotchkiss.web/backups"),
         );
         assert_eq!(
-            s.media_path,
-            PathBuf::from("/Users/test/Library/Application Support/io.hotchkiss.web/media"),
+            s.media_paths,
+            vec![PathBuf::from(
+                "/Users/test/Library/Application Support/io.hotchkiss.web/media"
+            )],
         );
+        assert_eq!(s.media_min_free_bytes, DEFAULT_MEDIA_MIN_FREE_BYTES);
         assert_eq!(s.http_port, 80);
         assert_eq!(s.https_port, 443);
         assert!(s.static_ip.is_none());
+    }
+
+    #[test]
+    fn media_paths_list_and_headroom_resolve() {
+        let home = PathBuf::from("/Users/test");
+        let raw = RawSettings {
+            cloudflare_token: "ctoken".into(),
+            domain: "do".into(),
+            webauthn_rp_id: None,
+            database_path: None,
+            log_path: None,
+            cache_path: None,
+            backup_path: None,
+            media_paths: Some(vec![
+                "/Volumes/fast/media".into(),
+                "/Volumes/big/media".into(),
+            ]),
+            media_min_free_bytes: Some(5_000_000_000),
+            http_port: None,
+            https_port: None,
+            static_ip: None,
+        };
+        let s = Settings::resolve(raw, &home);
+        // ordered, primary first — not collapsed or reordered
+        assert_eq!(
+            s.media_paths,
+            vec![
+                PathBuf::from("/Volumes/fast/media"),
+                PathBuf::from("/Volumes/big/media"),
+            ],
+        );
+        assert_eq!(s.media_min_free_bytes, 5_000_000_000);
     }
 
     #[test]

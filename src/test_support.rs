@@ -190,7 +190,8 @@ pub async fn spawn_test_server() -> Result<TestServer> {
         webauthn,
         site_host: "hotchkiss.io".to_string(),
         media_store: MediaStore::new(
-            std::env::temp_dir().join(format!("hotchkiss-test-media-{}", Uuid::new_v4())),
+            vec![std::env::temp_dir().join(format!("hotchkiss-test-media-{}", Uuid::new_v4()))],
+            0,
         ),
     };
     let router = create_router(app_state).await?;
