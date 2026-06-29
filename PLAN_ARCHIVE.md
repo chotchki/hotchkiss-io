@@ -424,3 +424,13 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] CL.3 - CL.3 - M1/L1: pick_write_root readiness (no phantom mountpoint) + per-root fall-through; roots_status shares the probe
 - [x] CL.4 - CL.4 - Tests + docs + ship beta→prod
 
+---
+
+## 2026-06-29
+
+## Phase CM - CM - Scrub career-private docs + rewrite history for public re-mirror
+- [x] CM.0 - Phase exit: docs de-personalized + history rewritten clean for public re-mirror
+- [x] CM.1 - De-personalize SPEC.md + PLAN.md (remove employment-context; keep product spec); commit
+- [x] CM.2 - Rewrite history (git-filter-repo replace-text + replace-message); verify clean + code unchanged
+- [x] CM.3 - Push gate: public-mirror branch/tag scope + mini reconciliation (deploy-aware)
+
