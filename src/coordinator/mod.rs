@@ -1,5 +1,6 @@
 mod acme;
 mod acme_provider_service;
+mod backfill_responsive_images;
 mod backup;
 pub mod dns;
 mod dns_provider_service;

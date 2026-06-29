@@ -229,6 +229,26 @@ impl MediaVariantDao {
         })
     }
 
+    /// Stamp this variant's pixel dimensions (Phase CN backfill). A legacy image's
+    /// original variant predates the width column; setting it to the item's dims
+    /// puts it in the srcset as the largest entry.
+    pub async fn set_dimensions(
+        executor: impl SqliteExecutor<'_>,
+        variant_id: i64,
+        width: Option<i64>,
+        height: Option<i64>,
+    ) -> Result<()> {
+        query!(
+            r#"UPDATE media_variant SET width = ?1, height = ?2 WHERE variant_id = ?3"#,
+            width,
+            height,
+            variant_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    }
+
     /// All encodings of a media item — what the transformer turns into `<source>`s.
     pub async fn find_by_media_id(
         executor: impl SqliteExecutor<'_>,

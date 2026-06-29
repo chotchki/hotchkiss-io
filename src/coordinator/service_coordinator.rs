@@ -43,6 +43,12 @@ impl ServiceCoordinator {
         let endpoints_provider_service =
             EndpointsProviderService::create(settings.clone(), pool.clone()).await?;
 
+        // Phase CN: backfill responsive AVIF variants for images uploaded before
+        // the pipeline existed. Detached background one-shot (NOT in the try_join)
+        // — backup-first + per-item non-fatal, so it can't delay boot or take the
+        // app down; idempotent → a no-op once the backlog is cleared.
+        super::backfill_responsive_images::spawn(pool.clone(), settings.clone());
+
         Ok(Self {
             ip_provider_service,
             dns_provider_service,
