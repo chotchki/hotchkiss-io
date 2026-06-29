@@ -175,6 +175,11 @@ pub struct MediaVariantDao {
     /// first (O(1)) before falling back to a first-found scan across all roots.
     /// `None` for legacy rows / unknown → always resolved by scan.
     pub storage_root: Option<String>,
+    /// Pixel dimensions of THIS encoding (Phase CN) — drive the srcset `Nw`
+    /// descriptor for an image's width-stepped variants. `None` for video / stl /
+    /// file / legacy variants (omitted from the srcset).
+    pub width: Option<i64>,
+    pub height: Option<i64>,
 }
 
 impl MediaVariantDao {
@@ -188,11 +193,13 @@ impl MediaVariantDao {
         codecs: Option<String>,
         bytes: i64,
         storage_root: Option<String>,
+        width: Option<i64>,
+        height: Option<i64>,
     ) -> Result<MediaVariantDao> {
         let row = query!(
             r#"
-            INSERT INTO media_variant (media_id, sha256, url_key, mime, codecs, bytes, storage_root)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            INSERT INTO media_variant (media_id, sha256, url_key, mime, codecs, bytes, storage_root, width, height)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
             RETURNING variant_id as "variant_id!"
             "#,
             media_id,
@@ -202,6 +209,8 @@ impl MediaVariantDao {
             codecs,
             bytes,
             storage_root,
+            width,
+            height,
         )
         .fetch_one(executor)
         .await?;
@@ -215,6 +224,8 @@ impl MediaVariantDao {
             codecs,
             bytes,
             storage_root,
+            width,
+            height,
         })
     }
 
@@ -226,7 +237,7 @@ impl MediaVariantDao {
         let variants = query_as!(
             MediaVariantDao,
             r#"
-            SELECT variant_id as "variant_id!", media_id, sha256, url_key, mime, codecs, bytes, storage_root
+            SELECT variant_id as "variant_id!", media_id, sha256, url_key, mime, codecs, bytes, storage_root, width, height
             FROM media_variant
             WHERE media_id = ?1
             ORDER BY variant_id
@@ -262,7 +273,7 @@ impl MediaVariantDao {
         let variant = query_as!(
             MediaVariantDao,
             r#"
-            SELECT variant_id as "variant_id!", media_id, sha256, url_key, mime, codecs, bytes, storage_root
+            SELECT variant_id as "variant_id!", media_id, sha256, url_key, mime, codecs, bytes, storage_root, width, height
             FROM media_variant
             WHERE url_key = ?1
             LIMIT 1
@@ -305,6 +316,8 @@ mod tests {
             Some("av01.0.12M.08".to_string()),
             1_000,
             None,
+            None,
+            None,
         )
         .await?;
         let hevc = MediaVariantDao::create(
@@ -316,6 +329,8 @@ mod tests {
             Some("hvc1".to_string()),
             900,
             Some("/Volumes/big/media".to_string()),
+            None,
+            None,
         )
         .await?;
 

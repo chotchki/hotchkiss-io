@@ -167,14 +167,42 @@ pub(crate) fn render_embed_html(media: &MediaDao, variants: &[MediaVariantDao]) 
     let kind = media.kind().unwrap_or(MediaKind::File);
     match kind {
         MediaKind::Image => {
-            let Some(v) = variants.first() else {
+            let Some(fallback) = variants.first() else {
                 return error_span("image has no stored file");
+            };
+            // Image variants carrying a width → a srcset (Phase CN): a new upload
+            // records the original's width plus its 480/960 AVIF downscales, so the
+            // browser pulls an appropriately-sized file instead of the full-res
+            // original. A legacy image with no widths falls through to a single src.
+            let mut sized: Vec<(&MediaVariantDao, i64)> = variants
+                .iter()
+                .filter(|v| v.mime.starts_with("image/"))
+                .filter_map(|v| v.width.map(|w| (v, w)))
+                .collect();
+            sized.sort_by_key(|(_, w)| *w);
+            // src = the largest (best for a no-srcset client + the zoom view);
+            // falls back to the first variant when nothing has a width.
+            let src_key = sized
+                .last()
+                .map(|(v, _)| v.url_key.as_str())
+                .unwrap_or(fallback.url_key.as_str());
+            // Only worth a srcset with ≥2 distinct sizes.
+            let srcset_attr = if sized.len() >= 2 {
+                let entries: Vec<String> = sized
+                    .iter()
+                    .map(|(v, w)| format!("/media/file/{} {w}w", v.url_key))
+                    .collect();
+                format!(
+                    " srcset=\"{}\" sizes=\"(max-width: 768px) 100vw, 768px\"",
+                    entries.join(", ")
+                )
+            } else {
+                String::new()
             };
             format!(
                 "<img class=\"content-image mx-auto my-4 block cursor-zoom-in\" \
 style=\"max-width:100%;max-height:{MAX_IMAGE_HEIGHT_PX}px\" data-zoomable=\"true\" tabindex=\"0\" \
-role=\"button\" aria-label=\"Zoom image\" src=\"/media/file/{}\" alt=\"{alt}\" />",
-                v.url_key
+role=\"button\" aria-label=\"Zoom image\" src=\"/media/file/{src_key}\"{srcset_attr} alt=\"{alt}\" />"
             )
         }
         MediaKind::Video => {
@@ -256,11 +284,15 @@ fn error_span(msg: &str) -> String {
 /// `None` when no cover is set or it has no image variant. Used by the blog +
 /// project card indexes, replacing the old `/attachments/id/<n>` cover render.
 pub(crate) async fn cover_url_for(pool: &sqlx::SqlitePool, page_id: i64) -> Option<String> {
+    // Prefer the SMALLEST width-stepped variant (Phase CN): a card thumbnail is
+    // ~300px, so serving the 480px AVIF beats the full-res original. NULL-width
+    // variants (legacy / the original) sort last → still picked when no resize
+    // exists yet.
     sqlx::query_scalar!(
         r#"SELECT v.url_key FROM content_pages c
            JOIN media_variant v ON v.media_id = c.page_cover_media_id
            WHERE c.page_id = ?1 AND v.mime LIKE 'image/%'
-           ORDER BY v.variant_id LIMIT 1"#,
+           ORDER BY (v.width IS NULL), v.width ASC, v.variant_id LIMIT 1"#,
         page_id
     )
     .fetch_optional(pool)
@@ -333,6 +365,8 @@ mod tests {
             codecs: codecs.map(|c| c.to_string()),
             bytes: 100,
             storage_root: None,
+            width: None,
+            height: None,
         }
     }
 

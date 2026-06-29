@@ -10,6 +10,7 @@
 
 pub mod poster;
 pub mod probe;
+pub mod resize;
 
 use anyhow::{anyhow, bail, Context, Result};
 use openssl::sha::sha256;

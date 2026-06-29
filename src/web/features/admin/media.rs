@@ -22,6 +22,7 @@ use crate::db::dao::crypto_key::CryptoKey;
 use crate::db::dao::media::{MediaDao, MediaKind, MediaVariantDao};
 use crate::media::poster::generate_poster;
 use crate::media::probe::{probe, Probed};
+use crate::media::resize::{responsive_avif_variants, ResizedImage};
 use crate::media::{media_url_key, MediaStore};
 use crate::web::authentication_state::AuthenticationState;
 use crate::web::features::media::render_embed_html;
@@ -251,8 +252,19 @@ pub async fn upload_media(
             probed.codecs.clone(),
             *len,
             Some(root.clone()),
+            probed.width,
+            probed.height,
         )
         .await?;
+    }
+
+    // Responsive image variants (Phase CN): for an image, generate width-stepped
+    // AVIFs from the original so the render can emit a srcset and the browser
+    // pulls an appropriately-sized file. Best-effort — the original still serves.
+    if kind == MediaKind::Image {
+        if let (Some(w), sha) = (first.width, ingested[0].0.clone()) {
+            maybe_add_responsive_variants(&state, &hmac_key, media.media_id, sha, w).await;
+        }
     }
 
     // Auto-poster for video (non-fatal — the video still plays without one).
@@ -321,6 +333,8 @@ pub async fn add_encode(
                 probed.codecs,
                 len as i64,
                 Some(root),
+                probed.width,
+                probed.height,
             )
             .await?;
         }
@@ -394,9 +408,23 @@ async fn create_variant(
     codecs: Option<String>,
     bytes: i64,
     storage_root: Option<String>,
+    width: Option<i64>,
+    height: Option<i64>,
 ) -> Result<()> {
     let url_key = media_url_key(hmac_key, &sha)?;
-    MediaVariantDao::create(pool, media_id, sha, url_key, mime, codecs, bytes, storage_root).await?;
+    MediaVariantDao::create(
+        pool,
+        media_id,
+        sha,
+        url_key,
+        mime,
+        codecs,
+        bytes,
+        storage_root,
+        width,
+        height,
+    )
+    .await?;
     Ok(())
 }
 
@@ -433,6 +461,8 @@ async fn maybe_add_poster(state: &AppState, hmac_key: &[u8], media_id: i64, vide
                 None,
                 len,
                 Some(root.to_string_lossy().into_owned()),
+                None,
+                None,
             )
             .await
             {
@@ -440,6 +470,59 @@ async fn maybe_add_poster(state: &AppState, hmac_key: &[u8], media_id: i64, vide
             }
         }
         Err(e) => tracing::warn!("auto-poster generation failed (media {media_id}): {e:?}"),
+    }
+}
+
+/// Generate width-stepped AVIF variants for an image so the render can emit a
+/// `srcset` (Phase CN). Best-effort: a failure is logged, not surfaced — the
+/// original variant still serves. Each resized blob is content-addressed (dedup'd
+/// like any other) and recorded as an `image/avif` variant carrying its width.
+async fn maybe_add_responsive_variants(
+    state: &AppState,
+    hmac_key: &[u8],
+    media_id: i64,
+    original_sha: String,
+    source_width: i64,
+) {
+    let store = state.media_store.clone();
+    let result: Result<()> = async {
+        let path_store = store.clone();
+        let resized = tokio::task::spawn_blocking(move || -> Result<Vec<ResizedImage>> {
+            let path = path_store
+                .resolve_path(&original_sha, None)
+                .ok_or_else(|| anyhow!("resize source {original_sha} not found in any media root"))?;
+            responsive_avif_variants(&path, source_width.max(0) as u32)
+        })
+        .await
+        .map_err(|e| anyhow!("resize task panicked: {e}"))??;
+
+        for r in resized {
+            let store = store.clone();
+            let bytes = r.avif;
+            let len = bytes.len() as i64;
+            let (sha, root) = tokio::task::spawn_blocking(move || store.store(&bytes))
+                .await
+                .map_err(|e| anyhow!("resize store task panicked: {e}"))??;
+            create_variant(
+                &state.pool,
+                hmac_key,
+                media_id,
+                sha,
+                "image/avif".to_string(),
+                None,
+                len,
+                Some(root.to_string_lossy().into_owned()),
+                Some(r.width as i64),
+                Some(r.height as i64),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+    .await;
+
+    if let Err(e) = result {
+        tracing::warn!("responsive image variants failed (media {media_id}): {e:?}");
     }
 }
 
