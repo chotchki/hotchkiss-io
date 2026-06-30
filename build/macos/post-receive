@@ -122,7 +122,11 @@ deploy() {
             lock_waited=$(( lock_waited + 5 ))
         fi
     done
-    trap 'rm -rf "$lock_dir"' EXIT
+    # Bake the path into the trap NOW (double quotes): $lock_dir is `local`, so it
+    # is OUT OF SCOPE when the subshell's EXIT trap fires after deploy() returns —
+    # a lazy 'rm -rf "$lock_dir"' would hit an unbound var (set -u) and never
+    # release, wedging every later deploy until the 600s stale-break.
+    trap "rm -rf '$lock_dir'" EXIT
 
     echo "post-receive: deploying $newsha -> $profile" >&2
 
