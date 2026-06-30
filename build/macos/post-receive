@@ -172,7 +172,12 @@ deploy() {
         echo "post-receive: $launch_label not loaded; bootstrapping" >&2
         launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/$launch_label.plist"
     fi
-    rm -rf "$app_prev"
+    # Do NOT rm "$app_prev" here: the SIGTERM'd old process is still shutting down
+    # and is mmap'd from .prev's executable — unlinking it mid-exit makes the kernel
+    # kill it with OS_REASON_CODESIGNING (a "quit unexpectedly" crash report, the
+    # v0.0.84 popup). Leave .prev; the next deploy's top `rm -rf "$app_prev"`
+    # reclaims it once the old process is long gone. (Hotchkiss-IO.app.prev isn't a
+    # .app, so LaunchServices ignores it.)
 
     echo "post-receive: deployed $newsha -> $profile" >&2
 }
