@@ -38,11 +38,13 @@ pub async fn log_requests(State(pool): State<SqlitePool>, req: Request, next: Ne
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
 
-    // The livereload long-poll is pure noise in dev.
+    // The livereload long-poll is pure noise in dev; /admin/logs is excluded
+    // ALWAYS so the log viewer never feeds the access log it tails (Phase CO —
+    // the no-self-feed guard against an infinite-loop-ish growth).
     #[cfg(debug_assertions)]
-    let skip = path.starts_with("/tower-livereload");
+    let skip = path.starts_with("/tower-livereload") || path.starts_with("/admin/logs");
     #[cfg(not(debug_assertions))]
-    let skip = false;
+    let skip = path.starts_with("/admin/logs");
 
     let response = next.run(req).await;
 

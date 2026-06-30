@@ -9,6 +9,7 @@ use crate::web::{app_state::AppState, middleware::require_admin::require_admin};
 
 pub mod analytics;
 pub mod api_keys;
+pub mod logs;
 pub mod media;
 pub mod pages;
 pub mod users;
@@ -43,5 +44,8 @@ pub fn admin_router() -> Router<AppState> {
         .route("/users", get(users::show_users))
         .route("/users/{id}/role", post(users::set_user_role))
         .route("/users/{id}", delete(users::delete_user))
+        // Server log tail (Phase CO): manual-refresh viewer; excluded from
+        // request_log (request_log.rs) so a self-view never feeds the access log.
+        .route("/logs", get(logs::show_logs))
         .layer(from_fn(require_admin))
 }

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Logs{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+    <div class="flex flex-row items-center justify-between mb-2">
+        <h1 class="text-2xl font-display text-navy">Server Logs</h1>
+        <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/pages">← Admin</a>
+    </div>
+    <p class="text-sm text-navy/70 mb-3">
+        Newest first, tail of
+        <code class="text-navy">{% if source.is_empty() %}(no log file yet){% else %}{{ source }}{% endif %}</code>.
+        Manual refresh only — this page is excluded from the request log, so viewing it never feeds the log it tails.
+    </p>
+
+    <div class="flex flex-row flex-wrap items-center gap-2 mb-3">
+        <span class="text-xs uppercase text-navy/50 self-center">Level:</span>
+        <a href="/admin/logs?level=all"
+            class="px-3 py-1 rounded text-sm font-display uppercase {% if level == "all" %}bg-navy text-yellow{% else %}bg-navy/10 text-navy hover:bg-navy/20{% endif %}">All</a>
+        <a href="/admin/logs?level=warn"
+            class="px-3 py-1 rounded text-sm font-display uppercase {% if level == "warn" %}bg-navy text-yellow{% else %}bg-navy/10 text-navy hover:bg-navy/20{% endif %}">Warn+</a>
+        <a href="/admin/logs?level=error"
+            class="px-3 py-1 rounded text-sm font-display uppercase {% if level == "error" %}bg-navy text-yellow{% else %}bg-navy/10 text-navy hover:bg-navy/20{% endif %}">Error</a>
+        <a href="/admin/logs?level={{ level }}"
+            class="ml-auto px-3 py-1 rounded text-sm font-display uppercase bg-yellow text-navy hover:bg-yellow/80">↻ Refresh</a>
+    </div>
+
+    {% if lines.is_empty() %}
+    <p class="text-navy/60 text-sm">No log lines{% if level != "all" %} at this level{% endif %}.</p>
+    {% else %}
+    <pre class="bg-navy text-div-grey text-xs leading-relaxed p-3 rounded overflow-auto max-h-[70vh] whitespace-pre">{% for line in lines %}{{ line }}
+{% endfor %}</pre>
+    {% endif %}
+</div>
+{% endblock %}

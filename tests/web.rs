@@ -164,6 +164,70 @@ async fn request_log_middleware_records_requests() {
 }
 
 #[tokio::test]
+async fn logs_requires_admin_and_renders(/* Phase CO */) {
+    let server = spawn_test_server().await.expect("spawn");
+
+    // anonymous → 403 (GET is public site-wide, but /admin is require_admin-gated)
+    let resp = client().get(server.url("/admin/logs")).send().await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    // Admin → 200, and the viewer renders (heading + the level-filter chips). The
+    // log dir doesn't exist in the test harness, so this exercises the empty tail.
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+    let resp = admin
+        .get(server.url("/admin/logs?level=error"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("Server Logs"));
+    assert!(body.contains("/admin/logs?level=warn"), "level filter chips present");
+}
+
+#[tokio::test]
+async fn logs_route_excluded_from_request_log(/* no self-feed */) {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    // View the EXCLUDED log page, then a NON-excluded admin page as a sentinel.
+    admin.get(server.url("/admin/logs")).send().await.unwrap();
+    admin.get(server.url("/admin/pages")).send().await.unwrap();
+
+    // Poll until the sentinel (/admin/pages) is logged — that proves the
+    // fire-and-forget request_log inserts have caught up, so the ABSENCE of an
+    // /admin/logs row is real exclusion, not a timing artifact.
+    let mut checked = false;
+    for _ in 0..100 {
+        let rows = sqlx::query("SELECT path FROM request_log")
+            .fetch_all(&server.pool)
+            .await
+            .unwrap();
+        let paths: Vec<String> = rows.iter().map(|r| r.get::<String, _>("path")).collect();
+        if paths.iter().any(|p| p == "/admin/pages") {
+            assert!(
+                !paths.iter().any(|p| p == "/admin/logs"),
+                "/admin/logs must be excluded from request_log (no self-feed)"
+            );
+            checked = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(checked, "sentinel /admin/pages should have been logged");
+}
+
+#[tokio::test]
 async fn blog_index_empty_state() {
     let server = spawn_test_server().await.expect("spawn");
     let resp = reqwest::get(server.url("/blog")).await.unwrap();

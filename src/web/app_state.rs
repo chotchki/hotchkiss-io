@@ -1,5 +1,6 @@
 use crate::media::MediaStore;
 use sqlx::SqlitePool;
+use std::path::PathBuf;
 use tower_sessions_sqlx_store::SqliteStore;
 use webauthn_rs::Webauthn;
 
@@ -17,4 +18,8 @@ pub struct AppState {
     /// `beta.hotchkiss.io` while content links the canonical `hotchkiss.io`, so
     /// matching the parent relativizes those links on beta as well as prod.
     pub site_host: String,
+    /// Directory holding the rolling app logs (`hotchkiss.io.log*`), so the
+    /// `/admin/logs` viewer (Phase CO) can tail the newest one. From
+    /// `Settings.log_path`.
+    pub log_path: PathBuf,
 }

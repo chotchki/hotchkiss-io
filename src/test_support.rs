@@ -189,6 +189,7 @@ pub async fn spawn_test_server() -> Result<TestServer> {
         session_store,
         webauthn,
         site_host: "hotchkiss.io".to_string(),
+        log_path: std::env::temp_dir().join(format!("hotchkiss-test-logs-{}", Uuid::new_v4())),
         media_store: MediaStore::new(
             vec![std::env::temp_dir().join(format!("hotchkiss-test-media-{}", Uuid::new_v4()))],
             0,
