@@ -50,7 +50,10 @@ for _ in 1 2 3 4 5; do
     fi
 
     err="$RES_DIR/$token.err"
-    if codesign --force --sign "$ID" --options runtime "$exe" 2>"$err"; then
+    # No --options runtime (hardened runtime): we don't notarize, and Dev-ID +
+    # hardened runtime turns ON library validation, which can OS_REASON_CODESIGNING
+    # the app at launch. TCC still keys on the Team ID without it.
+    if codesign --force --sign "$ID" "$exe" 2>"$err"; then
       printf 'OK %s\n' "$ID" > "$res"
     else
       printf 'FAIL: codesign: %s\n' "$(tr '\n' ' ' < "$err" 2>/dev/null)" > "$res"

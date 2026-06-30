@@ -36,6 +36,20 @@ WORK_ROOT="$HOME/.cache/hotchkiss-io-build"
 LOG_DIR="$HOME/Library/Logs/hio-deploy"
 KEEP_LOGS=5
 
+# media_roots_of <config.json> — print each media_paths entry (expanded), one per
+# line; nothing if the file or the key is missing/unparseable.
+media_roots_of() {
+    python3 -c '
+import json, os, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+for r in (cfg.get("media_paths") or []):
+    print(os.path.expanduser(r))
+' "$1" 2>/dev/null
+}
+
 # sign_with_devid <app_path>
 #
 # Re-sign the built app with the Developer ID. codesign fails from THIS non-GUI
@@ -114,6 +128,20 @@ deploy() {
     if [[ -z "$built" || ! -d "$built" ]]; then
         echo "post-receive: build.sh did not produce a usable app bundle for $profile" >&2
         exit 1
+    fi
+
+    # Developer ID re-sign (Phase CP): build.sh ad-hoc-signs so the app RUNS, but
+    # the durable Full Disk Access (TCC) grant needs a STABLE Developer ID
+    # signature. codesign can't reach the keychain from this non-GUI sshd hook, so
+    # hand the built app to the GUI-session signer agent. Re-source build.env HERE
+    # (not only at top level) so CODESIGN_IDENTITY is reliably set in this subshell.
+    [ -f "$HOME/.config/hotchkiss-io/build.env" ] && . "$HOME/.config/hotchkiss-io/build.env"
+    if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
+        echo "post-receive: re-signing $profile with Developer ID via signer agent" >&2
+        sign_with_devid "$built" \
+            || { echo "post-receive: Developer ID signing FAILED for $profile; aborting before swap (running app untouched)" >&2; exit 1; }
+    else
+        echo "post-receive: CODESIGN_IDENTITY unset — $profile shipped AD-HOC (Full Disk Access will drop)" >&2
     fi
 
     # Beta boots on fresh prod data: snapshot prod's DB into beta's path
@@ -229,54 +257,36 @@ snapshot_prod_db_into_beta() {
     local prod_config="$HOME/Library/Application Support/io.hotchkiss.web/config.json"
     local beta_config="$HOME/Library/Application Support/io.hotchkiss.web.beta/config.json"
 
-    # Beta's media target is its OWN configured media_paths[0]. This used to be
-    # hardcoded to the internal dir, so beta tried to consolidate prod's
-    # MULTI-DRIVE media (incl. the big external MediaStorage4 roots) onto the boot
-    # disk and ran it out of space (the v0.0.83 incident). Point it at beta's
-    # root[0] instead — beta's config now puts that on a drive with room.
-    local beta_media
-    beta_media=$(python3 -c '
-import json, os, sys
-try:
-    cfg = json.load(open(sys.argv[1]))
-    roots = cfg.get("media_paths") or []
-    print(os.path.expanduser(roots[0]) if roots else "")
-except Exception:
-    pass
-' "$beta_config" 2>/dev/null)
-    if [[ -z "$beta_media" ]]; then
-        beta_media="$HOME/Library/Application Support/io.hotchkiss.web.beta/media"
-    fi
+    # 1-for-1 media mirror. Prod and beta have MATCHING ordered media_paths (dual
+    # folders: the big media on the external drive, the small media on the boot
+    # disk). Pair prod_roots[i] -> beta_roots[i] so each prod root mirrors to its
+    # beta counterpart on the SAME class of drive — never consolidating prod's
+    # multi-drive media onto one beta disk (the v0.0.83 boot-disk-fill incident).
+    local -a prod_roots=() beta_roots=()
+    while IFS= read -r r; do [[ -n "$r" ]] && prod_roots+=("$r"); done < <(media_roots_of "$prod_config")
+    while IFS= read -r r; do [[ -n "$r" ]] && beta_roots+=("$r"); done < <(media_roots_of "$beta_config")
+    [[ ${#prod_roots[@]} -gt 0 ]] || prod_roots=("$HOME/Library/Application Support/io.hotchkiss.web/media")
+    [[ ${#beta_roots[@]} -gt 0 ]] || beta_roots=("$HOME/Library/Application Support/io.hotchkiss.web.beta/media")
 
-    # Only sync if beta's target drive is mounted (its dir OR its parent exists) —
-    # else an unmounted external root would mkdir a phantom mountpoint onto the boot
-    # disk (the CL.3 readiness guard). Skip the media sync otherwise; beta still
-    # boots (media 404s until the drive's back + the next push).
-    if [[ ! -d "$beta_media" && ! -d "$(dirname "$beta_media")" ]]; then
-        echo "post-receive: beta media root $beta_media not present (drive unmounted?) — skipping media sync" >&2
-    else
-        mkdir -p "$beta_media"
-        # Pull prod's configured roots (default single root if media_paths absent
-        # or python3 can't parse it) and merge each into beta's root[0].
-        local prod_roots
-        prod_roots=$(python3 -c '
-import json, os, sys
-try:
-    cfg = json.load(open(sys.argv[1]))
-except Exception:
-    sys.exit(0)
-for r in (cfg.get("media_paths") or []):
-    print(os.path.expanduser(r))
-' "$prod_config" 2>/dev/null)
-        if [[ -z "$prod_roots" ]]; then
-            prod_roots="$HOME/Library/Application Support/io.hotchkiss.web/media"
+    local i src dst dst_idx
+    for i in "${!prod_roots[@]}"; do
+        src="${prod_roots[$i]}"
+        # Pair by index; if beta has fewer roots, fold the extras into beta's LAST.
+        dst_idx=$i
+        if (( i >= ${#beta_roots[@]} )); then dst_idx=$(( ${#beta_roots[@]} - 1 )); fi
+        dst="${beta_roots[$dst_idx]}"
+
+        [[ -d "$src" ]] || continue          # prod root's drive not mounted -> skip
+        # Drive-present guard on the beta target (its dir OR parent exists) so an
+        # unmounted external beta root can't mkdir a phantom mountpoint onto /.
+        if [[ ! -d "$dst" && ! -d "$(dirname "$dst")" ]]; then
+            echo "post-receive: beta media root $dst not present (drive unmounted?) — skipping $src" >&2
+            continue
         fi
-        while IFS= read -r root; do
-            [[ -n "$root" && -d "$root" ]] || continue
-            rsync -a --ignore-existing --exclude='.staging/' "$root/" "$beta_media/" \
-                || echo "post-receive: media rsync $root -> beta failed (non-fatal)" >&2
-        done <<< "$prod_roots"
-    fi
+        mkdir -p "$dst"
+        rsync -a --ignore-existing --exclude='.staging/' "$src/" "$dst/" \
+            || echo "post-receive: media rsync $src -> $dst failed (non-fatal)" >&2
+    done
 
     echo "post-receive: snapshotted prod DB + media into beta (session key reset; media HMAC key + beta cert/ACME preserved; prod LE key scrubbed)" >&2
 }

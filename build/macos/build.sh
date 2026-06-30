@@ -84,7 +84,7 @@ cp build/macos/HotchkissLogox1024.icns "$APP/Contents/Resources/"
 # agent — codesign can't reach the keychain from the headless push hook, and a
 # stable identity is what keeps the Full Disk Access (TCC) grant alive across
 # deploys (Phase CP). A local/dev build just stays ad-hoc, which is fine.
-codesign --force --sign - --options runtime "$APP/Contents/MacOS/$EXE"
+codesign --force --sign - "$APP/Contents/MacOS/$EXE"
 
 ABSOLUTE_APP="$(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
 echo "BUILT_APP=$ABSOLUTE_APP"
