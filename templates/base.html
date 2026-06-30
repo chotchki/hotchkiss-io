@@ -38,8 +38,8 @@
 <body class="bg-body-grey">
     <!-- Site, centered -->
     <div class="flex flex-col justify-center items-center">
-        <!-- Jumbotron image -->
-        <div class="mb-2 py-4 max-w-lg flex flex-col sm:flex-row items-center sm:items-end text-center sm:text-left">
+        <!-- Jumbotron image — the site banner landmark -->
+        <header class="mb-2 py-4 max-w-lg flex flex-col sm:flex-row items-center sm:items-end text-center sm:text-left">
             {# Jumbotron headshot: displays at 160px (size-40), so srcset offers a
                320px (2x) and the 480px Photo.avif (3x + no-srcset fallback + the
                og:image seo.rs points at). Right-sized from the master (Phase CN). #}
@@ -54,14 +54,14 @@
                 <p class="py-2 font-content text-m text-navy">Crafting Solutions, Shaping Products: From Concept to
                     Code</p>
             </div>
-        </div>
+        </header>
 
         {# w-full (definite viewport width) + min-w-0 so this column can't shrink-wrap
            to a wide descendant (a nowrap table, the logged-in nav) and blow past the
            phone viewport — that bug let `overflow-x-auto` children never kick in. #}
         <div class="p-2 w-full min-w-0">
             <!-- Navigation -->
-            <div class="max-w-screen-md pl-2">
+            <nav class="max-w-screen-md pl-2" aria-label="Primary">
                 <!-- Desktop (lg+): single-row nav — content tabs + admin tabs (own group) -->
                 <div class="hidden lg:flex flex-row items-end gap-4">
                     <ul class="flex flex-row flex-wrap list-none gap-px">
@@ -132,12 +132,12 @@
                         {% endif %}
                     </div>
                 </details>
-            </div>
+            </nav>
 
             <!-- Content -->
-            <div class="bg-div-grey p-8 rounded-md border-4 border-navy">
+            <main class="bg-div-grey p-8 rounded-md border-4 border-navy">
                 {% block content %}{% endblock %}
-            </div>
+            </main>
         </div>
         <!-- Footer -->
         <footer class="p-2 flex flex-col items-center mt-auto">
@@ -145,7 +145,7 @@
                 not
                 any employer.
             </div>
-            <img class="size-12" src="/images/HotchkissLogo.svg?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" />
+            <img class="size-12" src="/images/HotchkissLogo.svg?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" alt="" />
         </footer>
     </div>
 </body>

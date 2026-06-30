@@ -228,6 +228,28 @@ async fn logs_route_excluded_from_request_log(/* no self-feed */) {
 }
 
 #[tokio::test]
+async fn base_layout_has_a11y_landmarks() {
+    // Lighthouse's landmark audit wants page content wrapped in semantic regions.
+    // base.html carries header (banner) / nav / main / footer — guard them so a
+    // future template refactor can't silently drop back to bare <div>s.
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("Landmarks", "# probe")
+        .await
+        .expect("seed");
+    let body = reqwest::get(server.url("/pages/Landmarks"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("<main"), "a <main> landmark");
+    assert!(body.contains("<nav"), "a <nav> landmark");
+    assert!(body.contains("<header"), "a <header> banner landmark");
+    assert!(body.contains("<footer"), "a <footer> contentinfo landmark");
+}
+
+#[tokio::test]
 async fn blog_index_empty_state() {
     let server = spawn_test_server().await.expect("spawn");
     let resp = reqwest::get(server.url("/blog")).await.unwrap();
