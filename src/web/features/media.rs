@@ -57,23 +57,41 @@ async fn serve_media_file(
     // drive can block for seconds — that must not pin a tokio worker (would
     // head-of-line-block unrelated requests). The admin upload path already
     // spawn_blocking's this; the serve hot path was the gap.
+    //
+    // BOUND it (CN.12): spawn_blocking keeps the stat off the worker, but the
+    // REQUEST still waited — a wedged / TCC-blocked drive hung the serve 25s+ (the
+    // v0.0.81 incident). A blocking stat can't be cancelled, so on timeout we
+    // ABANDON the task (it leaks ONE blocking thread until the stat eventually
+    // returns — logged loudly so the log viewer surfaces a wedged root) and fail
+    // fast with 503. The file READ (ServeFile, below) only runs once this stat has
+    // PASSED — i.e. the drive just answered — so the stat is the real chokepoint;
+    // bounding it covers the wedged-drive case without timing out a live stream.
+    const DISK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
     let store = state.media_store.clone();
     let sha = variant.sha256.clone();
     let hint = variant.storage_root.clone();
-    let path = match tokio::task::spawn_blocking(move || store.resolve_path(&sha, hint.as_deref()))
-        .await
-    {
-        Ok(Some(p)) => p,
-        Ok(None) => {
+    let resolve = tokio::task::spawn_blocking(move || store.resolve_path(&sha, hint.as_deref()));
+    let path = match tokio::time::timeout(DISK_TIMEOUT, resolve).await {
+        Ok(Ok(Some(p))) => p,
+        Ok(Ok(None)) => {
             tracing::warn!(
                 "media variant {} resolves to no mounted root (drive offline?)",
                 variant.variant_id
             );
             return (StatusCode::NOT_FOUND, "Not found").into_response();
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tracing::error!("media resolve task panicked: {e:?}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "media resolve failed").into_response();
+        }
+        Err(_elapsed) => {
+            tracing::error!(
+                "media resolve for variant {} timed out after {DISK_TIMEOUT:?} — wedged media root? \
+                 (the abandoned blocking stat leaks a thread until it returns); serving 503",
+                variant.variant_id
+            );
+            return (StatusCode::SERVICE_UNAVAILABLE, "media temporarily unavailable")
+                .into_response();
         }
     };
     let mime: mime_guess::mime::Mime = variant
