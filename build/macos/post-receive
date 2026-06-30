@@ -289,7 +289,12 @@ snapshot_prod_db_into_beta() {
             continue
         fi
         mkdir -p "$dst"
-        rsync -a --ignore-existing --exclude='.staging/' "$src/" "$dst/" \
+        # --max-size=2G: beta is EPHEMERAL and has no need for multi-GB assets. A
+        # large media-test file (78G) lived in prod's store and was re-copied into
+        # beta on EVERY deploy (and 3x over when pushes overlapped), dominating the
+        # sync. Nothing real on the site approaches 2G (images are KBs, web videos
+        # tens of MB), so skip the giants on beta only — prod + B2 still keep them.
+        rsync -a --ignore-existing --exclude='.staging/' --max-size=2G "$src/" "$dst/" \
             || echo "post-receive: media rsync $src -> $dst failed (non-fatal)" >&2
     done
 
