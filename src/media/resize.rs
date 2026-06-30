@@ -32,11 +32,7 @@ pub struct ResizedImage {
 /// source. Decodes once. Returns an empty vec when the source is already small
 /// (no variant smaller than it) — the original then serves alone.
 pub fn responsive_avif_variants(path: &Path, source_width: u32) -> Result<Vec<ResizedImage>> {
-    let targets: Vec<u32> = RESPONSIVE_WIDTHS
-        .iter()
-        .copied()
-        .filter(|&w| w < source_width)
-        .collect();
+    let targets = target_widths(source_width);
     if targets.is_empty() {
         return Ok(Vec::new());
     }
@@ -64,4 +60,49 @@ pub fn responsive_avif_variants(path: &Path, source_width: u32) -> Result<Vec<Re
         });
     }
     Ok(out)
+}
+
+/// The [`RESPONSIVE_WIDTHS`] strictly smaller than the source (never upscale).
+fn target_widths(source_width: u32) -> Vec<u32> {
+    RESPONSIVE_WIDTHS
+        .iter()
+        .copied()
+        .filter(|&w| w < source_width)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn target_widths_skip_at_or_above_source() {
+        assert_eq!(target_widths(2000), vec![480, 960]);
+        assert_eq!(target_widths(700), vec![480]); // 960 >= 700 → skipped
+        assert_eq!(target_widths(480), Vec::<u32>::new()); // not strictly less
+        assert_eq!(target_widths(100), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn resizes_a_source_image_to_an_avif_downscale() {
+        // 700px source → exactly one downscale at 480 (960 is skipped), so the
+        // test pays for a single rav1e encode.
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src.png");
+        let img = image::RgbImage::from_fn(700, 400, |x, _| {
+            image::Rgb([(x % 256) as u8, 128, 64])
+        });
+        image::DynamicImage::ImageRgb8(img).save(&src).unwrap();
+
+        let out = responsive_avif_variants(&src, 700).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].width, 480);
+        // Aspect preserved: 400 * 480 / 700 ≈ 274.
+        assert!((273..=275).contains(&out[0].height), "height {}", out[0].height);
+        // AVIF container: an `ftyp` box carrying the `avif` brand near the start.
+        assert!(
+            out[0].avif.windows(4).any(|w| w == b"avif"),
+            "output is not AVIF"
+        );
+    }
 }

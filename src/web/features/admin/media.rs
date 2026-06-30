@@ -261,10 +261,9 @@ pub async fn upload_media(
     // Responsive image variants (Phase CN): for an image, generate width-stepped
     // AVIFs from the original so the render can emit a srcset and the browser
     // pulls an appropriately-sized file. Best-effort — the original still serves.
-    if kind == MediaKind::Image {
-        if let (Some(w), sha) = (first.width, ingested[0].0.clone()) {
-            maybe_add_responsive_variants(&state, &hmac_key, media.media_id, sha, w).await;
-        }
+    if kind == MediaKind::Image && let Some(w) = first.width {
+        let sha = ingested[0].0.clone();
+        maybe_add_responsive_variants(&state, &hmac_key, media.media_id, sha, w).await;
     }
 
     // Auto-poster for video (non-fatal — the video still plays without one).

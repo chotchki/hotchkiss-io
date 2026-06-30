@@ -59,20 +59,14 @@ impl IntoResponse for StaticFile {
         match Asset::get(path.as_str()) {
             Some(content) => {
                 let mime = mime_guess::from_path(path).first_or_octet_stream();
-                let mut rb = Response::builder().header(header::CONTENT_TYPE, mime.as_ref());
-
-                if cfg!(debug_assertions) {
-                    rb = rb.header(header::CACHE_CONTROL, "no-store");
-                } else if versioned {
-                    // ?cb=<build epoch> changes every release → a year of immutable
-                    // caching, and the LCP-critical CSS/JS/fonts stop re-validating.
-                    rb = rb.header(header::CACHE_CONTROL, "public, max-age=31536000, immutable");
-                } else {
-                    // Un-versioned path (a bare favicon/manifest/apple-touch-icon
-                    // fetch with no ?cb=): a modest TTL so an update lands within a day.
-                    rb = rb
-                        .header(header::LAST_MODIFIED, BUILD_TIME)
-                        .header(header::CACHE_CONTROL, "max-age=86400");
+                let debug = cfg!(debug_assertions);
+                let mut rb = Response::builder()
+                    .header(header::CONTENT_TYPE, mime.as_ref())
+                    .header(header::CACHE_CONTROL, cache_control(debug, versioned));
+                // LAST_MODIFIED only helps the revalidatable case (un-versioned,
+                // release); immutable + no-store never revalidate.
+                if !debug && !versioned {
+                    rb = rb.header(header::LAST_MODIFIED, BUILD_TIME);
                 }
                 rb.body(Body::from(content.data)).unwrap()
             }
@@ -83,5 +77,36 @@ impl IntoResponse for StaticFile {
                 ))
                 .unwrap(),
         }
+    }
+}
+
+/// `Cache-Control` for a static asset (Phase CN). Versioned (`?cb=`) requests are
+/// immutable for a year — the URL carries the build epoch, so a stale cache can
+/// never serve the wrong bytes; un-versioned bare fetches get a modest TTL; debug
+/// never caches (live-reload). Split out as a pure fn so the release policy is
+/// unit-testable from the debug test harness.
+fn cache_control(debug: bool, versioned: bool) -> &'static str {
+    match (debug, versioned) {
+        (true, _) => "no-store",
+        (false, true) => "public, max-age=31536000, immutable",
+        (false, false) => "max-age=86400",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cache_control;
+
+    #[test]
+    fn cache_policy() {
+        // debug never caches, regardless of versioning (live-reload).
+        assert_eq!(cache_control(true, true), "no-store");
+        assert_eq!(cache_control(true, false), "no-store");
+        // release: a versioned (?cb=) hit caches a year immutable; a bare hit a day.
+        assert_eq!(
+            cache_control(false, true),
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(cache_control(false, false), "max-age=86400");
     }
 }

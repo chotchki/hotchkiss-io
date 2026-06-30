@@ -908,8 +908,10 @@ async fn blog_post_middle_shows_prev_and_next() {
     let body = reqwest::get(server.url("/blog/second-post"))
         .await.unwrap().text().await.unwrap();
 
-    assert!(body.contains("fa-arrow-left"), "Previous card missing: {body}");
-    assert!(body.contains("fa-arrow-right"), "Next card missing: {body}");
+    // Icons are now inline SVGs (Phase CN), so key on the card LABEL — "Previous"
+    // / "Next" appear only in this nav on a post page.
+    assert!(body.contains("Previous"), "Previous card missing: {body}");
+    assert!(body.contains("Next"), "Next card missing: {body}");
     assert!(
         body.contains("href=\"/blog/first-post\""),
         "Previous should link the older post: {body}"
@@ -932,15 +934,15 @@ async fn blog_post_ends_omit_one_side() {
     // Newest post: a Previous card (→ second) only, no Next.
     let newest = reqwest::get(server.url("/blog/third-post"))
         .await.unwrap().text().await.unwrap();
-    assert!(newest.contains("fa-arrow-left"), "newest should have a Previous card: {newest}");
-    assert!(!newest.contains("fa-arrow-right"), "newest must NOT have a Next card: {newest}");
+    assert!(newest.contains("Previous"), "newest should have a Previous card: {newest}");
+    assert!(!newest.contains("Next"), "newest must NOT have a Next card: {newest}");
     assert!(newest.contains("href=\"/blog/second-post\""), "Previous → second: {newest}");
 
     // Oldest post: a Next card (→ second) only, no Previous.
     let oldest = reqwest::get(server.url("/blog/first-post"))
         .await.unwrap().text().await.unwrap();
-    assert!(oldest.contains("fa-arrow-right"), "oldest should have a Next card: {oldest}");
-    assert!(!oldest.contains("fa-arrow-left"), "oldest must NOT have a Previous card: {oldest}");
+    assert!(oldest.contains("Next"), "oldest should have a Next card: {oldest}");
+    assert!(!oldest.contains("Previous"), "oldest must NOT have a Previous card: {oldest}");
     assert!(oldest.contains("href=\"/blog/second-post\""), "Next → second: {oldest}");
 }
 
@@ -953,8 +955,13 @@ async fn regular_page_has_no_post_nav() {
 
     let body = reqwest::get(server.url("/pages/about"))
         .await.unwrap().text().await.unwrap();
-    assert!(!body.contains("fa-arrow-left"), "no Previous card on a /pages page: {body}");
-    assert!(!body.contains("fa-arrow-right"), "no Next card on a /pages page: {body}");
+    // The BX prev/next nav (<nav aria-label="Post navigation">) is blog-only.
+    // Icons are generic <svg class="icon"> now (Phase CN), so anchor on the nav
+    // landmark, not an icon class.
+    assert!(
+        !body.contains("Post navigation"),
+        "a /pages page must not show the blog-only post nav: {body}"
+    );
 }
 
 /// Phase 16.3: /resume renders the résumé content (the newest child of the

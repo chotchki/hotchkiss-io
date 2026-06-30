@@ -404,6 +404,33 @@ mod tests {
     }
 
     #[test]
+    fn image_with_width_variants_renders_srcset() {
+        let mut orig = variant("korig", "image/png", None);
+        orig.width = Some(3000);
+        let mut v480 = variant("k480", "image/avif", None);
+        v480.width = Some(480);
+        let mut v960 = variant("k960", "image/avif", None);
+        v960.width = Some(960);
+        // Insert order shuffled — the render sorts by width.
+        let html = render_embed_html(&media("image"), &[v960, orig, v480]);
+        assert!(html.contains("srcset="), "{html}");
+        assert!(html.contains("/media/file/k480 480w"), "{html}");
+        assert!(html.contains("/media/file/k960 960w"), "{html}");
+        assert!(html.contains("/media/file/korig 3000w"), "{html}");
+        assert!(html.contains("sizes="), "{html}");
+        // src = the largest, for a no-srcset client + the zoom view.
+        assert!(html.contains("src=\"/media/file/korig\""), "{html}");
+    }
+
+    #[test]
+    fn legacy_image_without_widths_has_no_srcset() {
+        // A pre-CN image (no recorded widths) degrades to a single <img src>.
+        let html = render_embed_html(&media("image"), &[variant("only", "image/png", None)]);
+        assert!(html.contains("src=\"/media/file/only\""), "{html}");
+        assert!(!html.contains("srcset="), "{html}");
+    }
+
+    #[test]
     fn stl_renders_object_viewer() {
         let html = render_embed_html(&media("stl"), &[variant("stlkey", "model/stl", None)]);
         assert!(html.contains("<object class=\"stl-view"), "{html}");

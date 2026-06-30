@@ -32,3 +32,27 @@ async fn harness_boots_and_serves() {
         &body[..body.len().min(200)]
     );
 }
+
+/// End-to-end proof of the Phase CN build-time icon codegen: the 404 cat page
+/// calls `icons::house()`, a build.rs-generated askama macro emitting an inline
+/// `<svg class="icon">`. A real render exercises the whole pipeline (vendored SVG
+/// → codegen → macro → page) and confirms FontAwesome is gone.
+#[tokio::test]
+async fn build_time_icon_codegen_renders_inline_svg() {
+    let server = spawn_test_server().await.expect("spawn test server");
+
+    // Any unmatched route renders the 404 cat page.
+    let resp = reqwest::get(server.url("/no-such-route-xyz")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let body = resp.text().await.unwrap();
+
+    assert!(
+        body.contains("<svg class=\"icon\""),
+        "404 page should carry a build-time inline SVG icon; body starts: {}",
+        &body[..body.len().min(400)]
+    );
+    assert!(
+        !body.contains("fa-solid") && !body.contains("fontawesome"),
+        "FontAwesome should be fully gone from the rendered page"
+    );
+}
