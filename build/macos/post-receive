@@ -103,6 +103,27 @@ deploy() {
     local app_prev="$app_dst.prev"
     export CARGO_TARGET_DIR="$WORK_ROOT/$profile/target"
 
+    # Serialize deploys of THIS profile. Overlapping pushes (or one operator
+    # double-pushing) otherwise race the bundle swap below: three concurrent
+    # `mv`s nested the .app into .app.prev and left /Applications with NO live
+    # bundle — beta down, while a racer still printed "deployed". macOS has no
+    # `flock`, but `mkdir` is atomic; spin until we own the lock, with a
+    # stale-break so a crashed deploy can't wedge the next push forever. Per
+    # profile (beta + prod never block each other); released on subshell exit.
+    local lock_dir="/tmp/hio-deploy-$profile.lock"
+    local lock_waited=0
+    until mkdir "$lock_dir" 2>/dev/null; do
+        if (( lock_waited >= 600 )); then
+            echo "post-receive: $profile deploy lock held >600s; breaking stale lock" >&2
+            rm -rf "$lock_dir"
+        else
+            echo "post-receive: another $profile deploy in progress; waiting…" >&2
+            sleep 5
+            lock_waited=$(( lock_waited + 5 ))
+        fi
+    done
+    trap 'rm -rf "$lock_dir"' EXIT
+
     echo "post-receive: deploying $newsha -> $profile" >&2
 
     rm -rf "$src_dir"
@@ -158,6 +179,14 @@ deploy() {
         mv "$app_dst" "$app_prev"
     fi
     mv "$built" "$app_dst"
+    # Never restart the agent onto a non-bundle. `set -e` catches an mv ERROR but
+    # not an mv that NESTED into an existing dir (exit 0) — the failure mode that
+    # took beta down silently. The per-profile lock above makes the nest
+    # impossible, but a bad swap must still abort here, not relaunch onto nothing.
+    if [[ ! -x "$app_dst/Contents/MacOS/hotchkiss-io" ]]; then
+        echo "post-receive: $profile swap left no valid bundle at $app_dst; aborting before restart" >&2
+        exit 1
+    fi
     # Stop the running instance with SIGTERM, NOT `kickstart -k` (which SIGKILLs
     # the GUI tray app → macOS files a "<app> quit unexpectedly" crash report on
     # every deploy, piling dialogs up on the mini's screen). SIGTERM's default
