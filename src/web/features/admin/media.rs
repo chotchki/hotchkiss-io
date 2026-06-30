@@ -22,7 +22,7 @@ use crate::db::dao::crypto_key::CryptoKey;
 use crate::db::dao::media::{MediaDao, MediaKind, MediaVariantDao};
 use crate::media::poster::generate_poster;
 use crate::media::probe::{probe, Probed};
-use crate::media::resize::{responsive_avif_variants, ResizedImage};
+use crate::media::resize::{responsive_avif_variants, ResizeResult};
 use crate::media::{media_url_key, MediaStore};
 use crate::web::authentication_state::AuthenticationState;
 use crate::web::features::media::render_embed_html;
@@ -261,9 +261,9 @@ pub async fn upload_media(
     // Responsive image variants (Phase CN): for an image, generate width-stepped
     // AVIFs from the original so the render can emit a srcset and the browser
     // pulls an appropriately-sized file. Best-effort — the original still serves.
-    if kind == MediaKind::Image && let Some(w) = first.width {
+    if kind == MediaKind::Image {
         let sha = ingested[0].0.clone();
-        maybe_add_responsive_variants(&state, &hmac_key, media.media_id, sha, w).await;
+        maybe_add_responsive_variants(&state, &hmac_key, media.media_id, sha).await;
     }
 
     // Auto-poster for video (non-fatal — the video still plays without one).
@@ -481,21 +481,20 @@ async fn maybe_add_responsive_variants(
     hmac_key: &[u8],
     media_id: i64,
     original_sha: String,
-    source_width: i64,
 ) {
     let store = state.media_store.clone();
     let result: Result<()> = async {
         let path_store = store.clone();
-        let resized = tokio::task::spawn_blocking(move || -> Result<Vec<ResizedImage>> {
+        let resized = tokio::task::spawn_blocking(move || -> Result<ResizeResult> {
             let path = path_store
                 .resolve_path(&original_sha, None)
                 .ok_or_else(|| anyhow!("resize source {original_sha} not found in any media root"))?;
-            responsive_avif_variants(&path, source_width.max(0) as u32)
+            responsive_avif_variants(&path)
         })
         .await
         .map_err(|e| anyhow!("resize task panicked: {e}"))??;
 
-        for r in resized {
+        for r in resized.variants {
             let store = store.clone();
             let bytes = r.avif;
             let len = bytes.len() as i64;

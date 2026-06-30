@@ -27,39 +27,49 @@ pub struct ResizedImage {
     pub avif: Vec<u8>,
 }
 
-/// For a stored source image at `path` (whose width is `source_width`), produce a
-/// downscaled AVIF for each [`RESPONSIVE_WIDTHS`] strictly smaller than the
-/// source. Decodes once. Returns an empty vec when the source is already small
-/// (no variant smaller than it) — the original then serves alone.
-pub fn responsive_avif_variants(path: &Path, source_width: u32) -> Result<Vec<ResizedImage>> {
-    let targets = target_widths(source_width);
-    if targets.is_empty() {
-        return Ok(Vec::new());
-    }
+/// Resizing a source image: its TRUE dimensions (read from the decoded pixels,
+/// NOT a possibly-NULL DB column) + the downscaled AVIF variants.
+pub struct ResizeResult {
+    pub source_width: u32,
+    pub source_height: u32,
+    pub variants: Vec<ResizedImage>,
+}
 
+/// For a stored source image at `path`, produce a downscaled AVIF for each
+/// [`RESPONSIVE_WIDTHS`] strictly smaller than the source. Decodes once and reads
+/// the source dimensions FROM THE PIXELS — so it works for a media item whose
+/// `width` column is NULL (e.g. an attachment-migrated cover), which the old
+/// width-taking signature silently skipped. `variants` is empty when the source
+/// is already small (no width below it) — the original then serves alone.
+pub fn responsive_avif_variants(path: &Path) -> Result<ResizeResult> {
     let img = ImageReader::open(path)
         .with_context(|| format!("opening {} for resize", path.display()))?
         .with_guessed_format()?
         .decode()
         .with_context(|| format!("decoding {}", path.display()))?;
+    let (source_width, source_height) = (img.width(), img.height());
 
-    let mut out = Vec::with_capacity(targets.len());
-    for w in targets {
+    let mut variants = Vec::new();
+    for w in target_widths(source_width) {
         // Aspect-preserving box; resize() fits WITHIN (w, h) so read the actual
         // result dims back for the srcset `Nw` descriptor.
-        let h = ((img.height() as u64 * w as u64) / (img.width().max(1) as u64)).max(1) as u32;
+        let h = ((source_height as u64 * w as u64) / (source_width.max(1) as u64)).max(1) as u32;
         let resized = img.resize(w, h, FilterType::Lanczos3);
         let mut avif = Vec::new();
         resized
             .write_to(&mut Cursor::new(&mut avif), ImageFormat::Avif)
             .with_context(|| format!("AVIF-encoding width {w}"))?;
-        out.push(ResizedImage {
+        variants.push(ResizedImage {
             width: resized.width(),
             height: resized.height(),
             avif,
         });
     }
-    Ok(out)
+    Ok(ResizeResult {
+        source_width,
+        source_height,
+        variants,
+    })
 }
 
 /// The [`RESPONSIVE_WIDTHS`] strictly smaller than the source (never upscale).
@@ -94,14 +104,20 @@ mod tests {
         });
         image::DynamicImage::ImageRgb8(img).save(&src).unwrap();
 
-        let out = responsive_avif_variants(&src, 700).unwrap();
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].width, 480);
+        let out = responsive_avif_variants(&src).unwrap();
+        // Source dims come from the decoded pixels (NOT a DB column).
+        assert_eq!((out.source_width, out.source_height), (700, 400));
+        assert_eq!(out.variants.len(), 1);
+        assert_eq!(out.variants[0].width, 480);
         // Aspect preserved: 400 * 480 / 700 ≈ 274.
-        assert!((273..=275).contains(&out[0].height), "height {}", out[0].height);
+        assert!(
+            (273..=275).contains(&out.variants[0].height),
+            "height {}",
+            out.variants[0].height
+        );
         // AVIF container: an `ftyp` box carrying the `avif` brand near the start.
         assert!(
-            out[0].avif.windows(4).any(|w| w == b"avif"),
+            out.variants[0].avif.windows(4).any(|w| w == b"avif"),
             "output is not AVIF"
         );
     }

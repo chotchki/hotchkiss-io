@@ -17,7 +17,7 @@ use sqlx::SqlitePool;
 use crate::coordinator::backup::run_backup;
 use crate::db::dao::crypto_key::CryptoKey;
 use crate::db::dao::media::{MediaDao, MediaKind, MediaVariantDao};
-use crate::media::resize::{responsive_avif_variants, ResizedImage};
+use crate::media::resize::{responsive_avif_variants, ResizeResult};
 use crate::media::{media_url_key, MediaStore};
 use crate::settings::Settings;
 
@@ -95,26 +95,31 @@ async fn backfill_one(
     let Some(original) = variants.iter().find(|v| v.mime.starts_with("image/")) else {
         return Ok(0); // no image bytes to resize
     };
-    let Some(src_w) = m.width else {
-        return Ok(0); // unknown source dims → can't size the srcset
-    };
 
     let store_clone = store.clone();
     let sha = original.sha256.clone();
-    let resized = tokio::task::spawn_blocking(move || -> Result<Vec<ResizedImage>> {
+    let resized = tokio::task::spawn_blocking(move || -> Result<ResizeResult> {
         let path = store_clone
             .resolve_path(&sha, None)
             .ok_or_else(|| anyhow!("source bytes not found in any media root"))?;
-        responsive_avif_variants(&path, src_w.max(0) as u32)
+        responsive_avif_variants(&path)
     })
     .await
     .map_err(|e| anyhow!("resize task panicked: {e}"))??;
 
-    // Stamp the original so it's the largest srcset entry (+ the no-srcset src).
-    MediaVariantDao::set_dimensions(pool, original.variant_id, m.width, m.height).await?;
+    // Stamp the original with the TRUE decoded dims so it's the largest srcset
+    // entry (+ the no-srcset src). The `media.width` column is NULL for
+    // attachment-migrated covers — reading it was exactly what skipped them.
+    MediaVariantDao::set_dimensions(
+        pool,
+        original.variant_id,
+        Some(resized.source_width as i64),
+        Some(resized.source_height as i64),
+    )
+    .await?;
 
     let mut added = 0;
-    for r in resized {
+    for r in resized.variants {
         let store_clone = store.clone();
         let bytes = r.avif;
         let len = bytes.len() as i64;
