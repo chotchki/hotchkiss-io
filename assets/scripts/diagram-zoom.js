@@ -89,6 +89,12 @@
     clone.removeAttribute("style");
     clone.removeAttribute("class");
     clone.removeAttribute("tabindex");
+    // Drop srcset/sizes so the zoom view loads `src` — which the responsive
+    // render sets to the LARGEST (original) variant (Phase CN). Otherwise the
+    // browser would re-pick a small width-stepped variant off the inherited
+    // `sizes` hint and the deep-zoom would be blurry.
+    clone.removeAttribute("srcset");
+    clone.removeAttribute("sizes");
     clone.className = "diagram-lightbox__img";
 
     host.replaceChildren(clone);
