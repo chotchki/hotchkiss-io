@@ -181,3 +181,53 @@ The first beta deploy orders `beta.hotchkiss.io` from LE prod once; every later
 `main` push snapshots prod's DB into beta (`post-receive` → `snapshot_prod_db_into_beta`)
 and preserves that cert, so beta never re-orders and never trips the 5/week
 duplicate-cert rate limit.
+
+## 9. Code signing — Developer ID for durable Full Disk Access (Phase CP)
+
+The app reads media off external volumes (e.g. `/Volumes/MediaStorage4`), which
+macOS **TCC** gates — so the app needs **Full Disk Access**. TCC keys that grant
+on the code signature's *designated requirement*: an **ad-hoc** signature's is the
+per-build **cdhash** (changes every rebuild → the grant silently drops on every
+deploy and external reads start *hanging*); a **Developer ID** signature's is the
+**Team ID** (constant → the grant survives deploys). `build.sh` signs with
+`$CODESIGN_IDENTITY` when set, else ad-hoc — so this is opt-in per machine.
+
+One-time on the mini:
+
+1. The Developer ID cert + key must be in the keychain (skip if `security
+   find-identity -v -p codesigning` already lists `Developer ID Application: …
+   (TEAMID)`). Else export it WITH the key from a machine that has it (Keychain
+   Access → My Certificates → Export → `.p12`), copy over, then
+   `security import devid.p12 -k ~/Library/Keychains/login.keychain-db -P '<p12-pw>' -T /usr/bin/codesign`.
+
+2. Authorize codesign to use the key **headlessly** — without this a push-build
+   over ssh fails with `errSecInternalComponent` (no GUI to show the access prompt):
+   ```sh
+   security set-key-partition-list -S apple-tool:,apple: -s -k '<login-keychain-pw>' ~/Library/Keychains/login.keychain-db
+   ```
+   Verify over ssh: sign a throwaway mach-O and check `codesign -dvv` shows
+   `SIGN OK` + your `TeamIdentifier`.
+
+3. Point the build at the identity (off-repo; `post-receive` sources it). No
+   keychain password is needed here — the login keychain stays unlocked while the
+   mini is logged in, which the LaunchAgent requires anyway:
+   ```sh
+   mkdir -p ~/.config/hotchkiss-io
+   echo 'export CODESIGN_IDENTITY="Developer ID Application: Christopher Hotchkiss (G53N9PU948)"' > ~/.config/hotchkiss-io/build.env
+   ```
+
+4. Re-install the hook so it sources `build.env` (the hook is a *copy*, so a
+   `build/macos/post-receive` change does NOT auto-apply on push):
+   ```sh
+   G=~/repos/hotchkiss-io.git
+   git --git-dir="$G" show main:build/macos/post-receive > "$G/hooks/post-receive" && chmod +x "$G/hooks/post-receive"
+   ```
+
+5. Deploy. The build log prints `codesign: Developer ID Application: …`. Then
+   grant **Full Disk Access** to `/Applications/Hotchkiss-IO.app` (+ the beta app)
+   in **System Settings → Privacy & Security**, restart the agent
+   (`launchctl kill TERM gui/$(id -u)/io.hotchkiss.web`) — and the grant now
+   **persists across every later deploy** (no more re-granting).
+
+> Notarization + `.pkg` stay retired. This is signing-*identity* only, for TCC
+> stability; the binary still never leaves machines we control.

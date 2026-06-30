@@ -20,6 +20,14 @@ set -euo pipefail
 # launchctl / homebrew tools live so build.sh can find them.
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
+# Signing config (Phase CP), OUTSIDE the repo so it can hold the keychain unlock
+# password; absent on dev/CI, where build.sh falls back to ad-hoc. It exports
+# CODESIGN_IDENTITY (a Developer ID → the macOS Full Disk Access / TCC grant
+# survives deploys instead of dropping on every ad-hoc rebuild) and unlocks the
+# signing keychain so this headless push-build can codesign without a GUI prompt.
+# One-time keychain import + ACL setup is in build/macos/SETUP.md.
+[ -f "$HOME/.config/hotchkiss-io/build.env" ] && . "$HOME/.config/hotchkiss-io/build.env"
+
 WORK_ROOT="$HOME/.cache/hotchkiss-io-build"
 # Per-deploy build logs (the build's combined stdout+stderr) land here, pruned to
 # the most recent KEEP_LOGS per profile — so a failed deploy stays debuggable after
