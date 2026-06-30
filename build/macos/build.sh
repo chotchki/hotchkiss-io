@@ -2,14 +2,14 @@
 # Massive thanks to @dylanwh for the original approach
 # https://github.com/dylanwh/lilguy/blob/main/macos/build.sh
 #
-# Builds a signed Hotchkiss-IO[-Beta].app for direct deployment on a self-hosted
-# Mac. Signs with $CODESIGN_IDENTITY (a Developer ID) when set, else ad-hoc — the
-# binary never leaves machines we control, so still NO notarization / .pkg. A
-# STABLE Developer ID identity is what lets the macOS Full Disk Access (TCC)
-# grant survive deploys: TCC keys the grant on the signature's designated
-# requirement, which for a Developer ID is the Team ID (constant), but for an
-# ad-hoc signature is the per-build cdhash — so ad-hoc silently drops the grant
-# every single deploy (Phase CP, the MediaStorage4 / external-volume incident).
+# Builds an ad-hoc-signed Hotchkiss-IO[-Beta].app for direct deployment on a
+# self-hosted Mac (no notarization / .pkg — the binary never leaves machines we
+# control). The DEPLOY then RE-SIGNS the app with a stable Developer ID via a
+# GUI-session signer agent (post-receive -> io.hotchkiss.signer -> sign-agent.sh,
+# Phase CP) so the macOS Full Disk Access (TCC) grant survives deploys instead of
+# dropping on every ad-hoc cdhash change. Signing is delegated there because
+# codesign can't reach the keychain from the headless push hook
+# (errSecInternalComponent — a non-GUI session can't unlock the signing key).
 #
 # Honors CARGO_TARGET_DIR so the post-receive deploy hook can persist
 # incremental build artifacts across pushes.
@@ -79,15 +79,12 @@ sed -e "s;%VERSION%;$VERSION;g" \
     build/macos/Info.plist > "$APP/Contents/Info.plist"
 cp build/macos/HotchkissLogox1024.icns "$APP/Contents/Resources/"
 
-# Stable Developer ID (durable TCC/Full Disk Access) when $CODESIGN_IDENTITY is
-# set; ad-hoc "-" otherwise so a cert-less dev/CI build still works.
-SIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
-if [[ "$SIGN_IDENTITY" == "-" ]]; then
-  echo "codesign: ad-hoc (set CODESIGN_IDENTITY to a Developer ID for durable Full Disk Access)" >&2
-else
-  echo "codesign: $SIGN_IDENTITY" >&2
-fi
-codesign --force --sign "$SIGN_IDENTITY" --options runtime "$APP/Contents/MacOS/$EXE"
+# Ad-hoc sign so the binary RUNS (arm64 requires at least an ad-hoc signature).
+# The deploy then re-signs with a stable Developer ID via the GUI-session signer
+# agent — codesign can't reach the keychain from the headless push hook, and a
+# stable identity is what keeps the Full Disk Access (TCC) grant alive across
+# deploys (Phase CP). A local/dev build just stays ad-hoc, which is fine.
+codesign --force --sign - --options runtime "$APP/Contents/MacOS/$EXE"
 
 ABSOLUTE_APP="$(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
 echo "BUILT_APP=$ABSOLUTE_APP"

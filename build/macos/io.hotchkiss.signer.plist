@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Phase CP signer agent. Loaded into the user's GUI domain (launchctl bootstrap
+     gui/<uid>) so codesign can reach the login-keychain signing key, which the
+     non-GUI push-receive hook cannot. WatchPaths fires it whenever the hook drops
+     a *.request file naming an app to Developer-ID-sign. RunAtLoad is false: it's
+     purely event-driven, a short one-shot per trigger. Absolute paths are required
+     in a LaunchAgent plist (no $HOME expansion) — hardcoded to chris's mini, like
+     io.hotchkiss.web.plist. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.hotchkiss.signer</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/chotchki/.config/hotchkiss-io/sign-agent.sh</string>
+    </array>
+    <key>WatchPaths</key>
+    <array>
+        <string>/Users/chotchki/.config/hotchkiss-io/sign/requests</string>
+    </array>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/Users/chotchki/Library/Logs/io.hotchkiss.web/signer.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/chotchki/Library/Logs/io.hotchkiss.web/signer.err</string>
+</dict>
+</plist>

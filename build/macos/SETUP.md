@@ -188,46 +188,47 @@ The app reads media off external volumes (e.g. `/Volumes/MediaStorage4`), which
 macOS **TCC** gates — so the app needs **Full Disk Access**. TCC keys that grant
 on the code signature's *designated requirement*: an **ad-hoc** signature's is the
 per-build **cdhash** (changes every rebuild → the grant silently drops on every
-deploy and external reads start *hanging*); a **Developer ID** signature's is the
-**Team ID** (constant → the grant survives deploys). `build.sh` signs with
-`$CODESIGN_IDENTITY` when set, else ad-hoc — so this is opt-in per machine.
+deploy and external reads start *hanging* — the v0.0.81 incident); a **Developer
+ID** signature's is the **Team ID** (constant → the grant survives deploys).
 
-One-time on the mini:
+**The gotcha that shapes this whole design:** `codesign` cannot reach the keychain
+signing key from the `git push` receive hook. That hook runs in a **non-GUI sshd
+session**, and macOS won't unlock a keychain key there — every attempt fails with
+`errSecInternalComponent`. A *dedicated* keychain doesn't help (same session wall);
+`launchctl asuser` to hop into the GUI session needs **root**. So signing is done
+by a **LaunchAgent running in the logged-in GUI session** (`io.hotchkiss.signer`):
+`build.sh` ad-hoc-signs (so the app runs), then `post-receive`'s `sign_with_devid`
+drops a request file the agent WatchPaths, the agent re-signs with the Developer ID
+*in-session*, and the hook waits for the result before swapping.
 
-1. The Developer ID cert + key must be in the keychain (skip if `security
-   find-identity -v -p codesigning` already lists `Developer ID Application: …
-   (TEAMID)`). Else export it WITH the key from a machine that has it (Keychain
-   Access → My Certificates → Export → `.p12`), copy over, then
-   `security import devid.p12 -k ~/Library/Keychains/login.keychain-db -P '<p12-pw>' -T /usr/bin/codesign`.
+**Automated install** — from the repo root on a machine that has the `.p12`:
+```sh
+bash build/macos/install-signer-agent.sh [path-to.p12] [mini-host]
+```
+It imports the cert into the login keychain + runs `set-key-partition-list`, writes
+`~/.config/hotchkiss-io/build.env` (just `export CODESIGN_IDENTITY="Developer ID
+Application: … (TEAMID)"`), installs `sign-agent.sh` + the `io.hotchkiss.signer`
+LaunchAgent and bootstraps it into `gui/<uid>`, re-installs the `post-receive` hook
+(it's a *copy*, so a `build/macos/post-receive` change never auto-applies), and
+**end-to-end tests** the agent by signing a throwaway bundle through it.
 
-2. Authorize codesign to use the key **headlessly** — without this a push-build
-   over ssh fails with `errSecInternalComponent` (no GUI to show the access prompt):
-   ```sh
-   security set-key-partition-list -S apple-tool:,apple: -s -k '<login-keychain-pw>' ~/Library/Keychains/login.keychain-db
-   ```
-   Verify over ssh: sign a throwaway mach-O and check `codesign -dvv` shows
-   `SIGN OK` + your `TeamIdentifier`.
+What the installer sets up, for reference:
+- **cert + ACL** (one-time): the Developer ID identity in the login keychain, plus
+  `security set-key-partition-list -S apple-tool:,apple: -s -k '<login-pw>' ~/Library/Keychains/login.keychain-db`
+  so the GUI-session agent signs without an interactive prompt.
+- `~/.config/hotchkiss-io/build.env` → `export CODESIGN_IDENTITY="…"`. Present →
+  the deploy re-signs; absent (dev/CI) → plain ad-hoc.
+- `~/.config/hotchkiss-io/sign-agent.sh` + `~/Library/LaunchAgents/io.hotchkiss.signer.plist`,
+  bootstrapped: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.hotchkiss.signer.plist`.
+- the `post-receive` hook re-installed into `~/repos/hotchkiss-io.git/hooks/`.
 
-3. Point the build at the identity (off-repo; `post-receive` sources it). No
-   keychain password is needed here — the login keychain stays unlocked while the
-   mini is logged in, which the LaunchAgent requires anyway:
-   ```sh
-   mkdir -p ~/.config/hotchkiss-io
-   echo 'export CODESIGN_IDENTITY="Developer ID Application: Christopher Hotchkiss (G53N9PU948)"' > ~/.config/hotchkiss-io/build.env
-   ```
+After install, **deploy** (`git push origin main` → beta; a `v*` tag → prod). The
+build log prints `post-receive: Developer ID re-signed via signer agent`. Then grant
+**Full Disk Access** to `/Applications/Hotchkiss-IO.app` (+ the beta app) in **System
+Settings → Privacy & Security**, restart it (`launchctl kill TERM gui/$(id -u)/io.hotchkiss.web`),
+and the grant **persists across every later deploy** — the identity is now stable.
 
-4. Re-install the hook so it sources `build.env` (the hook is a *copy*, so a
-   `build/macos/post-receive` change does NOT auto-apply on push):
-   ```sh
-   G=~/repos/hotchkiss-io.git
-   git --git-dir="$G" show main:build/macos/post-receive > "$G/hooks/post-receive" && chmod +x "$G/hooks/post-receive"
-   ```
-
-5. Deploy. The build log prints `codesign: Developer ID Application: …`. Then
-   grant **Full Disk Access** to `/Applications/Hotchkiss-IO.app` (+ the beta app)
-   in **System Settings → Privacy & Security**, restart the agent
-   (`launchctl kill TERM gui/$(id -u)/io.hotchkiss.web`) — and the grant now
-   **persists across every later deploy** (no more re-granting).
-
-> Notarization + `.pkg` stay retired. This is signing-*identity* only, for TCC
-> stability; the binary still never leaves machines we control.
+> The mini must stay **logged into the GUI** (it already must, for the tray app) —
+> the signer agent lives in that session. Notarization + `.pkg` stay retired; this
+> is signing-*identity* only, for TCC stability. The binary never leaves machines
+> we control.

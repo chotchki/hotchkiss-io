@@ -20,12 +20,13 @@ set -euo pipefail
 # launchctl / homebrew tools live so build.sh can find them.
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-# Signing config (Phase CP), OUTSIDE the repo so it can hold the keychain unlock
-# password; absent on dev/CI, where build.sh falls back to ad-hoc. It exports
-# CODESIGN_IDENTITY (a Developer ID → the macOS Full Disk Access / TCC grant
-# survives deploys instead of dropping on every ad-hoc rebuild) and unlocks the
-# signing keychain so this headless push-build can codesign without a GUI prompt.
-# One-time keychain import + ACL setup is in build/macos/SETUP.md.
+# Signing config (Phase CP), OUTSIDE the repo + absent on dev/CI. It exports
+# CODESIGN_IDENTITY (a Developer ID). When set, deploy() re-signs the built app
+# with that identity so the macOS Full Disk Access (TCC) grant survives deploys
+# (ad-hoc's cdhash changes every build → the grant drops, hanging external-volume
+# media). codesign can't reach the keychain from THIS non-GUI sshd hook, so the
+# re-sign is delegated to a GUI-session agent (sign_with_devid below). One-time
+# setup (cert + key-partition-list + the signer LaunchAgent) is in SETUP.md §9.
 [ -f "$HOME/.config/hotchkiss-io/build.env" ] && . "$HOME/.config/hotchkiss-io/build.env"
 
 WORK_ROOT="$HOME/.cache/hotchkiss-io-build"
@@ -34,6 +35,48 @@ WORK_ROOT="$HOME/.cache/hotchkiss-io-build"
 # the push window closes (the build also still streams live to the pushing client).
 LOG_DIR="$HOME/Library/Logs/hio-deploy"
 KEEP_LOGS=5
+
+# sign_with_devid <app_path>
+#
+# Re-sign the built app with the Developer ID. codesign fails from THIS non-GUI
+# sshd hook (errSecInternalComponent — it can't unlock the keychain key, and
+# `launchctl asuser` into the GUI session needs root), so hand the app to the
+# io.hotchkiss.signer LaunchAgent running in the logged-in GUI session: drop a
+# request file (it WatchPaths the dir) and wait for its result. Returns non-zero
+# on failure or timeout, so a signing problem ABORTS the deploy rather than
+# shipping an ad-hoc binary that would silently drop the Full Disk Access grant.
+sign_with_devid() {
+    local app="$1"
+    local sdir="$HOME/.config/hotchkiss-io/sign"
+    local token; token="$(basename "$app" .app).$$"
+    local req="$sdir/requests/$token.request"
+    local res="$sdir/results/$token.result"
+
+    mkdir -p "$sdir/requests" "$sdir/results"
+    rm -f "$res"
+    printf '%s' "$app" > "$req"           # WatchPaths fires io.hotchkiss.signer
+
+    local waited=0
+    while [[ ! -f "$res" && $waited -lt 60 ]]; do
+        sleep 1; waited=$((waited + 1))
+        # Belt-and-suspenders: if a coalesced WatchPaths event missed, nudge the
+        # agent every 10s (a no-op if it's already running / mid-sign).
+        if [[ $((waited % 10)) -eq 0 ]]; then
+            launchctl kickstart "gui/$(id -u)/io.hotchkiss.signer" 2>/dev/null || true
+        fi
+    done
+
+    if [[ ! -f "$res" ]]; then
+        rm -f "$req"
+        echo "post-receive: signer timed out after ${waited}s — is io.hotchkiss.signer loaded and the mini logged in?" >&2
+        return 1
+    fi
+    local out; out="$(cat "$res")"; rm -f "$res"
+    case "$out" in
+        OK*) echo "post-receive: Developer ID re-signed via signer agent" >&2; return 0 ;;
+        *)   echo "post-receive: signer reported: $out" >&2; return 1 ;;
+    esac
+}
 
 # deploy <newsha> <profile> <app_dst> <launch_label>
 #
