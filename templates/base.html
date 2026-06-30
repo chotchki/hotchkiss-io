@@ -40,7 +40,13 @@
     <div class="flex flex-col justify-center items-center">
         <!-- Jumbotron image -->
         <div class="mb-2 py-4 max-w-lg flex flex-col sm:flex-row items-center sm:items-end text-center sm:text-left">
-            <img class="size-40 m-2 rounded-full border-8 border-navy" src="/images/Photo.avif?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" />
+            {# Jumbotron headshot: displays at 160px (size-40), so srcset offers a
+               320px (2x) and the 480px Photo.avif (3x + no-srcset fallback + the
+               og:image seo.rs points at). Right-sized from the master (Phase CN). #}
+            <img class="size-40 m-2 rounded-full border-8 border-navy" width="160" height="160"
+                src="/images/Photo.avif?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"
+                srcset="/images/Photo-320.avif?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}} 320w, /images/Photo.avif?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}} 480w"
+                sizes="160px" alt="Christopher Hotchkiss" />
             <div class="mb-2">
                 <h1 class="font-display text-xl text-navy uppercase underline underline-offset-8 decoration-yellow">
                     Christopher Hotchkiss
