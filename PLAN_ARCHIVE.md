@@ -434,3 +434,13 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] CM.2 - Rewrite history (git-filter-repo replace-text + replace-message); verify clean + code unchanged
 - [x] CM.3 - Push gate: public-mirror branch/tag scope + mini reconciliation (deploy-aware)
 
+---
+
+## 2026-06-30
+
+## Phase CP - CP - Stable code signing (Developer ID) for TCC/FDA persistence
+- [x] CP.0 - Phase exit: prod + beta are signed with chris's Apple Developer ID (a stable identity), so the Full Disk Access (TCC) grant survives every deploy — grant FDA once, never re-grant after a push; verified across two consecutive deploys with MediaStorage4-hosted media serving throughout (no re-grant, no 25s hang). Signing-IDENTITY only — Apple notarization + .pkg stay retired
+- [x] CP.1 - build.sh: sign with the Developer ID Application cert instead of ad-hoc `codesign -s -`. Resolve the identity from $SIGN_IDENTITY (the "Developer ID Application: … (TEAMID)" string) with ad-hoc as the FALLBACK when it's unset/absent (so a cert-less dev or CI build still works). Both --profile beta + prod sign with the same cert. Minimal — no hardened runtime / notarization (not needed without public download distribution; this is for TCC identity stability only)
+- [x] CP.2 - One-time mini keychain setup (build/macos/SETUP.md): import the Developer ID Application cert + private key into the keychain the post-receive build uses, and make NON-INTERACTIVE codesign work from the ssh/post-receive context (no GUI) — unlock the keychain + `security set-key-partition-list -S apple-tool:,apple: -s -k <pw> <keychain>` so codesign signs without a prompt. The real gotcha: a `git push` build runs OUTSIDE the GUI session, so the signing key must be reachable + ACL-allowed headless
+- [x] CP.3 - Grant Full Disk Access ONCE to the Developer-ID-signed app, then verify the grant PERSISTS across a deploy: push twice and confirm MediaStorage4-hosted media keeps serving with no re-grant + no 25s hang. Docs: CLAUDE.md + SETUP.md (signing is now Developer ID for durable TCC; notarization/.pkg still retired; FDA is a one-time grant). Ship beta→prod
+
