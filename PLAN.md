@@ -66,13 +66,6 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] 15.4 - Auto-generate a lower-res STL (SPEC goal) — decide build-time vs on-upload; may defer.
 - [ ] 15.5 - Author the 5 gallery entries (photos + descriptions + files).
 - [ ] 15.6 - e2e coverage for the 3D gallery; CLAUDE.md/SPEC update.
-## Phase CT - Analytics custom date-range picker
-- [ ] CT.0 - Phase exit: /admin/analytics supports a custom from/to datetime range (native datetime-local) threaded through all queries with an upper bound; presets still work; verified isolating a post-deploy window
-- [x] CT.1 - Introduce Window{from,to} (concrete UTC SQLite-datetime bounds); refactor request_log.rs queries + noisy_ips from since_days/cutoff to ts >= ?from AND ts < ?to; keep ts-index usage
-- [x] CT.2 - Handler: parse ?from=&to= (+ tz offset) in AnalyticsQuery, compute the Window (custom overrides preset; preset = now-Ndays..now); graceful fallback on bad input (never 500)
-- [x] CT.3 - UI: datetime-local from/to GET form in dashboard.html within the CQ.7 control model (hidden paths/audience + tz offset; native submit = no-JS fallback; htmx swaps #analytics-content); show active range + clear-to-presets
-- [x] CT.4 - Tests: Window bound predicate (request inside vs outside the range), custom overrides preset, bad from/to → default, existing analytics tests green
-- [x] CT.5 - CLAUDE.md update: document the custom range picker + Window refactor + tz handling
 
 ## Backlog (not yet phased)
 

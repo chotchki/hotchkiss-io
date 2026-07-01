@@ -582,3 +582,15 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [x] CS.5 - Tests: transform-cache unit tests, feed 304 conditional-request integration test, cover-date bump test; existing feed test still green
 - [x] CS.6 - CLAUDE.md update: document the transform/excerpt cache, feed ETag/304, and the cover-date fix
 
+---
+
+## 2026-07-01
+
+## Phase CT - Analytics custom date-range picker
+- [x] CT.0 - Phase exit: /admin/analytics supports a custom from/to datetime range (native datetime-local) threaded through all queries with an upper bound; presets still work; verified isolating a post-deploy window
+- [x] CT.1 - Introduce Window{from,to} (concrete UTC SQLite-datetime bounds); refactor request_log.rs queries + noisy_ips from since_days/cutoff to ts >= ?from AND ts < ?to; keep ts-index usage
+- [x] CT.2 - Handler: parse ?from=&to= (+ tz offset) in AnalyticsQuery, compute the Window (custom overrides preset; preset = now-Ndays..now); graceful fallback on bad input (never 500)
+- [x] CT.3 - UI: datetime-local from/to GET form in dashboard.html within the CQ.7 control model (hidden paths/audience + tz offset; native submit = no-JS fallback; htmx swaps #analytics-content); show active range + clear-to-presets
+- [x] CT.4 - Tests: Window bound predicate (request inside vs outside the range), custom overrides preset, bad from/to → default, existing analytics tests green
+- [x] CT.5 - CLAUDE.md update: document the custom range picker + Window refactor + tz handling
+
