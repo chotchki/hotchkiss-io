@@ -32,8 +32,10 @@ async fn favicon_and_apple_icon_served_at_root() {
         "favicon content-type should be an image: {ct}"
     );
 
-    let resp = reqwest::get(server.url("/apple-touch-icon.png")).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "/apple-touch-icon.png must serve, not 404");
+    for icon in ["/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"] {
+        let resp = reqwest::get(server.url(icon)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{icon} must serve, not 404");
+    }
 }
 
 #[tokio::test]

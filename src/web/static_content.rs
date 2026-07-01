@@ -21,6 +21,8 @@ pub fn static_content() -> Router {
         // maps the URL path to the asset path, and the icon lives under images/.
         .route("/favicon.ico", get(favicon))
         .route("/apple-touch-icon.png", get(apple_touch_icon))
+        // Legacy iOS probes the -precomposed variant at root too; serve the same icon.
+        .route("/apple-touch-icon-precomposed.png", get(apple_touch_icon))
         .route("/images/{*file}", get(static_handler))
         .route("/manifest.webmanifest", get(static_handler))
         // /robots.txt is served dynamically (host-aware Sitemap directive + beta
