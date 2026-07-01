@@ -19,6 +19,8 @@ pub mod users;
 pub fn admin_router() -> Router<AppState> {
     Router::new()
         .route("/analytics", get(analytics::show_analytics))
+        // Per-IP drill-down (CQ.4): scan-fingerprint detail for one IP.
+        .route("/analytics/ip/{ip}", get(analytics::show_ip_detail))
         .route("/pages", get(pages::show_admin_pages))
         .route("/pages/reorder", post(pages::reorder_pages))
         // Media library (Phase BZ). Upload disables the body limit for video.

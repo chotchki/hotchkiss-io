@@ -103,14 +103,21 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
 
     let router = router.layer(
         ServiceBuilder::new()
-            // Outermost: turn ANY handler panic into a styled 500 instead of a
-            // dropped connection (an uncaught panic resets the connection — a
+            // OUTERMOST: log every request + its final response status. Layered
+            // OUTER to CatchPanicLayer ON PURPOSE (CQ.1.1) — a handler panic unwinds
+            // PAST this layer's post-`next.run` insert, so inside the catch it would
+            // never see (nor log) the resulting 500. Outside it, `next.run` returns
+            // CatchPanicLayer's synthesized 500 as a normal response and records it,
+            // so panic-500s show up in the access log + analytics instead of being an
+            // invisible blind spot. (log_requests does no fallible work that would
+            // panic, so nothing above it needs the catch.)
+            .layer(axum::middleware::from_fn_with_state(log_pool, log_requests))
+            // Turn ANY handler (or inner-middleware) panic into a styled 500 instead
+            // of a dropped connection (an uncaught panic resets the connection — a
             // `000`, no response). Belt-and-suspenders behind transform()'s own
             // catch_unwind: no content or handler bug should crash a request or,
             // via the feed (which transforms every post), blank the whole feed.
             .layer(CatchPanicLayer::custom(handle_panic))
-            // See every request + the final response status.
-            .layer(axum::middleware::from_fn_with_state(log_pool, log_requests))
             .layer(
                 TraceLayer::new_for_http()
                     .make_span_with(DefaultMakeSpan::new().include_headers(true))

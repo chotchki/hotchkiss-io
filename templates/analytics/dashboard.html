@@ -2,44 +2,60 @@
 
 {% block title %}Analytics{% endblock %}
 
-{% block head %}{% endblock %}
+{% block head %}
+<!-- d3 line chart (CQ.7) — vendored full d3@7 UMD, admin-only + deferred (this page is
+     gated, non-indexed, off the public LCP path, so it never touches Phase CN's budget). -->
+<script defer src="/vendor/d3/d3.min.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<script defer src="/scripts/analytics-chart.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+{% endblock %}
 
 {% block content %}
 <div class="max-w-5xl mx-auto">
 <h2 class="font-display text-lg text-navy uppercase mb-1">Analytics</h2>
+<!-- CQ.7 control model: every toggle hx-get's the whole page and swaps only this
+     wrapper (hx-target/hx-select/hx-push-url are inherited by the links below), so the
+     chart + tables + stats + URL always agree. Each toggle keeps its href as the no-JS
+     fallback (a full-page nav). -->
+<div id="analytics-content" hx-target="#analytics-content" hx-select="#analytics-content" hx-push-url="true">
 <p class="text-sm text-navy mb-4">Last {{ since_days }} days</p>
 
 <!-- Range selector -->
 <div class="flex flex-row flex-wrap items-center gap-2 mb-3 text-sm">
     <span class="text-navy uppercase text-xs mr-1">Range</span>
-    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 7 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since=7&metric={{ metric }}&paths={{ paths_mode }}">7d</a>
-    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 30 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since=30&metric={{ metric }}&paths={{ paths_mode }}">30d</a>
-    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 90 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since=90&metric={{ metric }}&paths={{ paths_mode }}">90d</a>
+    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 7 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since=7&paths={{ paths_mode }}&audience={{ audience }}" href="/admin/analytics?since=7&paths={{ paths_mode }}&audience={{ audience }}">7d</a>
+    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 30 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since=30&paths={{ paths_mode }}&audience={{ audience }}" href="/admin/analytics?since=30&paths={{ paths_mode }}&audience={{ audience }}">30d</a>
+    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 90 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since=90&paths={{ paths_mode }}&audience={{ audience }}" href="/admin/analytics?since=90&paths={{ paths_mode }}&audience={{ audience }}">90d</a>
 </div>
 
-<!-- Metric toggle -->
+<!-- Audience toggle doubling as the 3-chip honesty display (CQ.2): each chip shows its
+     own count, so all three are visible at once (humans + bots = all), and clicking
+     filters the headline numbers + chart + top pages. ua_class is INFERRED from the
+     (spoofable) User-Agent — directional, not authoritative. -->
 <div class="flex flex-row flex-wrap items-center gap-2 mb-4 text-sm">
-    <span class="text-navy uppercase text-xs mr-1">Show</span>
-    <a class="px-2 py-1 rounded-sm {% if metric == "total" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric=total&paths={{ paths_mode }}">Total views</a>
-    <a class="px-2 py-1 rounded-sm {% if metric == "unique" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric=unique&paths={{ paths_mode }}">Unique visitors</a>
+    <span class="text-navy uppercase text-xs mr-1" title="Inferred from the User-Agent — spoofable, directional only">Audience</span>
+    <a class="px-2 py-1 rounded-sm {% if audience == "all" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=all" href="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=all">All {{ audience_counts.all }}</a>
+    <a class="px-2 py-1 rounded-sm {% if audience == "humans" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=humans" href="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=humans">Humans {{ audience_counts.humans }}</a>
+    <a class="px-2 py-1 rounded-sm {% if audience == "bots" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=bots" href="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=bots">Bots {{ audience_counts.bots }}</a>
 </div>
 
 <div class="flex flex-row flex-wrap gap-x-12 gap-y-3 mb-6">
-    <div><span class="text-3xl text-navy">{{ total_requests }}</span><br/><span class="text-sm">total views</span></div>
-    <div><span class="text-3xl text-navy">{{ distinct_ips }}</span><br/><span class="text-sm">unique visitors</span></div>
+    <div><span class="text-3xl text-navy">{{ total_requests }}</span><br/><span class="text-sm">{% if audience == "all" %}total views{% else %}{{ audience }} views{% endif %}</span></div>
+    <div><span class="text-3xl text-navy">{{ distinct_ips }}</span><br/><span class="text-sm">unique visitors{% if audience != "all" %} ({{ audience }}){% endif %}</span></div>
 </div>
 
-<h3 class="font-display text-navy uppercase mt-6 mb-2">
-    {% if metric == "unique" %}Unique visitors per day{% else %}Views per day{% endif %}
-</h3>
-<div class="mb-8 border border-div-grey rounded-md p-2 bg-white overflow-x-auto">
-    {{ chart_svg|safe }}
+<h3 class="font-display text-navy uppercase mt-6 mb-2">Traffic per day</h3>
+<p class="text-xs text-navy/60 mb-1">Total views vs unique visitors — the gap is the repeat/scanner signal.</p>
+<div class="mb-8 border border-div-grey rounded-md p-2 bg-white">
+    <div id="ts-chart" class="w-full"></div>
+    <!-- JSON island (CQ.7): NUMERIC data only (dates + counts), never attacker strings
+         (those stay in the auto-escaped askama tables below — the XSS boundary). -->
+    <script type="application/json" id="ts-data">{{ ts_json|safe }}</script>
 </div>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Top pages</h3>
 <div class="flex flex-row flex-wrap items-center gap-2 mb-1 text-sm">
-    <a class="px-2 py-0.5 rounded-sm {% if paths_mode == "content" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric={{ metric }}&paths=content">Content</a>
-    <a class="px-2 py-0.5 rounded-sm {% if paths_mode == "all" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" href="/admin/analytics?since={{ since_days }}&metric={{ metric }}&paths=all">All (incl. probes)</a>
+    <a class="px-2 py-0.5 rounded-sm {% if paths_mode == "content" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since={{ since_days }}&paths=content&audience={{ audience }}" href="/admin/analytics?since={{ since_days }}&paths=content&audience={{ audience }}">Content</a>
+    <a class="px-2 py-0.5 rounded-sm {% if paths_mode == "all" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since={{ since_days }}&paths=all&audience={{ audience }}" href="/admin/analytics?since={{ since_days }}&paths=all&audience={{ audience }}">All (incl. probes)</a>
 </div>
 <p class="text-xs text-navy/60 mb-1">Static assets excluded. {% if paths_mode == "all" %}Showing ALL requests including 4xx/5xx — the bot/scanner probes.{% else %}Successful loads only (status &lt; 400).{% endif %}</p>
 <div class="overflow-x-auto">
@@ -47,6 +63,51 @@
     {% for row in by_path %}
     <tr><td class="pr-4 text-right align-top">{{ row.count }}</td><td><span class="break-all">{{ row.path }}</span></td></tr>
     {% endfor %}
+</table>
+</div>
+
+<h3 class="font-display text-navy uppercase mt-6 mb-1">Status breakdown</h3>
+<p class="text-xs text-navy/60 mb-1">Factual — every response by status class (403 &amp; 404 split out: blocked vs probes).</p>
+<div class="overflow-x-auto">
+<table class="text-sm mb-2 whitespace-nowrap">
+    <tr class="text-left"><th class="pr-4">2xx</th><th class="pr-4">3xx</th><th class="pr-4">403</th><th class="pr-4">404</th><th class="pr-4">4xx</th><th class="pr-4">5xx</th></tr>
+    <tr>
+        <td class="pr-4">{{ status_buckets.s2xx }}</td>
+        <td class="pr-4">{{ status_buckets.s3xx }}</td>
+        <td class="pr-4">{{ status_buckets.s403 }}</td>
+        <td class="pr-4">{{ status_buckets.s404 }}</td>
+        <td class="pr-4">{{ status_buckets.s4xx }}</td>
+        <td class="pr-4">{{ status_buckets.s5xx }}</td>
+    </tr>
+</table>
+</div>
+
+<h3 class="font-display text-navy uppercase mt-6 mb-1">Noisy IPs</h3>
+<p class="text-xs text-navy/60 mb-1">By request volume. The <span class="uppercase font-bold">Scanner</span> badge is INFERRED (an IP hitting many distinct dead paths) — click an IP to drill down.</p>
+<div class="overflow-x-auto">
+<table class="text-sm mb-2 w-full whitespace-nowrap">
+    <tr class="text-left"><th class="pr-4">Reqs</th><th class="pr-4">Paths</th><th class="pr-4">404s</th><th class="pr-4">Err</th><th>IP</th></tr>
+    {% for r in noisy_ips %}
+    <tr>
+        <td class="pr-4 text-right">{{ r.total }}</td>
+        <td class="pr-4 text-right">{{ r.distinct_paths }}</td>
+        <td class="pr-4 text-right">{{ r.distinct_404 }}</td>
+        <td class="pr-4 text-right">{{ r.errors }}</td>
+        <td class="break-all"><a class="text-navy underline" href="/admin/analytics/ip/{{ r.ip }}">{{ r.ip }}</a>{% if r.is_scanner() %} <span class="ml-1 px-1.5 py-0.5 rounded-sm bg-navy text-yellow text-xs uppercase">Scanner</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    {% if noisy_ips.is_empty() %}<tr><td></td><td></td><td></td><td></td><td class="text-navy/60">(none yet)</td></tr>{% endif %}
+</table>
+</div>
+
+<h3 class="font-display text-navy uppercase mt-6 mb-1">Paths that only ever errored</h3>
+<p class="text-xs text-navy/60 mb-1">Never returned &lt; 400 — the scanner-signature list (includes 403-only / 5xx-only, not just 404).</p>
+<div class="overflow-x-auto">
+<table class="text-sm mb-2 w-full">
+    {% for row in never_succeeded %}
+    <tr><td class="pr-4 text-right align-top">{{ row.count }}</td><td><span class="break-all">{{ row.path }}</span></td></tr>
+    {% endfor %}
+    {% if never_succeeded.is_empty() %}<tr><td></td><td class="text-navy/60">(none yet)</td></tr>{% endif %}
 </table>
 </div>
 
@@ -62,16 +123,56 @@
 </table>
 </div>
 
-<h3 class="font-display text-navy uppercase mt-6 mb-1">Top referrers (external)</h3>
-<p class="text-xs text-navy/60 mb-1">Excludes direct hits + our own domain. Directional only — referrers are spoofable and often stripped.</p>
+<h3 class="font-display text-navy uppercase mt-6 mb-1">Referrers (external)</h3>
+<p class="text-xs text-navy/60 mb-1">Host-grouped (IP-literal referers stripped). Directional only — referrers are spoofable and often stripped.</p>
+<div class="flex flex-row flex-wrap items-center gap-2 mb-2 text-xs">
+    {% for c in referers.by_category %}
+    <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">{{ c.label }} {{ c.count }}</span>
+    {% endfor %}
+    <span class="px-2 py-0.5 rounded-sm bg-navy/60 text-div-grey" title="Requests with no referer (direct / stripped)">Direct {{ referers.direct_count }}</span>
+    {% if referers.noise_count > 0 %}<span class="px-2 py-0.5 rounded-sm bg-navy/40 text-div-grey" title="IP-literal + malformed referers, hidden">{{ referers.noise_count }} polluting referers hidden</span>{% endif %}
+</div>
 <div class="overflow-x-auto">
 <table class="text-sm mb-2 w-full">
-    {% for row in by_referer %}
-    <tr><td class="pr-4 text-right align-top">{{ row.count }}</td><td class="break-all">{{ row.referer }}</td></tr>
+    {% for row in referers.top_external %}
+    <tr><td class="pr-4 text-right align-top">{{ row.count }}</td><td class="pr-4 align-top text-navy/60">{{ row.category.as_label() }}</td><td class="break-all">{{ row.host }}</td></tr>
     {% endfor %}
-    {% if by_referer.is_empty() %}<tr><td></td><td class="text-navy/60">(none yet)</td></tr>{% endif %}
+    {% if referers.top_external.is_empty() %}<tr><td></td><td></td><td class="text-navy/60">(none yet)</td></tr>{% endif %}
 </table>
 </div>
+
+<h3 class="font-display text-navy uppercase mt-6 mb-1">Server response time</h3>
+<p class="text-xs text-navy/60 mb-1">Server-handler processing time (ms) — <strong>NOT</strong> client page-load / LCP: no network/download, and streaming bodies are under-counted. Static assets excluded; <code>/diagram</code> + <code>/media</code> kept (the slow subprocess / external-disk routes).</p>
+{% if !has_latency %}
+<p class="text-navy/70 text-sm mb-4">No timing data in this range yet.</p>
+{% else %}
+<p class="text-sm mb-3"><span class="text-3xl text-navy">{{ latency_p95 }}</span> ms overall p95</p>
+
+<h4 class="font-display text-navy text-sm uppercase mt-3 mb-1">Slowest routes</h4>
+<div class="overflow-x-auto">
+<table class="text-sm mb-3 w-full whitespace-nowrap">
+    <tr class="text-left"><th class="pr-4">p95</th><th class="pr-4">p50</th><th class="pr-4">max</th><th class="pr-4">n</th><th>Route</th></tr>
+    {% for r in slow_routes %}
+    <tr><td class="pr-4 text-right">{{ r.p95 }}</td><td class="pr-4 text-right">{{ r.p50 }}</td><td class="pr-4 text-right">{{ r.max }}</td><td class="pr-4 text-right">{{ r.count }}</td><td class="break-all">{{ r.route }}</td></tr>
+    {% endfor %}
+</table>
+</div>
+
+<h4 class="font-display text-navy text-sm uppercase mt-3 mb-1">Slowest requests</h4>
+<div class="overflow-x-auto">
+<table class="text-sm mb-2 whitespace-nowrap">
+    <tr class="text-left"><th class="pr-4">ms</th><th class="pr-6">When (UTC)</th><th class="pr-4">Status</th><th>Path</th></tr>
+    {% for r in slow_requests %}
+    <tr>
+        <td class="pr-4 text-right">{% if let Some(d) = r.duration_ms %}{{ d }}{% else %}&mdash;{% endif %}</td>
+        <td class="pr-6">{{ r.ts }}</td>
+        <td class="pr-4">{{ r.status }}</td>
+        <td class="break-all">{{ r.path }}</td>
+    </tr>
+    {% endfor %}
+</table>
+</div>
+{% endif %}
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Recent requests</h3>
 <div class="overflow-x-auto">
@@ -91,5 +192,6 @@
     {% endfor %}
 </table>
 </div>
+</div><!-- #analytics-content -->
 </div>
 {% endblock %}

@@ -58,6 +58,84 @@ async fn analytics_requires_admin() {
 }
 
 #[tokio::test]
+async fn analytics_audience_toggle_renders_and_tolerates_garbage() {
+    // CQ.2: the audience toggle + 3-chip honesty display render, and a bad ?audience
+    // degrades to All instead of 500-ing the admin page.
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    let body = admin
+        .get(server.url("/admin/analytics?audience=humans"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("Audience"), "the audience toggle row renders");
+    assert!(
+        body.contains("Humans") && body.contains("Bots"),
+        "all three audience chips render (the honesty display)"
+    );
+
+    // A bad ?audience must NOT 500 — Audience::parse falls back to All, never bubbles.
+    let resp = admin
+        .get(server.url("/admin/analytics?audience=not-a-real-value"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "garbage ?audience degrades to All, not a 500"
+    );
+}
+
+#[tokio::test]
+async fn ip_detail_admin_gated_and_validates() {
+    // CQ.4: /admin/analytics/ip/{ip} is admin-gated; a valid-but-empty IP renders a
+    // 200 empty-state; a garbage segment is a clean 400 (never a 500 / DB probe).
+    let server = spawn_test_server().await.expect("spawn");
+
+    // anonymous → 403 (the /admin require_admin nest)
+    let resp = client()
+        .get(server.url("/admin/analytics/ip/1.2.3.4"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    // valid IP, no rows → 200 empty-state
+    let resp = admin
+        .get(server.url("/admin/analytics/ip/8.8.8.8"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(resp.text().await.unwrap().contains("8.8.8.8"));
+
+    // garbage segment → 400
+    let resp = admin
+        .get(server.url("/admin/analytics/ip/not-an-ip"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn admin_pages_editor_requires_admin() {
     let server = spawn_test_server().await.expect("spawn");
 
@@ -594,14 +672,77 @@ async fn analytics_renders_chart_and_content_pages() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.text().await.unwrap();
-    assert!(body.contains("<svg"), "expected the views-per-day chart");
-    assert!(body.contains("Unique visitors"), "expected the total/unique toggle");
+    assert!(body.contains("id=\"ts-chart\""), "expected the d3 chart container");
+    assert!(body.contains("id=\"ts-data\""), "expected the JSON time-series island");
+    assert!(body.contains("Humans"), "expected the audience 3-chip");
     assert!(
         body.contains("/pages/test-page"),
         "the content page should appear in top pages"
     );
-    assert!(body.contains("Top referrers"), "expected the referrers panel");
+    assert!(body.contains("Referrers (external)"), "expected the grouped referrers panel");
     assert!(body.contains("paths=all"), "expected the Content/All toggle");
+    // CQ.7 new sections all render.
+    assert!(body.contains("Status breakdown"), "expected the status breakdown");
+    assert!(body.contains("Noisy IPs"), "expected the noisy-IPs leaderboard");
+    assert!(body.contains("Server response time"), "expected the latency section");
+    assert!(
+        body.contains("NOT</strong> client page-load"),
+        "latency must be honestly labeled server-side, not LCP"
+    );
+}
+
+#[tokio::test]
+async fn analytics_surfaces_scanners_and_latency() {
+    // CQ.7: a scanner (many distinct 404s) is badged + linked to its drill-down, its
+    // probe paths surface in the never-succeeded list, and a slow request shows up in
+    // the latency section.
+    let server = spawn_test_server().await.expect("spawn");
+
+    for i in 0..6 {
+        sqlx::query(
+            "INSERT INTO request_log (method, path, status, ip, user_agent, duration_ms) \
+             VALUES ('GET', ?, 404, '6.6.6.6', 'curl/8', 3)",
+        )
+        .bind(format!("/probe-{i}"))
+        .execute(&server.pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO request_log (method, path, status, ip, user_agent, duration_ms) \
+         VALUES ('GET', '/pages/slow', 200, '1.1.1.1', 'Mozilla/5', 850)",
+    )
+    .execute(&server.pool)
+    .await
+    .unwrap();
+
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+    let body = admin
+        .get(server.url("/admin/analytics?since=30"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    assert!(
+        body.contains("/admin/analytics/ip/6.6.6.6"),
+        "the scanner IP links to its drill-down"
+    );
+    assert!(
+        body.contains("/probe-0"),
+        "a never-succeeded probe path is listed"
+    );
+    assert!(
+        body.contains("850"),
+        "the slow request's duration renders in the latency section"
+    );
 }
 
 /// Regression guard for the anonymous content-mutation bypass: the `/pages`
@@ -2006,6 +2147,29 @@ async fn handler_panic_becomes_a_500_not_a_dropped_connection() {
     assert!(
         resp.text().await.unwrap().contains("tripped over the cable"),
         "the styled 500 should render"
+    );
+
+    // CQ.1.1: the panic-500 must ALSO be recorded. log_requests is layered OUTER to
+    // CatchPanicLayer, so it observes the synthesized 500 — before the reorder the
+    // panic unwound past the insert and the 500 never reached request_log (invisible
+    // to the access log + analytics). Fire-and-forget insert → poll briefly.
+    let mut logged = None;
+    for _ in 0..100 {
+        let rows =
+            sqlx::query("SELECT status FROM request_log WHERE path = '/test/panic' ORDER BY id DESC")
+                .fetch_all(&server.pool)
+                .await
+                .unwrap();
+        if let Some(row) = rows.first() {
+            logged = Some(row.get::<i64, _>("status"));
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        logged,
+        Some(500),
+        "the panic-500 must land in request_log, not vanish past the log layer"
     );
 }
 

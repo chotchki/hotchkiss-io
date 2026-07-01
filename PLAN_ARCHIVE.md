@@ -444,3 +444,83 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] CP.2 - One-time mini keychain setup (build/macos/SETUP.md): import the Developer ID Application cert + private key into the keychain the post-receive build uses, and make NON-INTERACTIVE codesign work from the ssh/post-receive context (no GUI) — unlock the keychain + `security set-key-partition-list -S apple-tool:,apple: -s -k <pw> <keychain>` so codesign signs without a prompt. The real gotcha: a `git push` build runs OUTSIDE the GUI session, so the signing key must be reachable + ACL-allowed headless
 - [x] CP.3 - Grant Full Disk Access ONCE to the Developer-ID-signed app, then verify the grant PERSISTS across a deploy: push twice and confirm MediaStorage4-hosted media keeps serving with no re-grant + no 25s hang. Docs: CLAUDE.md + SETUP.md (signing is now Developer ID for durable TCC; notarization/.pkg still retired; FDA is a one-time grant). Ship beta→prod
 
+---
+
+## 2026-06-30
+
+## Phase CO - CO - Admin log viewer (prod ops visibility)
+- [x] CO.0 - Phase exit: an admin reads recent server logs at /admin/logs (tail of Settings.log_path, level filter, manual refresh) WITHOUT the page feeding its own log (no infinite loop); the backfill-style silent no-op would now be one click to see; verified beta→prod
+- [x] CO.1 - Log tail reader: a bounded tail of the newest log file under Settings.log_path (last ~N lines / cap the bytes read — never slurp a multi-GB log), newest-first, run in spawn_blocking so a log on a slow/asleep disk can't pin a tokio worker. Handle tracing's rotation (read the current/most-recent file). Returns the lines + a level filter applied
+- [x] CO.2 - /admin/logs page: admin-gated under the /admin nest's require_admin, server-rendered <pre> of the tail + a level filter (?level=error|warn|all) + a MANUAL refresh link (no aggressive auto-poll). NO INFINITE LOOP: manual refresh is the primary defense, AND exclude /admin/logs from the request_log middleware + drop the route's own access lines from the displayed tail, so viewing the log never feeds the log. Hub link from /admin/pages
+- [x] CO.3 - Tests + docs + deploy: integration (admin-gated 403 for anon; renders the tail; the /admin/logs route is excluded from request_log so a self-view doesn't appear in the analytics/tail; level filter narrows). CLAUDE.md note (admin log viewer + the no-self-feed design). Ship beta→prod
+
+---
+
+## 2026-07-01
+
+## Phase 11 - Better local testing
+
+The Phase 10 dogfood loop revealed two structural gaps: (1) mobile/responsive bugs slipped through because no test exercised a phone-sized viewport, and (2) every fix required a push-to-deploy round-trip because the dev server isn't reachable from a real phone with HTTPS (hardcoded `:80`/`:443`, no LAN story). Closing both.
+
+Dev-HTTPS strategy: dev runs as a debug build, which already routes ACME at LE staging (`instant_acme.rs:42-47`). A separate Cloudflare token scoped to the `hotchkiss.io` zone gives the dev box DNS-01 access for `beta.hotchkiss.io`; the beta A record is grey-clouded at the dev box's LAN IP. One-time iPhone setup: install the LE staging root CA profile so iOS trusts the cert (PWA install requires a fully trusted cert, not just a bypassed warning). `ServiceCoordinator`'s `IpProviderService` gets a `static_ip` option so dev doesn't broadcast 127.0.0.1 (its current debug default).
+
+**Folded into Phase 12 (2026-06-22).** The reusable code shipped — 11.1–11.2 (configurable ports + `static_ip`) and 11.4–11.7 (mobile-viewport e2e). The dev-box-on-LAN + LE-staging-cert + iPhone-profile path (11.3 / 11.8 / 11.9) is superseded by Phase 12's beta-on-the-mini approach (real LE-prod cert, natively trusted, no profile install) and absorbed into 12.6 / 12.9 / 12.10 — see 12.11.
+
+- [x] 11.0 - Phase exit (superseded): code portions shipped; the dev-box/LE-staging/profile path is replaced by Phase 12's beta-on-mini.
+- [x] 11.1 - Make `:80` / `:443` configurable in `Settings` (`http_port` / `https_port`, defaulting to 80/443). Update `endpoints_provider_service.rs` to bind the configured ports.
+- [x] 11.2 - Add a `static_ip` option to `Settings`. When set, `IpProviderService` skips the cdn-cgi/trace poll and broadcasts the static IP immediately, overriding the existing `debug_assertions` 127.0.0.1 default.
+- [x] 11.3 - (Folded into 12.6 / 12.7 / 12.9.) `docs/dev-https.md`: one-time Cloudflare API token scoped to the `hotchkiss.io` zone, grey-cloud `beta.hotchkiss.io` A record at the dev box's LAN IP, sample `dev-config.json` (`domain="beta.hotchkiss.io"`, dev CF token, `static_ip`, dev ports), how to install the LE staging root CA profile on iPhone for PWA install. Note: debug build automatically uses LE staging — no code knob to flip.
+- [x] 11.4 - `tests/e2e_browser.rs` mobile-viewport setup: launch Chrome with 390×844 viewport, retina device-scale-factor. Factor out into a helper so individual tests can opt into mobile vs desktop.
+- [x] 11.5 - e2e: `/blog` and a representative content page have no horizontal scrollbar at 390px wide (`document.documentElement.scrollWidth <= window.innerWidth`). Captures the page-min-width-exceeds-portrait regression.
+- [x] 11.6 - e2e: top nav `<ul>` doesn't overflow at 390px. Captures the nav-cut-off regression.
+- [x] 11.7 - e2e: admin sees the "+ New post" form on `/blog`; submitting a slug with spaces succeeds (no silent 400) and the slug input live-slugifies as expected (typing "Hello world" leaves "hello-world" in the field, spacebar isn't eaten). Captures both Phase 10 dogfood fixes.
+- [x] 11.8 - (Folded into 12.9.) CLAUDE.md update: document the new `http_port`/`https_port`/`static_ip` settings; note the dev-HTTPS recipe; mention the existing debug→LE-staging routing so dev never burns prod cert quota.
+- [x] 11.9 - (Folded into 12.10.) Manual e2e: bring up a phone-reachable HTTPS surface, install the PWA from a phone, edit a template, refresh phone, confirm the change is live without a deploy.
+
+
+## Phase CA - API key authentication
+- [x] CA.0 - Phase exit: a user can generate/revoke API keys in /admin; an `Authorization: Bearer hio_…` key authenticates as that user (HMAC-pepper hashed) across all routes; tested + documented
+- [x] CA.1 - api_keys schema + ApiKeyDao + HMAC-pepper hashing (crypto_keys id 3) + key generation (hio_<base64url>); unit tests
+- [x] CA.2 - Auth resolution in SessionData extractor: Authorization: Bearer (axum-extra TypedHeader) → live-key lookup → Authenticated(user) + stamp last_used; session fallback; integration test
+- [x] CA.3 - Admin UI /admin/api-keys: generate (label → key shown ONCE), list (label/created/last-used), revoke; admin-gated; CLAUDE.md docs
+
+## Phase CI - Large-file streaming upload + shareable link
+- [x] CI.0 - Phase exit: large-file streaming upload + shareable link
+- [x] CI.1 - MediaStore::store_stream (chunks → temp → atomic rename, incremental SHA-256)
+- [x] CI.2 - Stream the upload handlers (drop the Vec<u8> buffering)
+- [x] CI.3 - Graceful generic-file ingest → MediaKind::File
+- [x] CI.4 - Share-link UX in the media library
+- [x] CI.5 - Tests + docs + deploy
+
+## Phase CJ - Multi-drive media storage
+- [x] CJ.0 - Phase exit: multi-drive media storage
+- [x] CJ.1 - Config: media_paths ordered list + free-space headroom
+- [x] CJ.2 - Schema: media_variant.storage_root hint column (migration 0017)
+- [x] CJ.3 - MediaStore multi-root: resolve (hint+scan), pick-write-root by free space
+- [x] CJ.4 - Wire ingest + serve + all path_for callers through resolve_path
+- [x] CJ.5 - Beta mirror: rsync iterates roots
+- [x] CJ.6 - Tests + docs + deploy
+- [x] CJ.7 - Storage panel: show media roots + free space
+
+## Phase CK - Upload progress
+- [x] CK.0 - Phase exit: media uploads show real progress
+- [x] CK.1 - media-upload.js: XHR upload + progress bar (drop-zone + add-encode)
+- [x] CK.2 - editor-support.js: XHR upload + progress for inline media drop
+- [x] CK.3 - CK tests + docs + deploy
+
+## Phase CN - CN - Performance: render path + responsive images
+- [x] CN.0 - Phase exit: mobile LCP < 2.5s; PSI render-blocking (~1.9s) + image-delivery (~434 KiB) + font-display (~90ms) insights cleared — FontAwesome dropped for build-time-generated inline SVG, htmx deferred, @font-face font-display:swap; content images served width-stepped AVIF via srcset (existing images backfilled); versioned static assets cached a year; verified beta→prod via fresh PSI run
+- [x] CN.1 - Drop FontAwesome via build-time icon codegen: a build.rs step takes a declared list of the ~19 used icons (arrow-left/right, bars, cloud-arrow-up, cube, cubes-stacked, file, file-pdf, floppy-disk, grip-vertical, house, image, link, magnifying-glass, pen, pen-nib, photo-film, plus, trash-can) and generates inline SVG (an icon("pen") macro / fn returning <svg>), sourced from FA Free solid SVGs (vendored or pin-downloaded like the Tailwind CLI). Replace <i class="fa-…"> across the 9 templates; remove fontawesome.css + solid.css from base.html <head> and drop the FA webfonts from assets. Kills the 154.71 KiB fa-solid-900.woff2 + ~18 KiB CSS + two critical-chain hops — biggest single LCP lever. Declarative list → tool generates, no hand-copied SVG blobs
+- [x] CN.2 - defer htmx: add defer to base.html:30 script so it leaves the critical path (16.7 KiB / ~760ms). Verify nothing in {% block head %} or inline scripts calls htmx.* at parse time — the vendor inits (webauthn, katex-render, code-highlight, diagram-zoom, htmx-stl-view) are event-driven so deferring is safe; confirm load order with the other deferred scripts
+- [x] CN.3 - font-display: swap on the @font-face for Oswald + Quattrocento (styles/tailwind.css:15-22) so text paints immediately instead of FOIT (~90ms, no invisible text). Optional/deferred: a build-time Latin subset of the two woff2s to shave 31+38 KiB off the critical chain
+- [x] CN.4 - Static-asset cache TTL: in static_content.rs serve versioned (?cb=) requests Cache-Control: public, max-age=31536000, immutable; keep a short TTL (or the current 86400) for un-versioned paths (favicon, manifest, apple-touch-icon). Gate on uri.query().is_some(). Honest note: a repeat-visit win — Lighthouse measures cold load so it won't move the PSI score, but it clears uses-long-cache-ttl and cuts real return-visit bytes
+- [x] CN.5 - Migration 0018: media_variant.width/height (nullable INTEGER) so each image variant records its own pixel width for a srcset Nw descriptor. (media.width/height already holds the item's ORIGINAL dims; per-variant width is what srcset needs and is new.)
+- [x] CN.6 - Resize/transcode on image ingest: generate width-stepped AVIF variants (e.g. 480/960/1440, skipping any width >= source) reusing poster.rs's resize + ImageFormat::Avif path (image crate; if in-process rav1e is too slow on multi-MB uploads, shell to the existing ffmpeg like the poster frame-grab does). Store each as a media_variant with width/height recorded; keep the original variant as the fallback. Dedup by sha across roots like every other variant
+- [x] CN.7 - Responsive render: the /media/embed Image branch (media.rs render_media_embed) emits <img srcset="…480w,…960w,…1440w" sizes="…"> from the width-stepped AVIF variants, original as the src fallback, keeping data-zoomable + the 480px max-height. Same for blog/project card covers (cover_url_for). No-JS still gets a working single src
+- [x] CN.8 - Backfill: a one-shot startup task (coordinator, modeled on the retired migrate_media.rs) generates the width-stepped AVIF variants + records widths for EXISTING image media. Idempotent (dedup by sha, skip if variants already present), backup-first, per-item non-fatal (log + continue so one bad image can't abort boot or trip the coordinator try_join)
+- [x] CN.9 - Tests + docs (deploy/PSI verify → CN.10): unit (resize target_widths + real AVIF downscale, srcset render, cache_control policy), integration (icon-codegen inline <svg> on the 404 page; BX prev/next tests re-anchored off the removed fa- classes), CLAUDE.md (build-time icon codegen, cache TTL + htmx defer + font-display, responsive-image pipeline + 0018 + backfill). Full suite green, clippy clean (bar one pre-existing api_key_auth warning)
+- [x] CN.10 - Ship CN beta→prod + verify: git push origin main (→ beta), eyeball beta.hotchkiss.io, then tag vX.Y.Z + push (→ prod). Re-run PageSpeed on hotchkiss.io (mobile) to confirm LCP < 2.5s + render-blocking (~1.9s) / image-delivery (~434 KiB) / font-display (~90ms) insights cleared. HELD for chris: keyless PSI is quota-0 (needs your read of the report), and a prod deploy is a deliberate tag push. The background responsive-image backfill runs on first CN boot (logged); give it a few minutes before judging image delivery
+- [x] CN.11 - FIX (CN regression): the responsive backfill skipped every attachment-migrated cover because media.width is NULL — backfill_one bailed on `let Some(src_w) = m.width`. Derive the source width from the DECODED image instead (responsive_avif_variants reads img.width(), returns ResizeResult{source_width,source_height,variants}); stamp the original variant from those true dims. Re-ship beta→prod; covers then serve the 480 AVIF (was 60–166 KB JPEG/PNG)
+- [x] CN.12 - Harden the media byte route with a timeout: a flaky/blocked media root (external volume unmounted, TCC-blocked, or wedged) currently HANGS the serve for 25s+ (the v0.0.81 MediaStorage4 incident — AVIFs on the primary SSD root were unreadable by the LaunchAgent). resolve_path is already off the tokio worker (M3 spawn_blocking), but the request still waits. Wrap the resolve (and consider the ServeFile body) in a tokio::time::timeout → fast 503/404 instead of a hang. Note: a timed-out spawn_blocking keeps running (can't cancel a blocking stat), so a permanently-wedged root could still leak blocking threads — log loudly so the log viewer surfaces it
+- [x] CN.13 - Right-size the static page images PSI still flags (embedded assets, NOT /media — outside the responsive pipeline): the jumbotron Photo.avif is 640×640 but renders at 160px (size-40), ~2x oversized. Resize to ~320px AVIF (clean 2x for a 160px display; bump if 3x crispness wanted) — same approach as the 404 cats (Phase 39). HotchkissLogo is SVG (fine). Saves ~25-30 KB on every page + helps LCP (the headshot is an early-paint element)
+

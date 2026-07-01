@@ -369,11 +369,25 @@ async fn analytics_usable_on_mobile() {
     page.goto(server.url("/admin/analytics"))
         .await
         .expect("goto /admin/analytics");
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    // The d3 line chart renders client-side (vendored d3 + analytics-chart.js) — poll
+    // for its two overlaid series paths (total + unique). CQ.7: assert the REAL rendered
+    // chart, not just any inline <svg> (the nav icons are <svg> too). d3 is ~280KB, so
+    // give it a beat to load + draw.
+    let mut chart_lines = 0i64;
+    for _ in 0..40 {
+        chart_lines = js(&page, "document.querySelectorAll('path.linechart-line').length").await;
+        if chart_lines >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        chart_lines >= 2,
+        "the d3 line chart should render both series (total + unique); got {chart_lines}",
+    );
 
-    // The core fix: no element forces the document wider than the phone viewport.
-    // (The wide recent-requests table still exists, but now scrolls inside its
-    // own overflow-x-auto box rather than growing the page.)
+    // The core fix: no element forces the document wider than the phone viewport —
+    // checked AFTER the chart renders so the SVG is included in the layout.
     let scroll_width: i64 = js(&page, "document.documentElement.scrollWidth").await;
     let inner_width: i64 = js(&page, "window.innerWidth").await;
     assert!(
@@ -381,9 +395,8 @@ async fn analytics_usable_on_mobile() {
         "/admin/analytics has horizontal scroll on a 390px viewport: scrollWidth={scroll_width}, innerWidth={inner_width}",
     );
 
-    // The widgets are actually present (not collapsed/hidden).
+    // The other widgets are present (not collapsed/hidden).
     let html = page.content().await.expect("page content");
-    assert!(html.contains("<svg"), "the views-per-day chart should render");
     assert!(html.contains("total views"), "stat widgets should render");
     assert!(
         html.contains("/pages/mobile-test"),

@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Instant};
 
 use axum::{
     extract::{ConnectInfo, Request, State},
@@ -38,15 +38,27 @@ pub async fn log_requests(State(pool): State<SqlitePool>, req: Request, next: Ne
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
 
-    // The livereload long-poll is pure noise in dev; /admin/logs is excluded
-    // ALWAYS so the log viewer never feeds the access log it tails (Phase CO —
-    // the no-self-feed guard against an infinite-loop-ish growth).
+    // The livereload long-poll is pure noise in dev; /admin/logs is excluded ALWAYS so
+    // the log viewer never feeds the access log it tails (Phase CO). /admin/analytics is
+    // excluded too (CQ.7): with the htmx control-model rework it hx-get's ITSELF on every
+    // range/audience toggle, so logging it would flood request_log with the admin's own
+    // dashboard traffic + pollute the very numbers it renders. (Trade-off: the dashboard
+    // can't measure its OWN render latency — a minor loss vs the self-pollution.)
     #[cfg(debug_assertions)]
-    let skip = path.starts_with("/tower-livereload") || path.starts_with("/admin/logs");
+    let skip = path.starts_with("/tower-livereload")
+        || path.starts_with("/admin/logs")
+        || path.starts_with("/admin/analytics");
     #[cfg(not(debug_assertions))]
-    let skip = path.starts_with("/admin/logs");
+    let skip = path.starts_with("/admin/logs") || path.starts_with("/admin/analytics");
 
+    // SERVER-handler processing time — the inner stack + handler, measured at the
+    // outermost log layer. NOT client page-load/LCP (no TLS/network/download), and it
+    // under-counts streaming bodies (ServeFile returns before the last byte). A failed
+    // cast saturates to 0, never i64::MAX — a bogus huge outlier would poison the
+    // latency percentiles/max the CQ dashboard computes off this column.
+    let start = Instant::now();
     let response = next.run(req).await;
+    let duration_ms = i64::try_from(start.elapsed().as_millis()).unwrap_or(0);
 
     if !skip {
         let entry = NewRequestLog {
@@ -56,6 +68,7 @@ pub async fn log_requests(State(pool): State<SqlitePool>, req: Request, next: Ne
             ip,
             user_agent,
             referer,
+            duration_ms,
         };
         tokio::spawn(async move {
             if let Err(e) = RequestLogDao::insert(&pool, &entry).await {
