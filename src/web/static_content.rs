@@ -13,7 +13,14 @@ const BUILD_TIME: &str = build_time_utc!("%a, %d %b %Y %H:%M:%S GMT");
 
 pub fn static_content() -> Router {
     Router::new()
-        //.route("/favicon.ico", get(static_handler))
+        // Browsers request /favicon.ico (and iOS /apple-touch-icon.png) at the ROOT by
+        // default — the tab icon before HTML parses, bookmarks, non-HTML contexts —
+        // regardless of the <link rel=icon>. Serve the images/ assets there too, else
+        // every visitor 404s the icon (523 favicon hits surfaced in the CR analytics
+        // "only ever errored" list). The old commented route wouldn't have worked: it
+        // maps the URL path to the asset path, and the icon lives under images/.
+        .route("/favicon.ico", get(favicon))
+        .route("/apple-touch-icon.png", get(apple_touch_icon))
         .route("/images/{*file}", get(static_handler))
         .route("/manifest.webmanifest", get(static_handler))
         // /robots.txt is served dynamically (host-aware Sitemap directive + beta
@@ -29,6 +36,24 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
         // `?cb=<build epoch>`), so the URL changes whenever the bytes do.
         versioned: uri.query().is_some(),
         path: uri.path().trim_start_matches('/').to_string(),
+    }
+}
+
+/// Root `/favicon.ico` → the embedded `images/favicon.ico`. Un-versioned (the root URL
+/// carries no `?cb=`), so it gets the modest 1-day TTL, not immutable.
+async fn favicon() -> impl IntoResponse {
+    StaticFile {
+        path: "images/favicon.ico".to_string(),
+        versioned: false,
+    }
+}
+
+/// Root `/apple-touch-icon.png` → the embedded `images/apple-touch-icon.png` (iOS
+/// requests it at the root by default).
+async fn apple_touch_icon() -> impl IntoResponse {
+    StaticFile {
+        path: "images/apple-touch-icon.png".to_string(),
+        versioned: false,
     }
 }
 

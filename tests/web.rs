@@ -14,6 +14,29 @@ fn client() -> reqwest::Client {
 }
 
 #[tokio::test]
+async fn favicon_and_apple_icon_served_at_root() {
+    // Browsers request /favicon.ico at the root by default (and iOS /apple-touch-icon.png)
+    // regardless of the <link rel=icon> — they must 200, not 404 (the CR analytics finding:
+    // 523 all-errored favicon hits because the root route was commented out).
+    let server = spawn_test_server().await.expect("spawn");
+
+    let resp = reqwest::get(server.url("/favicon.ico")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "/favicon.ico must serve, not 404");
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        ct.contains("icon") || ct.contains("image"),
+        "favicon content-type should be an image: {ct}"
+    );
+
+    let resp = reqwest::get(server.url("/apple-touch-icon.png")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "/apple-touch-icon.png must serve, not 404");
+}
+
+#[tokio::test]
 async fn analytics_requires_admin() {
     let server = spawn_test_server().await.expect("spawn");
 
