@@ -7,6 +7,17 @@
      gated, non-indexed, off the public LCP path, so it never touches Phase CN's budget). -->
 <script defer src="/vendor/d3/d3.min.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 <script defer src="/scripts/analytics-chart.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<!-- flatpickr (custom range picker, Phase CT) — vendored v4.6.13, admin-only + deferred,
+     same off-the-public-LCP-path rationale as d3. Native date inputs are rotten UX; this
+     is the small self-contained widget, themed to the site palette below. -->
+<link rel="stylesheet" href="/vendor/flatpickr/flatpickr.min.css?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}">
+<script defer src="/vendor/flatpickr/flatpickr.min.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<script defer src="/scripts/analytics-range.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<style>
+  .flatpickr-day.selected, .flatpickr-day.selected:hover, .flatpickr-day.startRange, .flatpickr-day.endRange { background: #14213d; border-color: #14213d; }
+  .flatpickr-day.today { border-color: #ffc935; }
+  .flatpickr-months .flatpickr-month, .flatpickr-weekdays, span.flatpickr-weekday, .flatpickr-current-month .flatpickr-monthDropdown-months { color: #14213d; }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -17,15 +28,39 @@
      chart + tables + stats + URL always agree. Each toggle keeps its href as the no-JS
      fallback (a full-page nav). -->
 <div id="analytics-content" hx-target="#analytics-content" hx-select="#analytics-content" hx-push-url="true">
+{% if custom_active %}
+<p class="text-sm text-navy mb-4">Custom range (UTC): {% if from_raw.is_empty() %}beginning{% else %}{{ from_raw }}{% endif %} &rarr; {% if to_raw.is_empty() %}now{% else %}{{ to_raw }}{% endif %}</p>
+{% else %}
 <p class="text-sm text-navy mb-4">Last {{ since_days }} days</p>
+{% endif %}
 
-<!-- Range selector -->
+<!-- Range selector — presets switch to a fixed lookback (dropping any custom range);
+     a preset only highlights when it IS the active window (not when a custom range is). -->
 <div class="flex flex-row flex-wrap items-center gap-2 mb-3 text-sm">
     <span class="text-navy uppercase text-xs mr-1">Range</span>
-    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 7 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since=7&paths={{ paths_mode }}&audience={{ audience }}" href="/admin/analytics?since=7&paths={{ paths_mode }}&audience={{ audience }}">7d</a>
-    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 30 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since=30&paths={{ paths_mode }}&audience={{ audience }}" href="/admin/analytics?since=30&paths={{ paths_mode }}&audience={{ audience }}">30d</a>
-    <a class="px-2 py-1 rounded-sm uppercase {% if since_days == 90 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since=90&paths={{ paths_mode }}&audience={{ audience }}" href="/admin/analytics?since=90&paths={{ paths_mode }}&audience={{ audience }}">90d</a>
+    <a class="px-2 py-1 rounded-sm uppercase {% if !custom_active && since_days == 7 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since=7&paths={{ paths_mode }}&audience={{ audience }}" href="/admin/analytics?since=7&paths={{ paths_mode }}&audience={{ audience }}">7d</a>
+    <a class="px-2 py-1 rounded-sm uppercase {% if !custom_active && since_days == 30 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since=30&paths={{ paths_mode }}&audience={{ audience }}" href="/admin/analytics?since=30&paths={{ paths_mode }}&audience={{ audience }}">30d</a>
+    <a class="px-2 py-1 rounded-sm uppercase {% if !custom_active && since_days == 90 %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since=90&paths={{ paths_mode }}&audience={{ audience }}" href="/admin/analytics?since=90&paths={{ paths_mode }}&audience={{ audience }}">90d</a>
 </div>
+
+<!-- Custom range (Phase CT): flatpickr-enhanced text inputs (native date inputs are
+     rotten UX), UTC to match the rest of the dashboard, submitted through the SAME
+     hx-get control model — a valid range OVERRIDES the preset. `to` blank = "since
+     `from`". No-JS: plain text inputs + native form GET still work. -->
+<form class="flex flex-row flex-wrap items-end gap-2 mb-4 text-sm" action="/admin/analytics" method="get" hx-get="/admin/analytics">
+    <input type="hidden" name="paths" value="{{ paths_mode }}">
+    <input type="hidden" name="audience" value="{{ audience }}">
+    <label class="flex flex-col text-navy uppercase text-xs">From (UTC)
+        <input id="range-from" name="from" type="text" data-flatpickr autocomplete="off" value="{{ from_raw }}" placeholder="YYYY-MM-DD HH:MM" class="mt-0.5 normal-case border border-navy/30 rounded px-2 py-1 text-sm bg-white">
+    </label>
+    <label class="flex flex-col text-navy uppercase text-xs">To (UTC — blank = now)
+        <input id="range-to" name="to" type="text" data-flatpickr autocomplete="off" value="{{ to_raw }}" placeholder="YYYY-MM-DD HH:MM" class="mt-0.5 normal-case border border-navy/30 rounded px-2 py-1 text-sm bg-white">
+    </label>
+    <button type="submit" class="px-3 py-1 rounded-sm uppercase bg-navy text-div-grey">Apply</button>
+    {% if custom_active %}
+    <a class="px-2 py-1 rounded-sm uppercase bg-navy/60 text-div-grey" hx-get="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience={{ audience }}" href="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience={{ audience }}">Clear</a>
+    {% endif %}
+</form>
 
 <!-- Audience toggle doubling as the 3-chip honesty display (CQ.2): each chip shows its
      own count, so all three are visible at once (humans + bots = all), and clicking
@@ -33,9 +68,9 @@
      (spoofable) User-Agent — directional, not authoritative. -->
 <div class="flex flex-row flex-wrap items-center gap-2 mb-4 text-sm">
     <span class="text-navy uppercase text-xs mr-1" title="Inferred from the User-Agent — spoofable, directional only">Audience</span>
-    <a class="px-2 py-1 rounded-sm {% if audience == "all" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=all" href="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=all">All {{ audience_counts.all }}</a>
-    <a class="px-2 py-1 rounded-sm {% if audience == "humans" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=humans" href="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=humans">Humans {{ audience_counts.humans }}</a>
-    <a class="px-2 py-1 rounded-sm {% if audience == "bots" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=bots" href="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=bots">Bots {{ audience_counts.bots }}</a>
+    <a class="px-2 py-1 rounded-sm {% if audience == "all" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?{{ window_qs|safe }}&paths={{ paths_mode }}&audience=all" href="/admin/analytics?{{ window_qs|safe }}&paths={{ paths_mode }}&audience=all">All {{ audience_counts.all }}</a>
+    <a class="px-2 py-1 rounded-sm {% if audience == "humans" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?{{ window_qs|safe }}&paths={{ paths_mode }}&audience=humans" href="/admin/analytics?{{ window_qs|safe }}&paths={{ paths_mode }}&audience=humans">Humans {{ audience_counts.humans }}</a>
+    <a class="px-2 py-1 rounded-sm {% if audience == "bots" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?{{ window_qs|safe }}&paths={{ paths_mode }}&audience=bots" href="/admin/analytics?{{ window_qs|safe }}&paths={{ paths_mode }}&audience=bots">Bots {{ audience_counts.bots }}</a>
     <button class="ml-2 px-2 py-1 rounded-sm bg-navy/70 text-div-grey text-xs" hx-post="/admin/analytics/reclassify-bots" title="Re-run the bot classifier over all stored rows (after retuning the rules) — the stored is_bot is not auto-retuned on every query">&#8635; Reclassify</button>
 </div>
 
@@ -55,8 +90,8 @@
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Top pages</h3>
 <div class="flex flex-row flex-wrap items-center gap-2 mb-1 text-sm">
-    <a class="px-2 py-0.5 rounded-sm {% if paths_mode == "content" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since={{ since_days }}&paths=content&audience={{ audience }}" href="/admin/analytics?since={{ since_days }}&paths=content&audience={{ audience }}">Content</a>
-    <a class="px-2 py-0.5 rounded-sm {% if paths_mode == "all" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since={{ since_days }}&paths=all&audience={{ audience }}" href="/admin/analytics?since={{ since_days }}&paths=all&audience={{ audience }}">All (incl. probes)</a>
+    <a class="px-2 py-0.5 rounded-sm {% if paths_mode == "content" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?{{ window_qs|safe }}&paths=content&audience={{ audience }}" href="/admin/analytics?{{ window_qs|safe }}&paths=content&audience={{ audience }}">Content</a>
+    <a class="px-2 py-0.5 rounded-sm {% if paths_mode == "all" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?{{ window_qs|safe }}&paths=all&audience={{ audience }}" href="/admin/analytics?{{ window_qs|safe }}&paths=all&audience={{ audience }}">All (incl. probes)</a>
 </div>
 <p class="text-xs text-navy/60 mb-1">Static assets excluded. {% if paths_mode == "all" %}Showing ALL requests including 4xx/5xx — the bot/scanner probes.{% else %}Successful loads only (status &lt; 400).{% endif %}</p>
 <div class="overflow-x-auto">

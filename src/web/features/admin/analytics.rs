@@ -5,12 +5,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use sqlx::types::chrono::NaiveDate;
+use sqlx::types::chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 
 use crate::{
     db::dao::request_log::{
         Audience, AudienceCounts, DayCount, IpPathStatus, NoisyIp, PathCount, RequestLogDao,
-        StatusBucketCounts, UserAgentCount, SCAN_DISTINCT_404_THRESHOLD,
+        StatusBucketCounts, UserAgentCount, Window, SCAN_DISTINCT_404_THRESHOLD,
     },
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
@@ -30,6 +30,39 @@ pub struct AnalyticsQuery {
     /// "humans" | "bots" | anything-else→All. A String (not a typed enum) so a
     /// bad value degrades to All instead of a deserialize-reject → 500 (CQ.2).
     pub audience: Option<String>,
+    /// Custom range bounds (Phase CT), as picker strings interpreted as UTC (the whole
+    /// dashboard is UTC). Present + valid → OVERRIDES `since`. Either may be blank:
+    /// from-only = "since this instant". A bad/inverted range degrades to the preset.
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+/// Parse a picker value (flatpickr `Y-m-d H:i`, or a native `datetime-local`
+/// `Y-m-dTH:i`, optional seconds) as a UTC instant — the dashboard reads UTC end to
+/// end, so the picker is UTC too (no tz conversion). Empty/garbage → `None` (that
+/// bound is open); never errors.
+fn parse_range_dt(s: &str) -> Option<DateTime<Utc>> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M"]
+        .iter()
+        .find_map(|fmt| NaiveDateTime::parse_from_str(s, fmt).ok())
+        .map(|n| n.and_utc())
+}
+
+/// Minimal percent-encoding for a picker value dropped into a toggle link's query
+/// string — the value charset is only digits / `-` / `T` or space / `:`, so encoding
+/// space + `:` is sufficient (axum decodes them back on the round-trip).
+fn encode_qs(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            ' ' => "%20".to_string(),
+            ':' => "%3A".to_string(),
+            other => other.to_string(),
+        })
+        .collect()
 }
 
 /// Two aligned daily series (CQ.7) for the d3 line chart, serialized into the page as
@@ -49,6 +82,14 @@ pub struct AnalyticsTemplate {
     pub top_bar: TopBar,
     pub auth_state: AuthenticationState,
     pub since_days: i64,
+    /// Custom-range state (Phase CT): when true, a from/to range is active — no preset
+    /// chip highlights, and the picker inputs pre-fill from `from_raw`/`to_raw`.
+    pub custom_active: bool,
+    pub from_raw: String,
+    pub to_raw: String,
+    /// The active window as a query fragment (`since=30` OR `from=…&to=…`) every toggle
+    /// link carries, so an audience/paths switch keeps the window. Server-built → `|safe`.
+    pub window_qs: String,
     /// "content" (status < 400) or "all" (incl. 4xx/5xx scanner probes) — drives
     /// the Top Pages list + which toggle chip is active.
     pub paths_mode: String,
@@ -104,11 +145,42 @@ pub async fn show_analytics(
     // chart + top-pages bucket to this; the 3-chip below shows all three regardless.
     let audience = Audience::parse(q.audience.as_deref());
 
+    // Window (Phase CT): a valid custom from/to range OVERRIDES the preset. Either
+    // bound may be open (from-only = "since this instant" — the post-deploy p95 case);
+    // an inverted from > to is invalid → fall back to the preset (never a 500). All the
+    // reads below take this ONE Window, so preset + custom share the exact same path.
+    let from_dt = q.from.as_deref().and_then(parse_range_dt);
+    let to_dt = q.to.as_deref().and_then(parse_range_dt);
+    let valid_range = match (from_dt, to_dt) {
+        (Some(f), Some(t)) => f < t,
+        (Some(_), None) | (None, Some(_)) => true,
+        (None, None) => false,
+    };
+    let (window, custom_active) = if valid_range {
+        (Window::custom(from_dt, to_dt), true)
+    } else {
+        (Window::last_days(since_days), false)
+    };
+    // Raw picker strings — repopulate the inputs + keep the range sticky across the
+    // audience/paths toggles (only meaningful when a custom range is active).
+    let (from_raw, to_raw) = if custom_active {
+        (q.from.clone().unwrap_or_default(), q.to.clone().unwrap_or_default())
+    } else {
+        (String::new(), String::new())
+    };
+    // The window query-string every toggle link carries, so switching audience/paths
+    // preserves the active window (preset OR custom). Server-built from a controlled
+    // charset → `|safe` in the template.
+    let window_qs = if custom_active {
+        format!("from={}&to={}", encode_qs(&from_raw), encode_qs(&to_raw))
+    } else {
+        format!("since={since_days}")
+    };
+
     // Run every independent read CONCURRENTLY (CR.3): WAL + the connection pool (≤10)
     // let these fan out across connections, so the page's wall-clock is ~the slowest
     // query instead of the SUM of ~15 windowed scans (the ~7s → sub-1s win). TopBar
     // joins in (it also reads the pool). `?` on the tuple bubbles the first error.
-    let cutoff = format!("-{since_days} days");
     let (
         top_bar,
         total_requests,
@@ -128,20 +200,20 @@ pub async fn show_analytics(
         recent,
     ) = tokio::try_join!(
         TopBar::create(&state.pool, "admin"),
-        RequestLogDao::count_since(&state.pool, since_days, audience),
-        RequestLogDao::distinct_ip_count(&state.pool, since_days, audience),
-        RequestLogDao::audience_counts(&state.pool, since_days),
-        RequestLogDao::count_by_day(&state.pool, since_days, audience),
-        RequestLogDao::distinct_ip_by_day(&state.pool, since_days, audience),
-        RequestLogDao::count_by_content_path(&state.pool, since_days, audience, max_status, 25),
-        RequestLogDao::count_by_status_bucket(&state.pool, since_days, audience),
-        RequestLogDao::noisy_ips(&state.pool, &cutoff, 0, 25),
-        RequestLogDao::never_succeeded_paths(&state.pool, since_days, 25),
-        RequestLogDao::count_by_user_agent(&state.pool, since_days, 25),
-        RequestLogDao::referer_urls_since(&state.pool, since_days),
-        RequestLogDao::direct_referer_count(&state.pool, since_days),
-        RequestLogDao::latency_samples(&state.pool, since_days),
-        RequestLogDao::slowest_requests(&state.pool, since_days, 15),
+        RequestLogDao::count_since(&state.pool, &window, audience),
+        RequestLogDao::distinct_ip_count(&state.pool, &window, audience),
+        RequestLogDao::audience_counts(&state.pool, &window),
+        RequestLogDao::count_by_day(&state.pool, &window, audience),
+        RequestLogDao::distinct_ip_by_day(&state.pool, &window, audience),
+        RequestLogDao::count_by_content_path(&state.pool, &window, audience, max_status, 25),
+        RequestLogDao::count_by_status_bucket(&state.pool, &window, audience),
+        RequestLogDao::noisy_ips(&state.pool, &window, 0, 25),
+        RequestLogDao::never_succeeded_paths(&state.pool, &window, 25),
+        RequestLogDao::count_by_user_agent(&state.pool, &window, 25),
+        RequestLogDao::referer_urls_since(&state.pool, &window),
+        RequestLogDao::direct_referer_count(&state.pool, &window),
+        RequestLogDao::latency_samples(&state.pool, &window),
+        RequestLogDao::slowest_requests(&state.pool, &window, 15),
         RequestLogDao::recent(&state.pool, 50),
     )?;
 
@@ -161,6 +233,10 @@ pub async fn show_analytics(
         top_bar,
         auth_state: session_data.auth_state,
         since_days,
+        custom_active,
+        from_raw,
+        to_raw,
+        window_qs,
         paths_mode: paths_mode.to_string(),
         audience: audience.as_tag().to_string(),
         audience_counts,
@@ -220,9 +296,10 @@ pub async fn show_ip_detail(
     }
     // The retention window — show everything we still have for this IP.
     let since_days = 90;
+    let window = Window::last_days(since_days);
 
-    let path_status = RequestLogDao::ip_path_status(&state.pool, &ip, since_days).await?;
-    let user_agents = RequestLogDao::ip_user_agents(&state.pool, &ip, since_days).await?;
+    let path_status = RequestLogDao::ip_path_status(&state.pool, &ip, &window).await?;
+    let user_agents = RequestLogDao::ip_user_agents(&state.pool, &ip, &window).await?;
     let recent = RequestLogDao::ip_recent(&state.pool, &ip, 100).await?;
 
     // Derive the header, status mix, and 404 wordlist from the one query — no extra

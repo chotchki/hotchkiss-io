@@ -83,6 +83,61 @@ async fn analytics_requires_admin() {
 }
 
 #[tokio::test]
+async fn analytics_custom_range_overrides_preset_and_tolerates_garbage() {
+    // Phase CT: a valid ?from/&to renders the custom-range branch; a bad or inverted
+    // range degrades to the preset (never a 500).
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    // A valid past range → the custom-range branch, NOT the "Last N days" preset line.
+    let body = admin
+        .get(server.url("/admin/analytics?from=2020-01-01T00:00&to=2020-12-31T23:59"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        body.contains("Custom range (UTC)"),
+        "a valid from/to must render the custom-range branch"
+    );
+    assert!(
+        !body.contains("Last 30 days"),
+        "a custom range must not also show the preset line"
+    );
+
+    // Garbage bounds → graceful fall back to the preset, 200 not 500.
+    let resp = admin
+        .get(server.url("/admin/analytics?from=notadate&to=alsobad"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(
+        resp.text().await.unwrap().contains("Last 30 days"),
+        "garbage bounds must degrade to the default preset"
+    );
+
+    // Inverted range (from > to) is invalid → preset fallback, still 200.
+    let resp = admin
+        .get(server.url("/admin/analytics?from=2030-01-01T00:00&to=2020-01-01T00:00"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(
+        resp.text().await.unwrap().contains("Last 30 days"),
+        "an inverted range must degrade to the preset"
+    );
+}
+
+#[tokio::test]
 async fn analytics_audience_toggle_renders_and_tolerates_garbage() {
     // CQ.2: the audience toggle + 3-chip honesty display render, and a bad ?audience
     // degrades to All instead of 500-ing the admin page.

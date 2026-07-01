@@ -202,8 +202,57 @@ pub struct LatencySample {
 }
 
 fn window(days: i64) -> String {
-    // SQLite datetime modifier — `datetime('now', '-7 days')`.
+    // SQLite datetime modifier — `datetime('now', '-7 days')`. Still used by
+    // `prune_before` (a DELETE); the analytics reads moved to `Window` (CT.1).
     format!("-{} days", days.max(0))
+}
+
+/// A concrete UTC time window `[from, to)` for the analytics queries, as SQLite
+/// datetime strings (`YYYY-MM-DD HH:MM:SS` — how `ts` is stored: SQLite
+/// `CURRENT_TIMESTAMP`, UTC). Both the fixed presets (7/30/90d) AND the custom
+/// from/to picker (Phase CT) funnel through this: every windowed query filters
+/// `ts >= from AND ts < to`. A preset is `[now - N days, FAR_FUTURE)` — unbounded
+/// above, identical to the old `datetime('now','-N days')` behavior; a custom
+/// range clamps either or both ends. Concrete strings (computed once in the
+/// handler) keep every query on the same `ts` index range-scan, and the
+/// fixed-width format makes the string compare a chronological compare.
+pub struct Window {
+    pub from: String,
+    pub to: String,
+}
+
+/// Open-ended sentinels. The `ts` format is fixed-width, so these sort
+/// lexicographically before/after any real timestamp.
+const WINDOW_FAR_PAST: &str = "0000-01-01 00:00:00";
+const WINDOW_FAR_FUTURE: &str = "9999-12-31 23:59:59";
+
+impl Window {
+    fn fmt(d: DateTime<Utc>) -> String {
+        d.format("%Y-%m-%d %H:%M:%S").to_string()
+    }
+
+    /// A preset lookback: `[now - days, unbounded)`. Computed via timestamp math
+    /// (`sqlx::types::chrono` doesn't re-export the `TimeDelta`/`Duration` delta type,
+    /// only the datetime types), which needs only `DateTime`/`Utc`.
+    pub fn last_days(days: i64) -> Self {
+        let now = Utc::now();
+        let cutoff_secs = now.timestamp() - days.max(0) * 86_400;
+        let from = DateTime::<Utc>::from_timestamp(cutoff_secs, 0).unwrap_or(now);
+        Self {
+            from: Self::fmt(from),
+            to: WINDOW_FAR_FUTURE.to_string(),
+        }
+    }
+
+    /// A custom range. Either bound may be open: a `None` `from` means "from the
+    /// beginning", a `None` `to` means "through now and beyond" — so a from-only
+    /// range is "since this instant" (the post-deploy p95 case, CT).
+    pub fn custom(from: Option<DateTime<Utc>>, to: Option<DateTime<Utc>>) -> Self {
+        Self {
+            from: from.map(Self::fmt).unwrap_or_else(|| WINDOW_FAR_PAST.to_string()),
+            to: to.map(Self::fmt).unwrap_or_else(|| WINDOW_FAR_FUTURE.to_string()),
+        }
+    }
 }
 
 impl RequestLogDao {
@@ -254,18 +303,18 @@ impl RequestLogDao {
 
     pub async fn count_since(
         executor: impl SqliteExecutor<'_>,
-        since_days: i64,
+        w: &Window,
         audience: Audience,
     ) -> Result<i64> {
-        let w = window(since_days);
         let bot = audience.as_bot_filter();
         Ok(query!(
             r#"
             SELECT COUNT(*) as "count!: i64"
             FROM request_log
-            WHERE ts >= datetime('now', ?1) AND (?2 IS NULL OR is_bot = ?2)
+            WHERE ts >= ?1 AND ts < ?2 AND (?3 IS NULL OR is_bot = ?3)
             "#,
-            w,
+            w.from,
+            w.to,
             bot
         )
         .fetch_one(executor)
@@ -275,18 +324,18 @@ impl RequestLogDao {
 
     pub async fn distinct_ip_count(
         executor: impl SqliteExecutor<'_>,
-        since_days: i64,
+        w: &Window,
         audience: Audience,
     ) -> Result<i64> {
-        let w = window(since_days);
         let bot = audience.as_bot_filter();
         Ok(query!(
             r#"
             SELECT COUNT(DISTINCT ip) as "count!: i64"
             FROM request_log
-            WHERE ts >= datetime('now', ?1) AND ip IS NOT NULL AND (?2 IS NULL OR is_bot = ?2)
+            WHERE ts >= ?1 AND ts < ?2 AND ip IS NOT NULL AND (?3 IS NULL OR is_bot = ?3)
             "#,
-            w,
+            w.from,
+            w.to,
             bot
         )
         .fetch_one(executor)
@@ -300,9 +349,8 @@ impl RequestLogDao {
     /// once the backfill has stamped every row (a NULL is_bot counts as neither).
     pub async fn audience_counts(
         executor: impl SqliteExecutor<'_>,
-        since_days: i64,
+        w: &Window,
     ) -> Result<AudienceCounts> {
-        let w = window(since_days);
         Ok(query_as!(
             AudienceCounts,
             r#"
@@ -311,9 +359,10 @@ impl RequestLogDao {
                 COUNT(CASE WHEN is_bot = 0 THEN 1 END) as "humans!: i64",
                 COUNT(CASE WHEN is_bot = 1 THEN 1 END) as "bots!: i64"
             FROM request_log
-            WHERE ts >= datetime('now', ?1)
+            WHERE ts >= ?1 AND ts < ?2
             "#,
-            w
+            w.from,
+            w.to
         )
         .fetch_one(executor)
         .await?)
@@ -321,21 +370,21 @@ impl RequestLogDao {
 
     pub async fn count_by_user_agent(
         executor: impl SqliteExecutor<'_>,
-        since_days: i64,
+        w: &Window,
         limit: i64,
     ) -> Result<Vec<UserAgentCount>> {
-        let w = window(since_days);
         Ok(query_as!(
             UserAgentCount,
             r#"
             SELECT user_agent, COUNT(*) as "count!: i64"
             FROM request_log
-            WHERE ts >= datetime('now', ?1)
+            WHERE ts >= ?1 AND ts < ?2
             GROUP BY user_agent
             ORDER BY COUNT(*) DESC, user_agent ASC
-            LIMIT ?2
+            LIMIT ?3
             "#,
-            w,
+            w.from,
+            w.to,
             limit
         )
         .fetch_all(executor)
@@ -352,19 +401,19 @@ impl RequestLogDao {
     /// URL and self-filtered with a substring `LIKE` that mis-swallowed lookalikes).
     pub async fn referer_urls_since(
         executor: impl SqliteExecutor<'_>,
-        since_days: i64,
+        w: &Window,
     ) -> Result<Vec<RefererCount>> {
-        let w = window(since_days);
         Ok(query_as!(
             RefererCount,
             r#"
             SELECT referer as "referer!: String", COUNT(*) as "count!: i64"
             FROM request_log
-            WHERE ts >= datetime('now', ?1) AND referer IS NOT NULL
+            WHERE ts >= ?1 AND ts < ?2 AND referer IS NOT NULL
             GROUP BY referer
             ORDER BY COUNT(*) DESC, referer ASC
             "#,
-            w
+            w.from,
+            w.to
         )
         .fetch_all(executor)
         .await?)
@@ -374,12 +423,12 @@ impl RequestLogDao {
     /// the "direct" number, core to the sources picture.
     pub async fn direct_referer_count(
         executor: impl SqliteExecutor<'_>,
-        since_days: i64,
+        w: &Window,
     ) -> Result<i64> {
-        let w = window(since_days);
         Ok(query!(
-            r#"SELECT COUNT(*) as "count!: i64" FROM request_log WHERE ts >= datetime('now', ?1) AND referer IS NULL"#,
-            w
+            r#"SELECT COUNT(*) as "count!: i64" FROM request_log WHERE ts >= ?1 AND ts < ?2 AND referer IS NULL"#,
+            w.from,
+            w.to
         )
         .fetch_one(executor)
         .await?
@@ -388,21 +437,21 @@ impl RequestLogDao {
 
     pub async fn count_by_day(
         executor: impl SqliteExecutor<'_>,
-        since_days: i64,
+        w: &Window,
         audience: Audience,
     ) -> Result<Vec<DayCount>> {
-        let w = window(since_days);
         let bot = audience.as_bot_filter();
         Ok(query_as!(
             DayCount,
             r#"
             SELECT substr(ts, 1, 10) as "day!: String", COUNT(*) as "count!: i64"
             FROM request_log
-            WHERE ts >= datetime('now', ?1) AND (?2 IS NULL OR is_bot = ?2)
+            WHERE ts >= ?1 AND ts < ?2 AND (?3 IS NULL OR is_bot = ?3)
             GROUP BY substr(ts, 1, 10)
             ORDER BY substr(ts, 1, 10) ASC
             "#,
-            w,
+            w.from,
+            w.to,
             bot
         )
         .fetch_all(executor)
@@ -413,21 +462,21 @@ impl RequestLogDao {
     /// excluded — they can't be attributed to a visitor.
     pub async fn distinct_ip_by_day(
         executor: impl SqliteExecutor<'_>,
-        since_days: i64,
+        w: &Window,
         audience: Audience,
     ) -> Result<Vec<DayCount>> {
-        let w = window(since_days);
         let bot = audience.as_bot_filter();
         Ok(query_as!(
             DayCount,
             r#"
             SELECT substr(ts, 1, 10) as "day!: String", COUNT(DISTINCT ip) as "count!: i64"
             FROM request_log
-            WHERE ts >= datetime('now', ?1) AND ip IS NOT NULL AND (?2 IS NULL OR is_bot = ?2)
+            WHERE ts >= ?1 AND ts < ?2 AND ip IS NOT NULL AND (?3 IS NULL OR is_bot = ?3)
             GROUP BY substr(ts, 1, 10)
             ORDER BY substr(ts, 1, 10) ASC
             "#,
-            w,
+            w.from,
+            w.to,
             bot
         )
         .fetch_all(executor)
@@ -441,20 +490,19 @@ impl RequestLogDao {
     /// a plain prefix/exact set — amend it here if a new static prefix shows up.
     pub async fn count_by_content_path(
         executor: impl SqliteExecutor<'_>,
-        since_days: i64,
+        w: &Window,
         audience: Audience,
         max_status: i64,
         limit: i64,
     ) -> Result<Vec<PathCount>> {
-        let w = window(since_days);
         let bot = audience.as_bot_filter();
         Ok(query_as!(
             PathCount,
             r#"
             SELECT path, COUNT(*) as "count!: i64"
             FROM request_log
-            WHERE ts >= datetime('now', ?1)
-              AND status < ?2
+            WHERE ts >= ?1 AND ts < ?2
+              AND status < ?3
               AND (?4 IS NULL OR is_bot = ?4)
               AND path NOT LIKE '/styles%'
               AND path NOT LIKE '/vendor%'
@@ -465,12 +513,13 @@ impl RequestLogDao {
               AND path NOT IN ('/favicon.ico', '/manifest.webmanifest', '/robots.txt', '/apple-touch-icon.png')
             GROUP BY path
             ORDER BY COUNT(*) DESC, path ASC
-            LIMIT ?3
+            LIMIT ?5
             "#,
-            w,
+            w.from,
+            w.to,
             max_status,
-            limit,
-            bot
+            bot,
+            limit
         )
         .fetch_all(executor)
         .await?)
@@ -481,10 +530,9 @@ impl RequestLogDao {
     /// `!` annotations hold.
     pub async fn count_by_status_bucket(
         executor: impl SqliteExecutor<'_>,
-        since_days: i64,
+        w: &Window,
         audience: Audience,
     ) -> Result<StatusBucketCounts> {
-        let w = window(since_days);
         let bot = audience.as_bot_filter();
         Ok(query_as!(
             StatusBucketCounts,
@@ -497,9 +545,10 @@ impl RequestLogDao {
                 COUNT(CASE WHEN status BETWEEN 400 AND 499 AND status NOT IN (403, 404) THEN 1 END) as "s4xx!: i64",
                 COUNT(CASE WHEN status BETWEEN 500 AND 599 THEN 1 END) as "s5xx!: i64"
             FROM request_log
-            WHERE ts >= datetime('now', ?1) AND (?2 IS NULL OR is_bot = ?2)
+            WHERE ts >= ?1 AND ts < ?2 AND (?3 IS NULL OR is_bot = ?3)
             "#,
-            w,
+            w.from,
+            w.to,
             bot
         )
         .fetch_one(executor)
@@ -513,14 +562,14 @@ impl RequestLogDao {
     /// scanner claiming to be a browser is exactly what this must still catch.
     ///
     /// `WHERE ip IS NOT NULL` is NON-NEGOTIABLE — a NULL in a GROUP BY is its own
-    /// bucket and would poison the leaderboard. `window_cutoff` is a SQLite datetime
-    /// MODIFIER (e.g. "-30 days") not a days int — so the deferred IP-blocklist phase
-    /// reuses this fn for its "N 404s in M MINUTES" variant by passing "-15 minutes" and
-    /// a `min_distinct_404` of `SCAN_DISTINCT_404_THRESHOLD` (the dashboard leaves it at
-    /// 0 to see everyone).
+    /// bucket and would poison the leaderboard. Takes the same `Window` as every other
+    /// windowed read (CT.1), so the deferred IP-blocklist phase still reuses this fn for
+    /// its "N 404s in M MINUTES" variant — it just passes `Window::custom(Some(now -
+    /// 15min), None)` and a `min_distinct_404` of `SCAN_DISTINCT_404_THRESHOLD` (the
+    /// dashboard leaves it at 0 to see everyone).
     pub async fn noisy_ips(
         executor: impl SqliteExecutor<'_>,
-        window_cutoff: &str,
+        w: &Window,
         min_distinct_404: i64,
         limit: i64,
     ) -> Result<Vec<NoisyIp>> {
@@ -534,13 +583,14 @@ impl RequestLogDao {
                 COUNT(DISTINCT CASE WHEN status = 404 THEN path END) as "distinct_404!: i64",
                 COUNT(CASE WHEN status >= 400 THEN 1 END) as "errors!: i64"
             FROM request_log
-            WHERE ip IS NOT NULL AND ts >= datetime('now', ?1)
+            WHERE ip IS NOT NULL AND ts >= ?1 AND ts < ?2
             GROUP BY ip
-            HAVING COUNT(DISTINCT CASE WHEN status = 404 THEN path END) >= ?2
+            HAVING COUNT(DISTINCT CASE WHEN status = 404 THEN path END) >= ?3
             ORDER BY COUNT(*) DESC, ip ASC
-            LIMIT ?3
+            LIMIT ?4
             "#,
-            window_cutoff,
+            w.from,
+            w.to,
             min_distinct_404,
             limit
         )
@@ -553,22 +603,22 @@ impl RequestLogDao {
     /// Labeled honestly: this includes 403-only / 5xx-only probes, not just 404s.
     pub async fn never_succeeded_paths(
         executor: impl SqliteExecutor<'_>,
-        since_days: i64,
+        w: &Window,
         limit: i64,
     ) -> Result<Vec<PathCount>> {
-        let w = window(since_days);
         Ok(query_as!(
             PathCount,
             r#"
             SELECT path, COUNT(*) as "count!: i64"
             FROM request_log
-            WHERE ts >= datetime('now', ?1)
+            WHERE ts >= ?1 AND ts < ?2
             GROUP BY path
             HAVING SUM(CASE WHEN status < 400 THEN 1 ELSE 0 END) = 0
             ORDER BY COUNT(*) DESC, path ASC
-            LIMIT ?2
+            LIMIT ?3
             "#,
-            w,
+            w.from,
+            w.to,
             limit
         )
         .fetch_all(executor)
@@ -581,20 +631,20 @@ impl RequestLogDao {
     pub async fn ip_path_status(
         executor: impl SqliteExecutor<'_>,
         ip: &str,
-        since_days: i64,
+        w: &Window,
     ) -> Result<Vec<IpPathStatus>> {
-        let w = window(since_days);
         Ok(query_as!(
             IpPathStatus,
             r#"
             SELECT path, status, COUNT(*) as "count!: i64"
             FROM request_log
-            WHERE ip = ?1 AND ts >= datetime('now', ?2)
+            WHERE ip = ?1 AND ts >= ?2 AND ts < ?3
             GROUP BY path, status
             ORDER BY COUNT(*) DESC, path ASC
             "#,
             ip,
-            w
+            w.from,
+            w.to
         )
         .fetch_all(executor)
         .await?)
@@ -605,20 +655,20 @@ impl RequestLogDao {
     pub async fn ip_user_agents(
         executor: impl SqliteExecutor<'_>,
         ip: &str,
-        since_days: i64,
+        w: &Window,
     ) -> Result<Vec<UserAgentCount>> {
-        let w = window(since_days);
         Ok(query_as!(
             UserAgentCount,
             r#"
             SELECT user_agent, COUNT(*) as "count!: i64"
             FROM request_log
-            WHERE ip = ?1 AND ts >= datetime('now', ?2)
+            WHERE ip = ?1 AND ts >= ?2 AND ts < ?3
             GROUP BY user_agent
             ORDER BY COUNT(*) DESC, user_agent ASC
             "#,
             ip,
-            w
+            w.from,
+            w.to
         )
         .fetch_all(executor)
         .await?)
@@ -661,15 +711,14 @@ impl RequestLogDao {
     /// which folds them out. Unbounded: percentiles need the full sample.
     pub async fn latency_samples(
         executor: impl SqliteExecutor<'_>,
-        since_days: i64,
+        w: &Window,
     ) -> Result<Vec<LatencySample>> {
-        let w = window(since_days);
         Ok(query_as!(
             LatencySample,
             r#"
             SELECT path, duration_ms as "duration_ms!: i64"
             FROM request_log
-            WHERE ts >= datetime('now', ?1)
+            WHERE ts >= ?1 AND ts < ?2
               AND duration_ms IS NOT NULL
               AND path NOT LIKE '/styles%'
               AND path NOT LIKE '/vendor%'
@@ -677,7 +726,8 @@ impl RequestLogDao {
               AND path NOT LIKE '/images%'
               AND path NOT IN ('/favicon.ico', '/manifest.webmanifest', '/robots.txt', '/apple-touch-icon.png')
             "#,
-            w
+            w.from,
+            w.to
         )
         .fetch_all(executor)
         .await?)
@@ -688,10 +738,9 @@ impl RequestLogDao {
     /// durations (they'd sort last under DESC anyway, but be explicit).
     pub async fn slowest_requests(
         executor: impl SqliteExecutor<'_>,
-        since_days: i64,
+        w: &Window,
         limit: i64,
     ) -> Result<Vec<RequestLogDao>> {
-        let w = window(since_days);
         Ok(query_as!(
             RequestLogDao,
             r#"
@@ -704,11 +753,12 @@ impl RequestLogDao {
                 user_agent,
                 duration_ms
             FROM request_log
-            WHERE ts >= datetime('now', ?1) AND duration_ms IS NOT NULL
+            WHERE ts >= ?1 AND ts < ?2 AND duration_ms IS NOT NULL
             ORDER BY duration_ms DESC, id DESC
-            LIMIT ?2
+            LIMIT ?3
             "#,
-            w,
+            w.from,
+            w.to,
             limit
         )
         .fetch_all(executor)
@@ -848,21 +898,60 @@ mod tests {
     async fn aggregates(pool: SqlitePool) -> Result<()> {
         seed(&pool).await?;
 
-        assert_eq!(RequestLogDao::count_since(&pool, 1, Audience::All).await?, 5);
-        assert_eq!(RequestLogDao::distinct_ip_count(&pool, 1, Audience::All).await?, 2);
+        assert_eq!(RequestLogDao::count_since(&pool, &Window::last_days(1), Audience::All).await?, 5);
+        assert_eq!(RequestLogDao::distinct_ip_count(&pool, &Window::last_days(1), Audience::All).await?, 2);
 
-        let by_path = RequestLogDao::count_by_content_path(&pool, 1, Audience::All, 400, 10).await?;
+        let by_path = RequestLogDao::count_by_content_path(&pool, &Window::last_days(1), Audience::All, 400, 10).await?;
         assert_eq!(by_path[0].path, "/pages/Resume");
         assert_eq!(by_path[0].count, 3);
 
-        let by_ua = RequestLogDao::count_by_user_agent(&pool, 1, 10).await?;
+        let by_ua = RequestLogDao::count_by_user_agent(&pool, &Window::last_days(1), 10).await?;
         // curl/8 and Mozilla/5 each appear; curl/8 has 2, Mozilla/5 has 2, plus one NULL
         assert!(by_ua.iter().any(|u| u.user_agent.as_deref() == Some("curl/8") && u.count == 2));
 
-        let by_day = RequestLogDao::count_by_day(&pool, 1, Audience::All).await?;
+        let by_day = RequestLogDao::count_by_day(&pool, &Window::last_days(1), Audience::All).await?;
         assert_eq!(by_day.len(), 1); // all seeded "now"
         assert_eq!(by_day[0].count, 5);
 
+        Ok(())
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn window_bounds_exclude_outside_range(pool: SqlitePool) -> Result<()> {
+        // A recent row (now) and an old row (100 days ago, via raw ts).
+        RequestLogDao::insert(&pool, &entry("/recent", 200, Some("1.1.1.1"), None)).await?;
+        query!("INSERT INTO request_log (ts, method, path, status) VALUES (datetime('now','-100 days'),'GET','/old',200)")
+            .execute(&pool)
+            .await?;
+
+        let now = Utc::now();
+        let at = |days_ago: i64| DateTime::<Utc>::from_timestamp(now.timestamp() - days_ago * 86_400, 0);
+
+        // Preset is unbounded above: last 1 day → only the recent row.
+        assert_eq!(
+            RequestLogDao::count_since(&pool, &Window::last_days(1), Audience::All).await?,
+            1,
+            "last_days(1) sees only the recent row"
+        );
+        // A CLOSED window straddling only the OLD row: [-150d, -50d) — the UPPER bound
+        // excludes 'now', the new capability this whole phase turns on.
+        assert_eq!(
+            RequestLogDao::count_since(&pool, &Window::custom(at(150), at(50)), Audience::All).await?,
+            1,
+            "only the -100d row is inside [-150d, -50d); the upper bound drops the recent one"
+        );
+        // A window entirely in the past (to before everything) → empty.
+        assert_eq!(
+            RequestLogDao::count_since(&pool, &Window::custom(None, at(200)), Audience::All).await?,
+            0,
+            "nothing precedes 200 days ago"
+        );
+        // from-only (to open) → "since this instant" through now = the recent row.
+        assert_eq!(
+            RequestLogDao::count_since(&pool, &Window::custom(at(1), None), Audience::All).await?,
+            1,
+            "from-only is 'since this instant', to = open"
+        );
         Ok(())
     }
 
@@ -876,10 +965,10 @@ mod tests {
         .execute(&pool)
         .await?;
 
-        assert_eq!(RequestLogDao::count_since(&pool, 365, Audience::All).await?, 6);
+        assert_eq!(RequestLogDao::count_since(&pool, &Window::last_days(365), Audience::All).await?, 6);
         let removed = RequestLogDao::prune_before(&pool, 90).await?;
         assert_eq!(removed, 1);
-        assert_eq!(RequestLogDao::count_since(&pool, 365, Audience::All).await?, 5);
+        assert_eq!(RequestLogDao::count_since(&pool, &Window::last_days(365), Audience::All).await?, 5);
 
         Ok(())
     }
@@ -899,7 +988,7 @@ mod tests {
             RequestLogDao::insert(&pool, &e).await?;
         }
 
-        let top = RequestLogDao::count_by_content_path(&pool, 1, Audience::All, 400, 25).await?;
+        let top = RequestLogDao::count_by_content_path(&pool, &Window::last_days(1), Audience::All, 400, 25).await?;
         let paths: Vec<&str> = top.iter().map(|p| p.path.as_str()).collect();
 
         assert!(paths.contains(&"/pages/Resume"), "content page must rank: {paths:?}");
@@ -920,7 +1009,7 @@ mod tests {
 
         // "All" mode (high status ceiling) surfaces the 404 probe but still
         // drops static assets.
-        let all = RequestLogDao::count_by_content_path(&pool, 1, Audience::All, 10_000, 25).await?;
+        let all = RequestLogDao::count_by_content_path(&pool, &Window::last_days(1), Audience::All, 10_000, 25).await?;
         let all_paths: Vec<&str> = all.iter().map(|p| p.path.as_str()).collect();
         assert!(
             all_paths.contains(&"/cgi-bin/luci"),
@@ -944,8 +1033,8 @@ mod tests {
             RequestLogDao::insert(&pool, &e).await?;
         }
 
-        let total = RequestLogDao::count_by_day(&pool, 1, Audience::All).await?;
-        let unique = RequestLogDao::distinct_ip_by_day(&pool, 1, Audience::All).await?;
+        let total = RequestLogDao::count_by_day(&pool, &Window::last_days(1), Audience::All).await?;
+        let unique = RequestLogDao::distinct_ip_by_day(&pool, &Window::last_days(1), Audience::All).await?;
         assert_eq!(total[0].count, 4, "4 total views");
         assert_eq!(unique[0].count, 2, "2 distinct IPs (null excluded)");
         Ok(())
@@ -962,16 +1051,16 @@ mod tests {
             RequestLogDao::insert(&pool, &e).await?;
         }
 
-        let c = RequestLogDao::audience_counts(&pool, 1).await?;
+        let c = RequestLogDao::audience_counts(&pool, &Window::last_days(1)).await?;
         assert_eq!(c.all, 4);
         assert_eq!(c.humans, 1, "only the real-browser UA is human");
         assert_eq!(c.bots, 3, "googlebot + python-requests + null-UA");
         assert_eq!(c.humans + c.bots, c.all, "the honesty invariant: no row is both/neither");
 
         // The audience filter re-buckets the headline count the same way.
-        assert_eq!(RequestLogDao::count_since(&pool, 1, Audience::All).await?, 4);
-        assert_eq!(RequestLogDao::count_since(&pool, 1, Audience::Humans).await?, 1);
-        assert_eq!(RequestLogDao::count_since(&pool, 1, Audience::Bots).await?, 3);
+        assert_eq!(RequestLogDao::count_since(&pool, &Window::last_days(1), Audience::All).await?, 4);
+        assert_eq!(RequestLogDao::count_since(&pool, &Window::last_days(1), Audience::Humans).await?, 1);
+        assert_eq!(RequestLogDao::count_since(&pool, &Window::last_days(1), Audience::Bots).await?, 3);
         Ok(())
     }
 
@@ -1005,7 +1094,7 @@ mod tests {
         let updated = RequestLogDao::reclassify_bots(&pool, true).await?;
         assert_eq!(updated, 2, "backfill only touches the NULL rows");
 
-        let c = RequestLogDao::audience_counts(&pool, 1).await?;
+        let c = RequestLogDao::audience_counts(&pool, &Window::last_days(1)).await?;
         assert_eq!(c.all, 3);
         assert_eq!(c.humans, 1, "the real browser");
         assert_eq!(c.bots, 2, "googlebot + curl");
@@ -1037,13 +1126,13 @@ mod tests {
             RequestLogDao::insert(&pool, &e).await?;
         }
 
-        let refs = RequestLogDao::referer_urls_since(&pool, 1).await?;
+        let refs = RequestLogDao::referer_urls_since(&pool, &Window::last_days(1)).await?;
         // 2 distinct non-null referers (HN + self), unbounded — self is kept here and
         // dropped later by group_referers, not by the SQL.
         assert_eq!(refs.len(), 2);
         assert_eq!(refs[0].referer, "https://news.ycombinator.com/");
         assert_eq!(refs[0].count, 2);
-        assert_eq!(RequestLogDao::direct_referer_count(&pool, 1).await?, 2);
+        assert_eq!(RequestLogDao::direct_referer_count(&pool, &Window::last_days(1)).await?, 2);
         Ok(())
     }
 
@@ -1060,7 +1149,7 @@ mod tests {
         ] {
             RequestLogDao::insert(&pool, &e).await?;
         }
-        let b = RequestLogDao::count_by_status_bucket(&pool, 1, Audience::All).await?;
+        let b = RequestLogDao::count_by_status_bucket(&pool, &Window::last_days(1), Audience::All).await?;
         assert_eq!(b.s2xx, 1);
         assert_eq!(b.s3xx, 1);
         assert_eq!(b.s403, 1);
@@ -1084,7 +1173,7 @@ mod tests {
         // NULL-ip rows (the poison boundary) — must NEVER appear in the leaderboard.
         RequestLogDao::insert(&pool, &entry("/wp-admin", 404, None, None)).await?;
 
-        let rows = RequestLogDao::noisy_ips(&pool, "-1 days", 0, 25).await?;
+        let rows = RequestLogDao::noisy_ips(&pool, &Window::last_days(1), 0, 25).await?;
         assert_eq!(rows.len(), 2, "exactly the two real IPs — NULL ip excluded, not its own bucket");
 
         let scanner = rows.iter().find(|r| r.ip == "9.9.9.9").expect("scanner present");
@@ -1097,14 +1186,14 @@ mod tests {
 
         // The blocklist-reuse seam: min_distinct_404 filters to offenders only.
         let offenders =
-            RequestLogDao::noisy_ips(&pool, "-1 days", SCAN_DISTINCT_404_THRESHOLD, 25).await?;
+            RequestLogDao::noisy_ips(&pool, &Window::last_days(1), SCAN_DISTINCT_404_THRESHOLD, 25).await?;
         assert_eq!(offenders.len(), 1);
         assert_eq!(offenders[0].ip, "9.9.9.9");
 
         // One below the floor is NOT selected by that filter.
         RequestLogDao::insert(&pool, &entry("/one-404", 404, Some("8.8.8.8"), None)).await?;
         let still_one =
-            RequestLogDao::noisy_ips(&pool, "-1 days", SCAN_DISTINCT_404_THRESHOLD, 25).await?;
+            RequestLogDao::noisy_ips(&pool, &Window::last_days(1), SCAN_DISTINCT_404_THRESHOLD, 25).await?;
         assert_eq!(still_one.len(), 1, "1 distinct-404 is below the scanner floor");
         Ok(())
     }
@@ -1120,7 +1209,7 @@ mod tests {
         ] {
             RequestLogDao::insert(&pool, &e).await?;
         }
-        let probes = RequestLogDao::never_succeeded_paths(&pool, 1, 25).await?;
+        let probes = RequestLogDao::never_succeeded_paths(&pool, &Window::last_days(1), 25).await?;
         let paths: Vec<&str> = probes.iter().map(|p| p.path.as_str()).collect();
         assert!(paths.contains(&"/wp-admin"));
         assert!(paths.contains(&"/.env"), "403-only counts as never-succeeded");
