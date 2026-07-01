@@ -2431,3 +2431,94 @@ async fn projects_listing_uses_the_shared_search_and_pager() {
         "page 1 shows PAGE_SIZE projects"
     );
 }
+
+/// The cover field takes a "media ref", but the media library's only per-item copy
+/// button hands you `![](/media/<ref>)` (and the other, `/media/file/<url_key>`).
+/// Pasting either must SET the cover — the resolver has to extract the token, not
+/// demand a bare ref (the old exact-match `find_by_ref` silently failed → cover
+/// never set, and worse, wiped any existing one). Regression for "setting a cover
+/// image for a project doesn't work".
+#[tokio::test]
+async fn setting_a_cover_accepts_the_copyable_media_forms() {
+    let server = spawn_test_server().await.expect("spawn");
+    server.seed_project("skylander", "# Skylander\n\nbody").await.unwrap();
+
+    // A minimal media item + one image variant, as an upload would leave behind.
+    let media_ref = "0190aaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    let media_id: i64 = sqlx::query(
+        "INSERT INTO media (media_ref, kind, title) VALUES (?1, 'Image', 'cover') RETURNING media_id",
+    )
+    .bind(media_ref)
+    .fetch_one(&server.pool)
+    .await
+    .unwrap()
+    .get("media_id");
+    let url_key = "coverurlkeyhmac";
+    sqlx::query(
+        "INSERT INTO media_variant (media_id, sha256, url_key, mime, bytes, width)
+         VALUES (?1, 'sha', ?2, 'image/avif', 100, 480)",
+    )
+    .bind(media_id)
+    .bind(url_key)
+    .execute(&server.pool)
+    .await
+    .unwrap();
+
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    let put = |cover: &str| {
+        admin
+            .put(server.url("/pages/projects/skylander"))
+            .form(&[
+                ("page_title", "Skylander"),
+                ("page_category", ""),
+                ("page_markdown", "# Skylander\n\nbody"),
+                ("page_cover_media_ref", cover),
+                ("page_order", "0"),
+                ("page_creation_date", ""),
+            ])
+            .send()
+    };
+    let cover_id = || async {
+        sqlx::query("SELECT page_cover_media_id FROM content_pages WHERE page_name = 'skylander'")
+            .fetch_one(&server.pool)
+            .await
+            .unwrap()
+            .get::<Option<i64>, _>("page_cover_media_id")
+    };
+
+    // The "Copy ![]()" button output — the natural thing to paste.
+    let r = put(&format!("![](/media/{media_ref})")).await.unwrap();
+    assert!(r.status().is_success(), "cover PUT: {}", r.status());
+    assert_eq!(cover_id().await, Some(media_id), "markdown-embed form must set the cover");
+
+    // The whole point: the /projects card now renders the cover image (this is the
+    // user-visible symptom — before the fix the card fell back to the cubes icon).
+    let index = reqwest::get(server.url("/projects")).await.unwrap().text().await.unwrap();
+    assert!(
+        index.contains(&format!("/media/file/{url_key}")),
+        "the project card must show the cover image after it's set"
+    );
+
+    // Clearing the field removes the cover.
+    assert!(put("").await.unwrap().status().is_success());
+    assert_eq!(cover_id().await, None, "empty field clears the cover");
+
+    // The bare "/media/<ref>" form and a bare ref both resolve too.
+    put(&format!("/media/{media_ref}")).await.unwrap();
+    assert_eq!(cover_id().await, Some(media_id), "/media/<ref> form must set the cover");
+    put("").await.unwrap();
+    put(media_ref).await.unwrap();
+    assert_eq!(cover_id().await, Some(media_id), "a bare ref still resolves");
+
+    // The "Copy link" button output — `/media/file/<url_key>` — resolves via the variant.
+    put("").await.unwrap();
+    put(&format!("/media/file/{url_key}")).await.unwrap();
+    assert_eq!(cover_id().await, Some(media_id), "/media/file/<url_key> must set the cover");
+
+    // A garbage non-empty ref must NOT wipe an existing cover (typo != clear).
+    put(&format!("![](/media/{media_ref})")).await.unwrap(); // re-set
+    put("![](/media/does-not-exist)").await.unwrap();
+    assert_eq!(cover_id().await, Some(media_id), "an unresolvable ref preserves the cover");
+}

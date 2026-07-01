@@ -335,6 +335,34 @@ pub(crate) async fn cover_ref_for(pool: &sqlx::SqlitePool, page_id: i64) -> Opti
     .flatten()
 }
 
+/// Resolve a pasted "Cover (media ref)" value → a `media_id`, tolerating every
+/// shape the media library actually hands you: `![](/media/<ref>)` ("Copy ![]()"),
+/// `/media/file/<url_key>` ("Copy link"), a bare `/media/<ref>`, or a bare ref.
+/// The editor field demands a "media ref" but offers no bare-ref copy button, so
+/// without this the natural copy-paste silently fails to set the cover.
+///
+/// `Ok(None)` means "couldn't resolve" — an empty field OR a non-empty typo. The
+/// caller distinguishes them: an empty field clears the cover; an unresolvable
+/// non-empty value is left alone so a typo can't wipe an existing cover.
+pub(crate) async fn resolve_cover_media_id(
+    pool: &sqlx::SqlitePool,
+    raw: &str,
+) -> Option<i64> {
+    use crate::web::util::media_ref::{parse_cover_reference, MediaReference};
+    match parse_cover_reference(raw)? {
+        MediaReference::Ref(r) => MediaDao::find_by_ref(pool, r)
+            .await
+            .ok()
+            .flatten()
+            .map(|m| m.media_id),
+        MediaReference::UrlKey(k) => MediaVariantDao::find_by_url_key(pool, k)
+            .await
+            .ok()
+            .flatten()
+            .map(|v| v.media_id),
+    }
+}
+
 /// `<source>` ordering preference by hardware-decode likelihood (lower first):
 /// HEVC (Apple HW) → AV1 (royalty-free, but software-decoded on most devices) →
 /// H.264 → unknown. The browser plays the first source it can decode, so this

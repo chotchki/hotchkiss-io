@@ -75,9 +75,9 @@
     <label class="flex flex-col gap-1">
       <span class="text-sm font-display text-navy uppercase">Cover (media ref)</span>
       {% if let Some(cover_ref) = cover_media_ref %}
-      <input class="border border-navy/30 rounded px-3 py-2" name="page_cover_media_ref" value="{{cover_ref}}" placeholder="paste a media ref" type="text" />
+      <input class="border border-navy/30 rounded px-3 py-2" name="page_cover_media_ref" value="{{cover_ref}}" placeholder="paste ![]() from the library" type="text" />
       {% else %}
-      <input class="border border-navy/30 rounded px-3 py-2" name="page_cover_media_ref" placeholder="paste a media ref" type="text" />
+      <input class="border border-navy/30 rounded px-3 py-2" name="page_cover_media_ref" placeholder="paste ![]() from the library" type="text" />
       {% endif %}
     </label>
     <label class="flex flex-col gap-1">

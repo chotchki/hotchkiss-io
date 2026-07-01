@@ -231,13 +231,19 @@ pub async fn put_page_path(
     Path(page_path): Path<String>,
     Form(put_page_form): Form<PutPageForm>,
 ) -> Result<Response, AppError> {
-    // The cover is now a media ref (BZ.8); resolve it → media_id. An empty or
-    // unknown ref clears the cover.
-    let cover_media_id: Option<i64> = match &put_page_form.page_cover_media_ref {
-        Some(r) => crate::db::dao::media::MediaDao::find_by_ref(&state.pool, r)
-            .await?
-            .map(|m| m.media_id),
-        None => None,
+    // The cover is a media ref (BZ.8). The field tolerates every copyable shape
+    // (`![](/media/<ref>)`, `/media/file/<url_key>`, a bare ref) — see
+    // `resolve_cover_media_id`. Three outcomes:
+    //   empty field       → clear the cover
+    //   resolves          → set it
+    //   non-empty, no hit  → leave the cover ALONE (a typo must not wipe an
+    //                        existing cover — was the silent data-loss footgun).
+    let cover_update: Option<Option<i64>> = match &put_page_form.page_cover_media_ref {
+        None => Some(None),
+        // Some(id) → set it; None (unresolvable) → skip, preserving the existing cover.
+        Some(raw) => crate::web::features::media::resolve_cover_media_id(&state.pool, raw)
+            .await
+            .map(Some),
     };
 
     let page_names: Vec<&str> = page_path.split("/").collect();
@@ -263,8 +269,11 @@ pub async fn put_page_path(
 
             // Cover lives in a separate column (`page_cover_media_id`) that
             // `update()` doesn't touch; set_cover stamps `page_modified_date` too
-            // so a cover change keeps the feed/sitemap validators fresh.
-            ContentPageDao::set_cover(&state.pool, lp.page_id, cover_media_id).await?;
+            // so a cover change keeps the feed/sitemap validators fresh. Skip it
+            // entirely on an unresolvable ref so the existing cover is preserved.
+            if let Some(cover_media_id) = cover_update {
+                ContentPageDao::set_cover(&state.pool, lp.page_id, cover_media_id).await?;
+            }
 
             Ok(htmx_refresh())
         }
