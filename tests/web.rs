@@ -135,6 +135,24 @@ async fn analytics_custom_range_overrides_preset_and_tolerates_garbage() {
         resp.text().await.unwrap().contains("Last 30 days"),
         "an inverted range must degrade to the preset"
     );
+
+    // A preset pre-fills the From picker with its resolved lower bound (so the fields
+    // reflect the active window), while staying a preset — not flipping to a custom range.
+    let body = admin
+        .get(server.url("/admin/analytics?since=30"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("Last 30 days"), "a preset stays a preset");
+    let empty_from =
+        "id=\"range-from\" name=\"from\" type=\"text\" data-flatpickr autocomplete=\"off\" value=\"\"";
+    assert!(
+        body.contains("id=\"range-from\"") && !body.contains(empty_from),
+        "the From picker must be pre-filled with the preset's lower bound, not left empty"
+    );
 }
 
 #[tokio::test]

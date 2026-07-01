@@ -161,12 +161,18 @@ pub async fn show_analytics(
     } else {
         (Window::last_days(since_days), false)
     };
-    // Raw picker strings — repopulate the inputs + keep the range sticky across the
-    // audience/paths toggles (only meaningful when a custom range is active).
+    // Raw picker strings — repopulate the inputs + keep a custom range sticky across the
+    // audience/paths toggles. For a PRESET, MIRROR the resolved window into both fields
+    // (From = the lower bound, To = now; minute precision to match flatpickr's `Y-m-d
+    // H:i`) so clicking 7d/30d/90d makes the picker a WYSIWYG snapshot of the active
+    // range that's a concrete starting point to tweak. It's display-only until Apply —
+    // the active window stays the live preset (`window_qs` = `since=N`) until then.
     let (from_raw, to_raw) = if custom_active {
         (q.from.clone().unwrap_or_default(), q.to.clone().unwrap_or_default())
     } else {
-        (String::new(), String::new())
+        let from = window.from.get(..16).unwrap_or(window.from.as_str()).to_string();
+        let to = Utc::now().format("%Y-%m-%d %H:%M").to_string();
+        (from, to)
     };
     // The window query-string every toggle link carries, so switching audience/paths
     // preserves the active window (preset OR custom). Server-built from a controlled
