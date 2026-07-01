@@ -25,18 +25,13 @@
 </div>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Status mix</h3>
-<div class="overflow-x-auto">
-<table class="text-sm mb-2 whitespace-nowrap">
-    <tr class="text-left"><th class="pr-4">2xx</th><th class="pr-4">3xx</th><th class="pr-4">403</th><th class="pr-4">404</th><th class="pr-4">4xx</th><th class="pr-4">5xx</th></tr>
-    <tr>
-        <td class="pr-4">{{ status_buckets.s2xx }}</td>
-        <td class="pr-4">{{ status_buckets.s3xx }}</td>
-        <td class="pr-4">{{ status_buckets.s403 }}</td>
-        <td class="pr-4">{{ status_buckets.s404 }}</td>
-        <td class="pr-4">{{ status_buckets.s4xx }}</td>
-        <td class="pr-4">{{ status_buckets.s5xx }}</td>
-    </tr>
-</table>
+<div class="flex flex-row flex-wrap items-center gap-2 mb-2 text-sm">
+    <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">2xx {{ status_buckets.s2xx }}</span>
+    <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">3xx {{ status_buckets.s3xx }}</span>
+    <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">403 {{ status_buckets.s403 }}</span>
+    <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">404 {{ status_buckets.s404 }}</span>
+    <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">4xx {{ status_buckets.s4xx }}</span>
+    <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">5xx {{ status_buckets.s5xx }}</span>
 </div>
 
 {% if !wordlist.is_empty() %}
@@ -51,38 +46,45 @@
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Paths &amp; status</h3>
 <div class="overflow-x-auto">
-<table class="text-sm mb-2 w-full">
-    <tr class="text-left"><th class="pr-4">Hits</th><th class="pr-4">Status</th><th>Path</th></tr>
+<table class="data-table mb-2">
+    <thead><tr><th class="num">Hits</th><th class="num">Status</th><th>Path</th></tr></thead>
+    <tbody>
     {% for row in path_status %}
-    <tr><td class="pr-4 text-right align-top">{{ row.count }}</td><td class="pr-4 align-top">{{ row.status }}</td><td><span class="break-all">{{ row.path }}</span></td></tr>
+    <tr><td class="num">{{ row.count }}</td><td class="num">{{ row.status }}</td><td class="grow break-all">{{ row.path }}</td></tr>
     {% endfor %}
+    </tbody>
 </table>
 </div>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">User agents</h3>
 <div class="overflow-x-auto">
-<table class="text-sm mb-2 w-full">
+<table class="data-table mb-2">
+    <thead><tr><th class="num">Hits</th><th>User agent</th></tr></thead>
+    <tbody>
     {% for row in user_agents %}
-    <tr><td class="pr-4 text-right align-top">{{ row.count }}</td><td class="break-all">{% if let Some(ua) = row.user_agent.as_ref() %}{{ ua }}{% else %}(none){% endif %}</td></tr>
+    <tr><td class="num">{{ row.count }}</td><td class="grow break-all">{% if let Some(ua) = row.user_agent.as_ref() %}{{ ua }}{% else %}(none){% endif %}</td></tr>
     {% endfor %}
+    </tbody>
 </table>
 </div>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Recent requests</h3>
 <div class="overflow-x-auto">
-<table class="text-sm whitespace-nowrap">
-    <tr class="text-left">
-        <th class="pr-6">When (UTC)</th><th class="pr-4">Method</th><th class="pr-4">Status</th><th class="pr-4">ms</th><th>Path</th>
-    </tr>
+<table class="data-table">
+    <thead><tr>
+        <th>When (UTC)</th><th>Method</th><th class="num">Status</th><th class="num">ms</th><th>Path</th>
+    </tr></thead>
+    <tbody>
     {% for r in recent %}
     <tr>
-        <td class="pr-6">{{ r.ts }}</td>
-        <td class="pr-4">{{ r.method }}</td>
-        <td class="pr-4">{{ r.status }}</td>
-        <td class="pr-4 text-right">{% if let Some(d) = r.duration_ms %}{{ d }}{% else %}—{% endif %}</td>
-        <td class="break-all">{{ r.path }}</td>
+        <td class="nowrap">{{ r.ts }}</td>
+        <td class="nowrap">{{ r.method }}</td>
+        <td class="num">{{ r.status }}</td>
+        <td class="num">{% if let Some(d) = r.duration_ms %}{{ d }}{% else %}—{% endif %}</td>
+        <td class="grow break-all">{{ r.path }}</td>
     </tr>
     {% endfor %}
+    </tbody>
 </table>
 </div>
 

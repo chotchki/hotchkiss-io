@@ -59,67 +59,70 @@
 </div>
 <p class="text-xs text-navy/60 mb-1">Static assets excluded. {% if paths_mode == "all" %}Showing ALL requests including 4xx/5xx — the bot/scanner probes.{% else %}Successful loads only (status &lt; 400).{% endif %}</p>
 <div class="overflow-x-auto">
-<table class="text-sm mb-2 w-full">
+<table class="data-table mb-2">
+    <thead><tr><th class="num">Hits</th><th>Path</th></tr></thead>
+    <tbody>
     {% for row in by_path %}
-    <tr><td class="pr-4 text-right align-top">{{ row.count }}</td><td><span class="break-all">{{ row.path }}</span></td></tr>
+    <tr><td class="num">{{ row.count }}</td><td class="grow break-all">{{ row.path }}</td></tr>
     {% endfor %}
+    </tbody>
 </table>
 </div>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Status breakdown</h3>
 <p class="text-xs text-navy/60 mb-1">Factual — every response by status class (403 &amp; 404 split out: blocked vs probes).</p>
-<div class="overflow-x-auto">
-<table class="text-sm mb-2 whitespace-nowrap">
-    <tr class="text-left"><th class="pr-4">2xx</th><th class="pr-4">3xx</th><th class="pr-4">403</th><th class="pr-4">404</th><th class="pr-4">4xx</th><th class="pr-4">5xx</th></tr>
-    <tr>
-        <td class="pr-4">{{ status_buckets.s2xx }}</td>
-        <td class="pr-4">{{ status_buckets.s3xx }}</td>
-        <td class="pr-4">{{ status_buckets.s403 }}</td>
-        <td class="pr-4">{{ status_buckets.s404 }}</td>
-        <td class="pr-4">{{ status_buckets.s4xx }}</td>
-        <td class="pr-4">{{ status_buckets.s5xx }}</td>
-    </tr>
-</table>
+<div class="flex flex-row flex-wrap items-center gap-2 mb-2 text-sm">
+    <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">2xx {{ status_buckets.s2xx }}</span>
+    <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">3xx {{ status_buckets.s3xx }}</span>
+    <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">403 {{ status_buckets.s403 }}</span>
+    <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">404 {{ status_buckets.s404 }}</span>
+    <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">4xx {{ status_buckets.s4xx }}</span>
+    <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">5xx {{ status_buckets.s5xx }}</span>
 </div>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Noisy IPs</h3>
 <p class="text-xs text-navy/60 mb-1">By request volume. The <span class="uppercase font-bold">Scanner</span> badge is INFERRED (an IP hitting many distinct dead paths) — click an IP to drill down.</p>
 <div class="overflow-x-auto">
-<table class="text-sm mb-2 w-full whitespace-nowrap">
-    <tr class="text-left"><th class="pr-4">Reqs</th><th class="pr-4">Paths</th><th class="pr-4">404s</th><th class="pr-4">Err</th><th>IP</th></tr>
+<table class="data-table mb-2">
+    <thead><tr><th class="num">Reqs</th><th class="num">Paths</th><th class="num">404s</th><th class="num">Err</th><th>IP</th></tr></thead>
+    <tbody>
     {% for r in noisy_ips %}
     <tr>
-        <td class="pr-4 text-right">{{ r.total }}</td>
-        <td class="pr-4 text-right">{{ r.distinct_paths }}</td>
-        <td class="pr-4 text-right">{{ r.distinct_404 }}</td>
-        <td class="pr-4 text-right">{{ r.errors }}</td>
-        <td class="break-all"><a class="text-navy underline" href="/admin/analytics/ip/{{ r.ip }}">{{ r.ip }}</a>{% if r.is_scanner() %} <span class="ml-1 px-1.5 py-0.5 rounded-sm bg-navy text-yellow text-xs uppercase">Scanner</span>{% endif %}</td>
+        <td class="num">{{ r.total }}</td>
+        <td class="num">{{ r.distinct_paths }}</td>
+        <td class="num">{{ r.distinct_404 }}</td>
+        <td class="num">{{ r.errors }}</td>
+        <td class="grow break-all"><a class="text-navy underline" href="/admin/analytics/ip/{{ r.ip }}">{{ r.ip }}</a>{% if r.is_scanner() %} <span class="ml-1 px-1.5 py-0.5 rounded-sm bg-navy text-yellow text-xs uppercase">Scanner</span>{% endif %}</td>
     </tr>
     {% endfor %}
-    {% if noisy_ips.is_empty() %}<tr><td></td><td></td><td></td><td></td><td class="text-navy/60">(none yet)</td></tr>{% endif %}
+    {% if noisy_ips.is_empty() %}<tr><td class="grow text-navy/60" colspan="5">(none yet)</td></tr>{% endif %}
+    </tbody>
 </table>
 </div>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Paths that only ever errored</h3>
 <p class="text-xs text-navy/60 mb-1">Never returned &lt; 400 — the scanner-signature list (includes 403-only / 5xx-only, not just 404).</p>
 <div class="overflow-x-auto">
-<table class="text-sm mb-2 w-full">
+<table class="data-table mb-2">
+    <thead><tr><th class="num">Hits</th><th>Path</th></tr></thead>
+    <tbody>
     {% for row in never_succeeded %}
-    <tr><td class="pr-4 text-right align-top">{{ row.count }}</td><td><span class="break-all">{{ row.path }}</span></td></tr>
+    <tr><td class="num">{{ row.count }}</td><td class="grow break-all">{{ row.path }}</td></tr>
     {% endfor %}
-    {% if never_succeeded.is_empty() %}<tr><td></td><td class="text-navy/60">(none yet)</td></tr>{% endif %}
+    {% if never_succeeded.is_empty() %}<tr><td class="grow text-navy/60" colspan="2">(none yet)</td></tr>{% endif %}
+    </tbody>
 </table>
 </div>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Top user agents</h3>
 <div class="overflow-x-auto">
-<table class="text-sm mb-2 w-full">
+<table class="data-table mb-2">
+    <thead><tr><th class="num">Hits</th><th>User agent</th></tr></thead>
+    <tbody>
     {% for row in by_user_agent %}
-    <tr>
-        <td class="pr-4 text-right align-top">{{ row.count }}</td>
-        <td class="break-all">{% if let Some(ua) = row.user_agent.as_ref() %}{{ ua }}{% else %}(none){% endif %}</td>
-    </tr>
+    <tr><td class="num">{{ row.count }}</td><td class="grow break-all">{% if let Some(ua) = row.user_agent.as_ref() %}{{ ua }}{% else %}(none){% endif %}</td></tr>
     {% endfor %}
+    </tbody>
 </table>
 </div>
 
@@ -133,11 +136,14 @@
     {% if referers.noise_count > 0 %}<span class="px-2 py-0.5 rounded-sm bg-navy/40 text-div-grey" title="IP-literal + malformed referers, hidden">{{ referers.noise_count }} polluting referers hidden</span>{% endif %}
 </div>
 <div class="overflow-x-auto">
-<table class="text-sm mb-2 w-full">
+<table class="data-table mb-2">
+    <thead><tr><th class="num">Hits</th><th>Category</th><th>Host</th></tr></thead>
+    <tbody>
     {% for row in referers.top_external %}
-    <tr><td class="pr-4 text-right align-top">{{ row.count }}</td><td class="pr-4 align-top text-navy/60">{{ row.category.as_label() }}</td><td class="break-all">{{ row.host }}</td></tr>
+    <tr><td class="num">{{ row.count }}</td><td class="nowrap text-navy/70">{{ row.category.as_label() }}</td><td class="grow break-all">{{ row.host }}</td></tr>
     {% endfor %}
-    {% if referers.top_external.is_empty() %}<tr><td></td><td></td><td class="text-navy/60">(none yet)</td></tr>{% endif %}
+    {% if referers.top_external.is_empty() %}<tr><td class="grow text-navy/60" colspan="3">(none yet)</td></tr>{% endif %}
+    </tbody>
 </table>
 </div>
 
@@ -150,46 +156,52 @@
 
 <h4 class="font-display text-navy text-sm uppercase mt-3 mb-1">Slowest routes</h4>
 <div class="overflow-x-auto">
-<table class="text-sm mb-3 w-full whitespace-nowrap">
-    <tr class="text-left"><th class="pr-4">p95</th><th class="pr-4">p50</th><th class="pr-4">max</th><th class="pr-4">n</th><th>Route</th></tr>
+<table class="data-table mb-3">
+    <thead><tr><th class="num">p95</th><th class="num">p50</th><th class="num">max</th><th class="num">n</th><th>Route</th></tr></thead>
+    <tbody>
     {% for r in slow_routes %}
-    <tr><td class="pr-4 text-right">{{ r.p95 }}</td><td class="pr-4 text-right">{{ r.p50 }}</td><td class="pr-4 text-right">{{ r.max }}</td><td class="pr-4 text-right">{{ r.count }}</td><td class="break-all">{{ r.route }}</td></tr>
+    <tr><td class="num">{{ r.p95 }}</td><td class="num">{{ r.p50 }}</td><td class="num">{{ r.max }}</td><td class="num">{{ r.count }}</td><td class="grow break-all">{{ r.route }}</td></tr>
     {% endfor %}
+    </tbody>
 </table>
 </div>
 
 <h4 class="font-display text-navy text-sm uppercase mt-3 mb-1">Slowest requests</h4>
 <div class="overflow-x-auto">
-<table class="text-sm mb-2 whitespace-nowrap">
-    <tr class="text-left"><th class="pr-4">ms</th><th class="pr-6">When (UTC)</th><th class="pr-4">Status</th><th>Path</th></tr>
+<table class="data-table mb-2">
+    <thead><tr><th class="num">ms</th><th>When (UTC)</th><th class="num">Status</th><th>Path</th></tr></thead>
+    <tbody>
     {% for r in slow_requests %}
     <tr>
-        <td class="pr-4 text-right">{% if let Some(d) = r.duration_ms %}{{ d }}{% else %}&mdash;{% endif %}</td>
-        <td class="pr-6">{{ r.ts }}</td>
-        <td class="pr-4">{{ r.status }}</td>
-        <td class="break-all">{{ r.path }}</td>
+        <td class="num">{% if let Some(d) = r.duration_ms %}{{ d }}{% else %}&mdash;{% endif %}</td>
+        <td class="nowrap">{{ r.ts }}</td>
+        <td class="num">{{ r.status }}</td>
+        <td class="grow break-all">{{ r.path }}</td>
     </tr>
     {% endfor %}
+    </tbody>
 </table>
 </div>
 {% endif %}
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Recent requests</h3>
 <div class="overflow-x-auto">
-<table class="text-sm whitespace-nowrap">
-    <tr class="text-left">
-        <th class="pr-6">When (UTC)</th><th class="pr-4">Method</th><th class="pr-4">Status</th><th class="pr-6">Path</th><th class="pr-6">IP</th><th>User agent</th>
-    </tr>
+<table class="data-table">
+    <thead><tr>
+        <th>When (UTC)</th><th>Method</th><th class="num">Status</th><th>Path</th><th>IP</th><th>User agent</th>
+    </tr></thead>
+    <tbody>
     {% for r in recent %}
     <tr>
-        <td class="pr-6">{{ r.ts }}</td>
-        <td class="pr-4">{{ r.method }}</td>
-        <td class="pr-4">{{ r.status }}</td>
-        <td class="pr-6">{{ r.path }}</td>
-        <td class="pr-6">{% if let Some(ip) = r.ip.as_ref() %}{{ ip }}{% else %}—{% endif %}</td>
-        <td>{% if let Some(ua) = r.user_agent.as_ref() %}{{ ua }}{% else %}—{% endif %}</td>
+        <td class="nowrap">{{ r.ts }}</td>
+        <td class="nowrap">{{ r.method }}</td>
+        <td class="num">{{ r.status }}</td>
+        <td class="grow break-all">{{ r.path }}</td>
+        <td class="nowrap">{% if let Some(ip) = r.ip.as_ref() %}{{ ip }}{% else %}—{% endif %}</td>
+        <td class="grow break-all">{% if let Some(ua) = r.user_agent.as_ref() %}{{ ua }}{% else %}—{% endif %}</td>
     </tr>
     {% endfor %}
+    </tbody>
 </table>
 </div>
 </div><!-- #analytics-content -->
