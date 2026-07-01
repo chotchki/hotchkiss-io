@@ -569,3 +569,16 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - [>] 16.5 - Tie the contact/CTA into the landing page (Phase 13) — FOLDED into Phase 13's 13.5 (the same "resume / hire me" landing-page CTA); lands with the landing page, not the résumé.
 - [x] 16.6 - e2e coverage for `/resume` + PDF download; CLAUDE.md/SPEC update.
 
+---
+
+## 2026-07-01
+
+## Phase CS - Feed + page render caching
+- [x] CS.0 - Phase exit: /feed.xml served from a warm transform cache (~1.3s → sub-100ms), shared by all page renders; feed emits ETag/Last-Modified + honors conditional 304
+- [x] CS.1 - render-cache module: content-hash-keyed in-memory transform (+ excerpt) cache, coherent with the diagram REGISTRY (process lifetime); unit tests for hit/miss/determinism
+- [x] CS.2 - Wire cached transform/excerpt into feed.rs, pages/mod.rs, blog.rs, resume.rs, projects.rs index, seo.rs Meta
+- [x] CS.3 - Fix cover-date bug: page_cover_media_id update must bump page_modified_date (route through update() or stamp the raw SQL)
+- [x] CS.4 - ETag/Last-Modified + conditional 304 on /feed.xml (validator = host + max(page_modified_date) + entry count; skip body build on match)
+- [x] CS.5 - Tests: transform-cache unit tests, feed 304 conditional-request integration test, cover-date bump test; existing feed test still green
+- [x] CS.6 - CLAUDE.md update: document the transform/excerpt cache, feed ETag/304, and the cover-date fix
+

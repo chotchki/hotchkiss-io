@@ -66,14 +66,6 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] 15.4 - Auto-generate a lower-res STL (SPEC goal) — decide build-time vs on-upload; may defer.
 - [ ] 15.5 - Author the 5 gallery entries (photos + descriptions + files).
 - [ ] 15.6 - e2e coverage for the 3D gallery; CLAUDE.md/SPEC update.
-## Phase CS - Feed + page render caching
-- [x] CS.0 - Phase exit: /feed.xml served from a warm transform cache (~1.3s → sub-100ms), shared by all page renders; feed emits ETag/Last-Modified + honors conditional 304
-- [x] CS.1 - render-cache module: content-hash-keyed in-memory transform (+ excerpt) cache, coherent with the diagram REGISTRY (process lifetime); unit tests for hit/miss/determinism
-- [x] CS.2 - Wire cached transform/excerpt into feed.rs, pages/mod.rs, blog.rs, resume.rs, projects.rs index, seo.rs Meta
-- [x] CS.3 - Fix cover-date bug: page_cover_media_id update must bump page_modified_date (route through update() or stamp the raw SQL)
-- [x] CS.4 - ETag/Last-Modified + conditional 304 on /feed.xml (validator = host + max(page_modified_date) + entry count; skip body build on match)
-- [x] CS.5 - Tests: transform-cache unit tests, feed 304 conditional-request integration test, cover-date bump test; existing feed test still green
-- [x] CS.6 - CLAUDE.md update: document the transform/excerpt cache, feed ETag/304, and the cover-date fix
 
 ## Backlog (not yet phased)
 
