@@ -67,10 +67,6 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] 15.5 - Author the 5 gallery entries (photos + descriptions + files).
 - [ ] 15.6 - e2e coverage for the 3D gallery; CLAUDE.md/SPEC update.
 
-## Phase 16 - Resume / background capture
-
-See SPEC.md Pillar 3. The substance and the long pole: making less-visible work credible, not just recording it.
-
 ## Backlog (not yet phased)
 
 ### Tech debt
@@ -90,16 +86,6 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 - **Warn when main has commits past the latest prod tag.** With Phase 12's inverted code flow (`main` → beta, `vX.Y.Z` tag → prod), it'd be easy to forget to tag and let prod silently lag. A small pre-push hook or `git status`-style helper that prints "main is N commits ahead of v0.x.y" would close the gap. Could also surface in the analytics dashboard ("running version vs latest commit"). Small follow-up to Phase 12.
 - **Beta-only registration → prod-usable passkey (rp_id design implication).** With Phase 12's `webauthn_rp_id = hotchkiss.io` on beta, *any* passkey registered against beta is implicitly authorized for prod too (and vice versa) — they share an rp_id. For chris-as-sole-admin that's the goal (existing prod passkey works on beta). If users ever register on beta, their credentials would also work on prod after the next snapshot. Mitigations to consider before opening registration on beta: (a) disable public registration on beta (admin-only gate via config), (b) split rp_ids and accept that prod passkeys won't work on beta (need iCloud sync or re-register), (c) snapshot strips non-admin credentials on the way in.
 - **Publish `ios-inspect` as a crates.io crate.** The iOS-simulator inspection tool used by `tests/e2e_ios.rs` now lives in its own repo `github.com/chotchki/ios-inspect` (split out 2026-06-22 from `skylander-portal-controller/tools/ios-inspect`: the original sibling-repo *path* dep silently broke every non-dev-machine build incl. the mini's prod deploy, and a git-dep on the skylander repo dragged in its giant `rpcs3` submodule). It's now a clean **git** dev-dependency on the standalone repo, pinned via `Cargo.lock`. Publishing it to crates.io would make it a plain versioned registry dep (no git/branch pin) and is independently reusable — its own small project.
-- [ ] 16.0 - Phase exit: `/resume` renders a clean, current resume; a downloadable PDF is one click away; the background is captured in a reusable, structured form.
-- [ ] 16.1 - Capture the raw history — interview/brain-dump the background (roles, scope, impact, highlights). chotchki + Claude drafting session. The long pole; start in parallel now.
-  - [ ] 16.1.1 - Mine the less-visible work for public-safe signal — architecture/problem writeups, scope/scale/impact stated at a safe level, and anything already public (talks, patents, OSS, conference work).
-- [ ] 16.2 - Decide resume structure + narrative (chronological vs impact-led), what to lead with, and public vs gated.
-  - [ ] 16.2.1 - Narrative strategy: meet the "lots of depth, little public proof" skeptic head-on (depth + progression), and cross-link the résumé to the side projects as the tangible evidence of range.
-- [ ] 16.3 - `/resume` as a content_page rendering the résumé markdown — the SINGLE source for both the web view and the PDF (seed/author from `career-portfolio/resume/resume-draft-v3.md`). DRY with the site, editable inline, source-in-HTML so ATS / AI screeners parse it.
-- [ ] 16.4 - Downloadable PDF — DECIDED (2026-06-26): option B, GENERATE `/resume.pdf` from the same source server-side (no print-stylesheet half-measure, no hand-maintained attachment — chris: "rather not give people the option of a crappy version"). Reuse the d2 pattern: shell out to an HTML→PDF binary, resolve via `$BIN`→brew→PATH, cache, fail-visible-not-500.
-  - [x] 16.4.1 - Pick + vendor the HTML→PDF binary. Recommend `weasyprint` (HTML+print-CSS→PDF — reuses the rendered markdown HTML so markdown stays the single source; a résumé has no JS-rendered content so headless-chrome isn't needed). `typst` only if a bespoke designed layout is wanted (that moves the source-of-truth off markdown). Install on dev + the mini + CI, like d2.
-- [ ] 16.5 - Tie the contact/CTA into the landing page (Phase 13).
-- [ ] 16.6 - e2e coverage for `/resume` + PDF download; CLAUDE.md/SPEC update.
 
 
 

@@ -554,3 +554,18 @@ Dev-HTTPS strategy: dev runs as a debug build, which already routes ACME at LE s
 - [>] CR.4 - Trim redundant scans (measure-gated): fold count_since into audience_counts.all + combine any queries where one windowed scan yields multiple aggregates; only if the diagnostic still shows it matters after CR.1-CR.3
 - [x] CR.5 - Verify + tests + docs + deploy: re-run the diagnostic harness to confirm <0.5s at 300k rows; unit/integration (is_bot classify parity with the old view rules, backfill idempotent, recompute, parallel path correctness); CLAUDE.md + SPEC update (indexes, stored is_bot + recompute, query parallelization, view dropped); ship beta→prod
 
+## Phase 16 - Resume / background capture — DONE (résumé live at /resume + /resume.pdf; reconciled 2026-07-01)
+
+See SPEC.md Pillar 3. The substance and the long pole: making less-visible work credible, not just recording it. Shipped: the résumé is authored + live, rendered from single-source markdown for both the web view and the weasyprint-generated PDF. (Was structurally orphaned in PLAN.md's Backlog by the original layout; reconciled + swept here.)
+
+- [x] 16.0 - Phase exit: `/resume` renders a clean, current resume; a downloadable PDF is one click away; the background is captured in a reusable, structured form.
+- [x] 16.1 - Capture the raw history — interview/brain-dump the background (roles, scope, impact, highlights). DONE — the résumé chris authors at `/resume?edit` is the captured form.
+  - [x] 16.1.1 - Mine the less-visible work for public-safe signal — architecture/problem writeups, scope/scale/impact at a safe level, anything already public.
+- [x] 16.2 - Decide resume structure + narrative (chronological vs impact-led), what to lead with, public vs gated.
+  - [x] 16.2.1 - Narrative strategy: meet the "lots of depth, little public proof" skeptic head-on + cross-link the résumé to the side projects as tangible evidence of range.
+- [x] 16.3 - `/resume` as a content_page rendering the résumé markdown — the SINGLE source for both the web view and the PDF. SHIPPED (`web/features/resume.rs`, source-in-HTML so ATS / AI screeners parse it).
+- [x] 16.4 - Downloadable PDF — GENERATE `/resume.pdf` from the same source server-side. SHIPPED (weasyprint, resolved `$WEASYPRINT_BIN`→brew→PATH, content-hash cached, fail-visible-not-500; `<base href>` so PDF links resolve absolute).
+  - [x] 16.4.1 - Pick + vendor the HTML→PDF binary — `weasyprint` (installed on dev + mini + CI, like d2).
+- [>] 16.5 - Tie the contact/CTA into the landing page (Phase 13) — FOLDED into Phase 13's 13.5 (the same "resume / hire me" landing-page CTA); lands with the landing page, not the résumé.
+- [x] 16.6 - e2e coverage for `/resume` + PDF download; CLAUDE.md/SPEC update.
+
