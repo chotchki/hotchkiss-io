@@ -1775,6 +1775,80 @@ async fn blog_feed_alias_still_serves_unified_feed() {
 }
 
 #[tokio::test]
+async fn feed_conditional_request_304_then_200_after_change() {
+    // Phase CS: the feed emits an ETag/Last-Modified validator and honors
+    // If-None-Match with a 304 (skipping the expensive per-entry transform), then
+    // returns a fresh 200 once the content set changes.
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_blog_post("cond-post", "Some body.")
+        .await
+        .expect("seed");
+
+    // First fetch: 200 carrying the validators.
+    let first = reqwest::get(server.url("/feed.xml")).await.unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let etag = first
+        .headers()
+        .get("etag")
+        .and_then(|h| h.to_str().ok())
+        .expect("feed must carry an ETag")
+        .to_string();
+    assert!(etag.starts_with("W/\""), "weak etag expected: {etag}");
+    assert!(
+        first.headers().contains_key("last-modified"),
+        "feed must carry Last-Modified"
+    );
+
+    // Re-fetch echoing the ETag → 304, no body, validator preserved.
+    let client = reqwest::Client::new();
+    let cached = client
+        .get(server.url("/feed.xml"))
+        .header("If-None-Match", &etag)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        cached.status(),
+        StatusCode::NOT_MODIFIED,
+        "an unchanged feed should 304"
+    );
+    assert_eq!(
+        cached.headers().get("etag").and_then(|h| h.to_str().ok()),
+        Some(etag.as_str()),
+        "a 304 should echo the ETag"
+    );
+    assert!(
+        cached.text().await.unwrap().is_empty(),
+        "a 304 carries no body"
+    );
+
+    // Add a second entry → the entry count (and max modified_date) move the
+    // validator → the SAME conditional request now misses and returns a 200.
+    server
+        .seed_blog_post("cond-post-2", "Another body.")
+        .await
+        .expect("seed 2");
+    let after = client
+        .get(server.url("/feed.xml"))
+        .header("If-None-Match", &etag)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        after.status(),
+        StatusCode::OK,
+        "a new post must invalidate the client's cached ETag"
+    );
+    let new_etag = after
+        .headers()
+        .get("etag")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or_default();
+    assert_ne!(new_etag, etag, "the validator must change after content changes");
+}
+
+#[tokio::test]
 async fn sitemap_lists_home_pages_blog_and_projects() {
     let server = spawn_test_server().await.expect("spawn");
     server

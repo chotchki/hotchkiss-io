@@ -7,7 +7,9 @@ use crate::{
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
         html_template::HtmlTemplate, htmx_responses::htmx_refresh,
-        markdown::{links::rewrite_site_links, title::strip_leading_h1, transformer::transform},
+        markdown::{
+            links::rewrite_site_links, render_cache::cached_transform, title::strip_leading_h1,
+        },
         session::SessionData,
     },
 };
@@ -145,7 +147,7 @@ pub async fn get_page_path(
                 pages_path: pages_path.clone(),
                 children_pages: ContentPageDao::find_by_parent(&state.pool, Some(lp.page_id))
                     .await?,
-                rendered_markdown: transform(&strip_leading_h1(&lp.page_markdown))?,
+                rendered_markdown: cached_transform(&strip_leading_h1(&lp.page_markdown))?,
                 edit: edit_q.edit.is_some(),
                 prev_post: None,
                 next_post: None,
@@ -259,13 +261,10 @@ pub async fn put_page_path(
             }
             lp.update(&state.pool).await?;
 
-            sqlx::query!(
-                r#"UPDATE content_pages SET page_cover_media_id = ?1 WHERE page_id = ?2"#,
-                cover_media_id,
-                lp.page_id
-            )
-            .execute(&state.pool)
-            .await?;
+            // Cover lives in a separate column (`page_cover_media_id`) that
+            // `update()` doesn't touch; set_cover stamps `page_modified_date` too
+            // so a cover change keeps the feed/sitemap validators fresh.
+            ContentPageDao::set_cover(&state.pool, lp.page_id, cover_media_id).await?;
 
             Ok(htmx_refresh())
         }

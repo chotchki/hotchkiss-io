@@ -29,8 +29,8 @@ use crate::web::app_state::AppState;
 use crate::web::features::pages::{EditQuery, GetPageTemplate};
 use crate::web::features::top_bar::TopBar;
 use crate::web::html_template::HtmlTemplate;
+use crate::web::markdown::render_cache::cached_transform;
 use crate::web::markdown::title::strip_leading_h1;
-use crate::web::markdown::transformer::transform;
 use crate::web::session::SessionData;
 
 /// Résumé-specific print stylesheet (NOT Tailwind — weasyprint styles the
@@ -80,7 +80,7 @@ pub async fn show_resume(
         page: child.clone(),
         pages_path: vec![child.clone()],
         children_pages: ContentPageDao::find_by_parent(&state.pool, Some(child.page_id)).await?,
-        rendered_markdown: transform(&strip_leading_h1(&child.page_markdown))?,
+        rendered_markdown: cached_transform(&strip_leading_h1(&child.page_markdown))?,
         edit: edit_q.edit.is_some(),
         prev_post: None,
         next_post: None,
@@ -129,7 +129,7 @@ fn render_resume_pdf(child: &ContentPageDao, site_host: &str) -> Result<Vec<u8>>
     {
         return Ok(hit.clone());
     }
-    let body = transform(&strip_leading_h1(&child.page_markdown))?;
+    let body = cached_transform(&strip_leading_h1(&child.page_markdown))?;
     let title = html_escape(&title);
     let html = resume_html(&title, &body, site_host);
     let pdf = weasyprint(&html)?;

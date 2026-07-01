@@ -8,7 +8,10 @@ use crate::{
             top_bar::TopBar,
         },
         html_template::HtmlTemplate,
-        markdown::{excerpt::excerpt, title::strip_leading_h1, transformer::transform},
+        markdown::{
+            render_cache::{cached_excerpt, cached_transform},
+            title::strip_leading_h1,
+        },
         session::SessionData,
     },
 };
@@ -78,7 +81,7 @@ pub async fn show_index(
             page_name: p.page_name,
             page_creation_date: p.page_creation_date.format("%B %-d, %Y").to_string(),
             cover_url,
-            excerpt: excerpt(&p.page_markdown),
+            excerpt: cached_excerpt(&p.page_markdown),
         });
     }
 
@@ -142,7 +145,7 @@ pub async fn show_post(
         page: lp.clone(),
         pages_path: pages_path.clone(),
         children_pages: ContentPageDao::find_by_parent(&state.pool, Some(lp.page_id)).await?,
-        rendered_markdown: transform(&strip_leading_h1(&lp.page_markdown))?,
+        rendered_markdown: cached_transform(&strip_leading_h1(&lp.page_markdown))?,
         edit: edit_q.edit.is_some(),
         prev_post,
         next_post,

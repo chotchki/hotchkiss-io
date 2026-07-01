@@ -127,6 +127,28 @@ impl ContentPageDao {
         Ok(())
     }
 
+    /// Set just the cover media for one page, STAMPING `page_modified_date`. A
+    /// cover IS a content change — it drives the card thumbnail + `og:image`, and
+    /// the feed / sitemap key their validators (and the feed's `<updated>`) off
+    /// `page_modified_date`, so a cover-only change must move it or those go
+    /// stale. (Contrast `set_order`, which deliberately does NOT stamp — reordering
+    /// isn't a content change and doesn't affect the feed, ordered by date.) A
+    /// NULL `media_id` clears the cover.
+    pub async fn set_cover(
+        executor: impl SqliteExecutor<'_>,
+        page_id: i64,
+        media_id: Option<i64>,
+    ) -> Result<()> {
+        query!(
+            "UPDATE content_pages SET page_cover_media_id = ?1, page_modified_date = datetime('now', 'utc') WHERE page_id = ?2",
+            media_id,
+            page_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    }
+
     /// Set just the ordering for one page — used by drag-to-reorder, which sets
     /// `page_order` to the page's position in the dragged list. `page_order`
     /// drives both the nav tab order and the Manage Pages list.
@@ -471,6 +493,39 @@ mod tests {
 
         tx.commit().await?;
 
+        Ok(())
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn set_cover_stamps_modified_date(pool: SqlitePool) -> Result<()> {
+        let page =
+            ContentPageDao::create(&pool, None, "cover-pg".to_string(), None, "body".to_string(), None)
+                .await?;
+
+        // Force modified_date into the past so the stamp is observable regardless
+        // of SQLite's 1-second `datetime('now')` resolution (create() also stamps
+        // it to now, so a same-second set_cover would otherwise look unchanged).
+        sqlx::query(
+            "UPDATE content_pages SET page_modified_date = '2000-01-01 00:00:00' WHERE page_id = ?1",
+        )
+        .bind(page.page_id)
+        .execute(&pool)
+        .await?;
+
+        ContentPageDao::set_cover(&pool, page.page_id, None).await?;
+
+        let row = query!(
+            r#"SELECT page_modified_date as "d: DateTime<Utc>" FROM content_pages WHERE page_id = ?1"#,
+            page.page_id
+        )
+        .fetch_one(&pool)
+        .await?;
+        let old: DateTime<Utc> = "2001-01-01T00:00:00Z".parse().unwrap();
+        assert!(
+            row.d > old,
+            "set_cover must bump page_modified_date to now (got {})",
+            row.d
+        );
         Ok(())
     }
 

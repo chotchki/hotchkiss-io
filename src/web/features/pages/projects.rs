@@ -7,7 +7,7 @@ use crate::{
             top_bar::TopBar,
         },
         html_template::HtmlTemplate,
-        markdown::excerpt::excerpt,
+        markdown::render_cache::cached_excerpt,
         session::SessionData,
     },
 };
@@ -71,7 +71,7 @@ pub async fn show_all_projects(
             title: p.display_title(),
             page_name: p.page_name,
             cover_url,
-            excerpt: excerpt(&p.page_markdown),
+            excerpt: cached_excerpt(&p.page_markdown),
         });
     }
 

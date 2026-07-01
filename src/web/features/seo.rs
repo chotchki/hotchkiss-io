@@ -11,7 +11,7 @@ use crate::{
     web::{
         app_error::AppError,
         app_state::AppState,
-        markdown::excerpt::excerpt,
+        markdown::render_cache::cached_excerpt,
         util::host::{request_host, request_scheme},
     },
 };
@@ -53,7 +53,7 @@ impl Meta {
         cover_url: Option<&str>,
         og_type: &'static str,
     ) -> Self {
-        let mut description = excerpt(markdown);
+        let mut description = cached_excerpt(markdown);
         if description.trim().is_empty() {
             description = DEFAULT_DESCRIPTION.to_string();
         }
