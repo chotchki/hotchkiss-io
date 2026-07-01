@@ -61,6 +61,9 @@ pub async fn log_requests(State(pool): State<SqlitePool>, req: Request, next: Ne
     let duration_ms = i64::try_from(start.elapsed().as_millis()).unwrap_or(0);
 
     if !skip {
+        // Stamp the bot classification at write (CR.2) so the dashboard's audience
+        // filter is a cheap indexed count, not a per-row 25-LIKE scan.
+        let is_bot = crate::db::dao::request_log::is_bot(user_agent.as_deref());
         let entry = NewRequestLog {
             method,
             path,
@@ -69,6 +72,7 @@ pub async fn log_requests(State(pool): State<SqlitePool>, req: Request, next: Ne
             user_agent,
             referer,
             duration_ms,
+            is_bot,
         };
         tokio::spawn(async move {
             if let Err(e) = RequestLogDao::insert(&pool, &entry).await {

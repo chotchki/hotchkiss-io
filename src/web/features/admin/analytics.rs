@@ -14,7 +14,8 @@ use crate::{
     },
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
-        features::top_bar::TopBar, html_template::HtmlTemplate, session::SessionData,
+        features::top_bar::TopBar, html_template::HtmlTemplate,
+        htmx_responses::htmx_refresh, session::SessionData,
         util::{
             referer::{group_referers, GroupedReferers},
             route::{aggregate_by_route, overall_p95, RouteLatency},
@@ -103,52 +104,61 @@ pub async fn show_analytics(
     // chart + top-pages bucket to this; the 3-chip below shows all three regardless.
     let audience = Audience::parse(q.audience.as_deref());
 
-    let total_requests = RequestLogDao::count_since(&state.pool, since_days, audience).await?;
-    let distinct_ips = RequestLogDao::distinct_ip_count(&state.pool, since_days, audience).await?;
-    let audience_counts = RequestLogDao::audience_counts(&state.pool, since_days).await?;
-    // Both daily series for the overlay chart (CQ.7) — the gap between total views and
-    // unique visitors is the repeat/scanner signal. shape_timeseries zero-fills a
-    // continuous UTC daily axis; the result serializes to the numeric JSON island.
-    let total_by_day = RequestLogDao::count_by_day(&state.pool, since_days, audience).await?;
-    let unique_by_day =
-        RequestLogDao::distinct_ip_by_day(&state.pool, since_days, audience).await?;
-    let timeseries = shape_timeseries(&total_by_day, &unique_by_day);
-    let ts_json = serde_json::to_string(&timeseries)
-        .unwrap_or_else(|_| r#"{"days":[],"total":[],"unique":[],"empty":true}"#.to_string())
-        // Belt-and-suspenders XSS guard: escape any `<` so the island can never carry a
-        // `</script>` (the data is numeric so this is a no-op today, but keep it honest).
-        .replace('<', "\\u003c");
-    let by_path =
-        RequestLogDao::count_by_content_path(&state.pool, since_days, audience, max_status, 25)
-            .await?;
-    // Status / noise (CQ.3): the factual status breakdown, the volume-sorted per-IP
-    // leaderboard (min_distinct_404=0 → show everyone; the scanner badge is a Rust
-    // flag), and the never-succeeded scanner-signature paths.
-    let status_buckets =
-        RequestLogDao::count_by_status_bucket(&state.pool, since_days, audience).await?;
-    let noisy_ips =
-        RequestLogDao::noisy_ips(&state.pool, &format!("-{since_days} days"), 0, 25).await?;
-    let never_succeeded = RequestLogDao::never_succeeded_paths(&state.pool, since_days, 25).await?;
-    let by_user_agent = RequestLogDao::count_by_user_agent(&state.pool, since_days, 25).await?;
-    // Referers (CQ.5): pull ALL distinct non-null referers + the direct (NULL) count,
-    // then host-group + classify + tally noise in Rust against the canonical site host.
-    let referer_urls = RequestLogDao::referer_urls_since(&state.pool, since_days).await?;
-    let direct_count = RequestLogDao::direct_referer_count(&state.pool, since_days).await?;
-    let referers = group_referers(&referer_urls, &state.site_host, direct_count);
-    let recent = RequestLogDao::recent(&state.pool, 50).await?;
+    // Run every independent read CONCURRENTLY (CR.3): WAL + the connection pool (≤10)
+    // let these fan out across connections, so the page's wall-clock is ~the slowest
+    // query instead of the SUM of ~15 windowed scans (the ~7s → sub-1s win). TopBar
+    // joins in (it also reads the pool). `?` on the tuple bubbles the first error.
+    let cutoff = format!("-{since_days} days");
+    let (
+        top_bar,
+        total_requests,
+        distinct_ips,
+        audience_counts,
+        total_by_day,
+        unique_by_day,
+        by_path,
+        status_buckets,
+        noisy_ips,
+        never_succeeded,
+        by_user_agent,
+        referer_urls,
+        direct_count,
+        latency_samples,
+        slow_requests,
+        recent,
+    ) = tokio::try_join!(
+        TopBar::create(&state.pool, "admin"),
+        RequestLogDao::count_since(&state.pool, since_days, audience),
+        RequestLogDao::distinct_ip_count(&state.pool, since_days, audience),
+        RequestLogDao::audience_counts(&state.pool, since_days),
+        RequestLogDao::count_by_day(&state.pool, since_days, audience),
+        RequestLogDao::distinct_ip_by_day(&state.pool, since_days, audience),
+        RequestLogDao::count_by_content_path(&state.pool, since_days, audience, max_status, 25),
+        RequestLogDao::count_by_status_bucket(&state.pool, since_days, audience),
+        RequestLogDao::noisy_ips(&state.pool, &cutoff, 0, 25),
+        RequestLogDao::never_succeeded_paths(&state.pool, since_days, 25),
+        RequestLogDao::count_by_user_agent(&state.pool, since_days, 25),
+        RequestLogDao::referer_urls_since(&state.pool, since_days),
+        RequestLogDao::direct_referer_count(&state.pool, since_days),
+        RequestLogDao::latency_samples(&state.pool, since_days),
+        RequestLogDao::slowest_requests(&state.pool, since_days, 15),
+        RequestLogDao::recent(&state.pool, 50),
+    )?;
 
-    // Latency (CQ.6): pull the windowed timed samples, aggregate per normalized route
-    // + the overall p95 in Rust (SQLite has no percentile fn). `has_latency` gates the
-    // empty-state (nothing timed yet on a fresh boot / after a beta scrub).
-    let latency_samples = RequestLogDao::latency_samples(&state.pool, since_days).await?;
+    // Derived, Rust-side (cheap): the chart island (both daily series overlaid — the gap
+    // is the repeat/scanner signal, `<`-escaped for the XSS boundary), the referer fold,
+    // and the latency percentiles (SQLite has no percentile fn).
+    let ts_json = serde_json::to_string(&shape_timeseries(&total_by_day, &unique_by_day))
+        .unwrap_or_else(|_| r#"{"days":[],"total":[],"unique":[],"empty":true}"#.to_string())
+        .replace('<', "\\u003c");
+    let referers = group_referers(&referer_urls, &state.site_host, direct_count);
     let has_latency = !latency_samples.is_empty();
     let latency_p95 = overall_p95(&latency_samples);
     let mut slow_routes = aggregate_by_route(&latency_samples);
     slow_routes.truncate(15);
-    let slow_requests = RequestLogDao::slowest_requests(&state.pool, since_days, 15).await?;
 
     let tmpl = AnalyticsTemplate {
-        top_bar: TopBar::create(&state.pool, "admin").await?,
+        top_bar,
         auth_state: session_data.auth_state,
         since_days,
         paths_mode: paths_mode.to_string(),
@@ -268,6 +278,15 @@ pub async fn show_ip_detail(
         recent,
     };
     Ok(HtmlTemplate(tmpl).into_response())
+}
+
+/// `POST /admin/analytics/reclassify-bots` (CR.2.1) — re-run the `is_bot` classifier
+/// over ALL rows (e.g. after retuning the ruleset), then reload the dashboard with the
+/// refreshed audience counts. Admin-gated by the `/admin` nest. Awaited: an admin does
+/// this deliberately + infrequently, so a few seconds is fine.
+pub async fn reclassify_bots(State(state): State<AppState>) -> Result<Response, AppError> {
+    RequestLogDao::reclassify_bots(&state.pool, false).await?;
+    Ok(htmx_refresh())
 }
 
 /// Build the two-series daily time series for the d3 line chart (CQ.7). Zero-fills a

@@ -541,3 +541,16 @@ Dev-HTTPS strategy: dev runs as a debug build, which already routes ACME at LE s
 - [x] CQ.8 - Tests: unit (shape_timeseries UTC zero-fill/two-series alignment/empty; normalize_route pinned; percentile nearest-rank edge cases); reqwest integration tests/web.rs (/test/login Admin → GET /admin/analytics renders new sections; audience toggle + /admin/analytics/ip/{ip} admin-gated, anon rejected); chromiumoxide e2e (admin login via virtual authenticator → GET /admin/analytics → assert path.linechart-line rendered via Runtime.evaluate)
 - [x] CQ.9 - Docs: CLAUDE.md analytics section — new columns/view (duration_ms, request_log_view/ua_class), two-axis model (factual status / inferred agent), latency = server-processing-NOT-LCP semantics; per-IP noisy_ips window-cutoff blocklist-reuse seam, geo/ASN skip rationale, referer derive-at-query + the LIKE-bug fix; the named deferral triggers (batcher / rollup+histogram / stored referer_host / ip_group-on-v6) and the panic-not-logged known limit
 
+---
+
+## 2026-07-01
+
+## Phase CR - Analytics performance — indexes, stored is_bot, parallel queries
+- [x] CR.0 - Phase exit: /admin/analytics loads in well under ~0.5s at 300k+ rows (verified via the diagnostic harness); cargo test green; CLAUDE.md + SPEC updated; swept to PLAN_ARCHIVE
+- [x] CR.1 - Covering indexes (migration 0021) — the biggest win: (path,ts,status), (ip,ts), (referer,ts), (user_agent,ts) so the GROUP-BY queries go index-only (no temp b-tree); confirm via EXPLAIN QUERY PLAN they use COVERING INDEX; note the write-amplification (4 more indexes on the fire-and-forget insert — acceptable at personal-site write rates)
+- [x] CR.2 - Stored is_bot column (migration 0022) + single-source Rust classifier: port the 25 bot-UA substrings to a fn is_bot(ua)->bool used at write (NewRequestLog/insert) AND an idempotent startup backfill for existing NULL rows; switch the audience-threaded queries + audience_counts from request_log_view.ua_class to is_bot (SUM); add (ts,is_bot) or a covering index so audience_counts is index-only; DROP the now-unused request_log_view
+  - [x] CR.2.1 - Admin recompute command: re-run is_bot(ua) over ALL rows on demand so the ruleset stays retunable despite being stored (addresses CQ's frozen-classification concern) — a POST /admin/analytics/reclassify-bots or equivalent, admin-gated, in spawn_blocking
+- [x] CR.3 - Parallelize show_analytics: try_join!/join_all the independent read queries (WAL + pool≤10 → concurrent readers) so wall-clock ≈ slowest query, not the sum of ~15; mind the shared-pool connection budget (don't starve concurrent site requests)
+- [>] CR.4 - Trim redundant scans (measure-gated): fold count_since into audience_counts.all + combine any queries where one windowed scan yields multiple aggregates; only if the diagnostic still shows it matters after CR.1-CR.3
+- [x] CR.5 - Verify + tests + docs + deploy: re-run the diagnostic harness to confirm <0.5s at 300k rows; unit/integration (is_bot classify parity with the old view rules, backfill idempotent, recompute, parallel path correctness); CLAUDE.md + SPEC update (indexes, stored is_bot + recompute, query parallelization, view dropped); ship beta→prod
+

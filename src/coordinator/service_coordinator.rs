@@ -49,6 +49,10 @@ impl ServiceCoordinator {
         // app down; idempotent → a no-op once the backlog is cleared.
         super::backfill_responsive_images::spawn(pool.clone(), settings.clone());
 
+        // Phase CR.2: stamp the stored is_bot for request_log rows logged before the
+        // column existed. Same detached / non-fatal / idempotent shape.
+        super::backfill_is_bot::spawn(pool.clone());
+
         Ok(Self {
             ip_provider_service,
             dns_provider_service,

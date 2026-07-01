@@ -36,6 +36,7 @@
     <a class="px-2 py-1 rounded-sm {% if audience == "all" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=all" href="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=all">All {{ audience_counts.all }}</a>
     <a class="px-2 py-1 rounded-sm {% if audience == "humans" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=humans" href="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=humans">Humans {{ audience_counts.humans }}</a>
     <a class="px-2 py-1 rounded-sm {% if audience == "bots" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=bots" href="/admin/analytics?since={{ since_days }}&paths={{ paths_mode }}&audience=bots">Bots {{ audience_counts.bots }}</a>
+    <button class="ml-2 px-2 py-1 rounded-sm bg-navy/70 text-div-grey text-xs" hx-post="/admin/analytics/reclassify-bots" title="Re-run the bot classifier over all stored rows (after retuning the rules) — the stored is_bot is not auto-retuned on every query">&#8635; Reclassify</button>
 </div>
 
 <div class="flex flex-row flex-wrap gap-x-12 gap-y-3 mb-6">

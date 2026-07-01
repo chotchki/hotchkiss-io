@@ -3,7 +3,7 @@ use sqlx::{
     prelude::FromRow,
     query, query_as,
     types::chrono::{DateTime, Utc},
-    SqliteExecutor,
+    SqliteExecutor, SqlitePool,
 };
 
 /// A persisted request observation, projected for the "recent requests" view.
@@ -35,6 +35,8 @@ pub struct NewRequestLog {
     pub user_agent: Option<String>,
     pub referer: Option<String>,
     pub duration_ms: i64,
+    /// Stored bot classification (CR.2), computed at write via `is_bot(user_agent)`.
+    pub is_bot: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -63,7 +65,7 @@ pub struct RefererCount {
 
 /// Total / human / bot request counts over a window — the always-visible 3-chip
 /// (CQ.2). `humans + bots == all` by construction (every row classifies as exactly
-/// one). Directional: `ua_class` is a spoofable-User-Agent heuristic.
+/// one, once backfilled). Directional: `is_bot` is a spoofable-User-Agent heuristic.
 #[derive(Clone, Debug)]
 pub struct AudienceCounts {
     pub all: i64,
@@ -72,9 +74,9 @@ pub struct AudienceCounts {
 }
 
 /// Audience filter for the analytics dashboard (CQ.2): All (factual, the default),
-/// Humans, or Bots — maps to the `ua_class` heuristic on `request_log_view`.
-/// Directional not authoritative: `ua_class` keys off the spoofable User-Agent, so
-/// this never governs a primary number on its own (the 3-chip shows all three at once).
+/// Humans, or Bots — maps to the stored `is_bot` column (CR.2). Directional not
+/// authoritative: `is_bot` keys off the spoofable User-Agent, so this never governs a
+/// primary number on its own (the 3-chip shows all three at once).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Audience {
     All,
@@ -83,14 +85,14 @@ pub enum Audience {
 }
 
 impl Audience {
-    /// The bound `ua_class` filter value. "All" is a sentinel matched by the
-    /// `?N = 'All' OR ua_class = ?N` predicate — so the `ts` index still bounds the
-    /// scan (the per-row class check only runs on the already-windowed rows).
-    pub fn as_filter(self) -> &'static str {
+    /// The bound `is_bot` filter value (CR.2): `None` for All (the `?N IS NULL OR
+    /// is_bot = ?N` predicate then matches every row, so the `ts` index still bounds
+    /// the scan), `Some(0)` for Humans, `Some(1)` for Bots.
+    pub fn as_bot_filter(self) -> Option<i64> {
         match self {
-            Audience::All => "All",
-            Audience::Humans => "human",
-            Audience::Bots => "bot",
+            Audience::All => None,
+            Audience::Humans => Some(0),
+            Audience::Bots => Some(1),
         }
     }
 
@@ -112,6 +114,30 @@ impl Audience {
             _ => Audience::All,
         }
     }
+}
+
+/// The single-source bot/scanner classifier (CR.2): a UA is a bot if it's absent/empty
+/// or contains any known bot/crawler/library/scanner/headless marker. Used at write
+/// (the middleware stamps `is_bot`), by the startup backfill, and by the admin recompute
+/// — so the ruleset stays RETUNABLE despite being stored (edit the list, run the
+/// recompute). Ports the substrings the retired `request_log_view.ua_class` used.
+/// DIRECTIONAL: the User-Agent is trivially spoofable, so this never governs a primary
+/// number on its own (the 3-chip shows All/Humans/Bots at once).
+pub fn is_bot(user_agent: Option<&str>) -> bool {
+    let Some(ua) = user_agent else {
+        return true; // no UA is overwhelmingly automated
+    };
+    if ua.is_empty() {
+        return true;
+    }
+    let ua = ua.to_ascii_lowercase();
+    const MARKERS: &[&str] = &[
+        "bot", "crawl", "spider", "slurp", "curl", "wget", "python", "go-http", "java/",
+        "okhttp", "httpx", "axios", "node-fetch", "headless", "phantomjs", "scrapy",
+        "masscan", "zgrab", "nmap", "semrush", "ahrefs", "mj12", "dotbot",
+        "facebookexternalhit", "feedfetcher",
+    ];
+    MARKERS.iter().any(|m| ua.contains(m))
 }
 
 /// A per-IP distinct-404-path count at/above this flags a likely SCANNER (a client
@@ -184,8 +210,8 @@ impl RequestLogDao {
     pub async fn insert(executor: impl SqliteExecutor<'_>, new: &NewRequestLog) -> Result<()> {
         query!(
             r#"
-            INSERT INTO request_log (method, path, status, ip, user_agent, referer, duration_ms)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            INSERT INTO request_log (method, path, status, ip, user_agent, referer, duration_ms, is_bot)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             "#,
             new.method,
             new.path,
@@ -194,6 +220,7 @@ impl RequestLogDao {
             new.user_agent,
             new.referer,
             new.duration_ms,
+            new.is_bot,
         )
         .execute(executor)
         .await?;
@@ -231,15 +258,15 @@ impl RequestLogDao {
         audience: Audience,
     ) -> Result<i64> {
         let w = window(since_days);
-        let aud = audience.as_filter();
+        let bot = audience.as_bot_filter();
         Ok(query!(
             r#"
             SELECT COUNT(*) as "count!: i64"
-            FROM request_log_view
-            WHERE ts >= datetime('now', ?1) AND (?2 = 'All' OR ua_class = ?2)
+            FROM request_log
+            WHERE ts >= datetime('now', ?1) AND (?2 IS NULL OR is_bot = ?2)
             "#,
             w,
-            aud
+            bot
         )
         .fetch_one(executor)
         .await?
@@ -252,15 +279,15 @@ impl RequestLogDao {
         audience: Audience,
     ) -> Result<i64> {
         let w = window(since_days);
-        let aud = audience.as_filter();
+        let bot = audience.as_bot_filter();
         Ok(query!(
             r#"
             SELECT COUNT(DISTINCT ip) as "count!: i64"
-            FROM request_log_view
-            WHERE ts >= datetime('now', ?1) AND ip IS NOT NULL AND (?2 = 'All' OR ua_class = ?2)
+            FROM request_log
+            WHERE ts >= datetime('now', ?1) AND ip IS NOT NULL AND (?2 IS NULL OR is_bot = ?2)
             "#,
             w,
-            aud
+            bot
         )
         .fetch_one(executor)
         .await?
@@ -268,8 +295,9 @@ impl RequestLogDao {
     }
 
     /// Total / human / bot counts over the window in one pass — the always-visible
-    /// 3-chip (CQ.2). `COUNT(CASE …)` never returns NULL (0 for an empty window), so
-    /// the `!` non-null annotations hold. `humans + bots == all` by construction.
+    /// 3-chip (CQ.2, on the stored `is_bot` since CR.2). `COUNT(CASE …)` never returns
+    /// NULL (0 for an empty window), so the `!` annotations hold. `humans + bots == all`
+    /// once the backfill has stamped every row (a NULL is_bot counts as neither).
     pub async fn audience_counts(
         executor: impl SqliteExecutor<'_>,
         since_days: i64,
@@ -280,9 +308,9 @@ impl RequestLogDao {
             r#"
             SELECT
                 COUNT(*) as "all!: i64",
-                COUNT(CASE WHEN ua_class = 'human' THEN 1 END) as "humans!: i64",
-                COUNT(CASE WHEN ua_class = 'bot' THEN 1 END) as "bots!: i64"
-            FROM request_log_view
+                COUNT(CASE WHEN is_bot = 0 THEN 1 END) as "humans!: i64",
+                COUNT(CASE WHEN is_bot = 1 THEN 1 END) as "bots!: i64"
+            FROM request_log
             WHERE ts >= datetime('now', ?1)
             "#,
             w
@@ -364,18 +392,18 @@ impl RequestLogDao {
         audience: Audience,
     ) -> Result<Vec<DayCount>> {
         let w = window(since_days);
-        let aud = audience.as_filter();
+        let bot = audience.as_bot_filter();
         Ok(query_as!(
             DayCount,
             r#"
             SELECT substr(ts, 1, 10) as "day!: String", COUNT(*) as "count!: i64"
-            FROM request_log_view
-            WHERE ts >= datetime('now', ?1) AND (?2 = 'All' OR ua_class = ?2)
+            FROM request_log
+            WHERE ts >= datetime('now', ?1) AND (?2 IS NULL OR is_bot = ?2)
             GROUP BY substr(ts, 1, 10)
             ORDER BY substr(ts, 1, 10) ASC
             "#,
             w,
-            aud
+            bot
         )
         .fetch_all(executor)
         .await?)
@@ -389,18 +417,18 @@ impl RequestLogDao {
         audience: Audience,
     ) -> Result<Vec<DayCount>> {
         let w = window(since_days);
-        let aud = audience.as_filter();
+        let bot = audience.as_bot_filter();
         Ok(query_as!(
             DayCount,
             r#"
             SELECT substr(ts, 1, 10) as "day!: String", COUNT(DISTINCT ip) as "count!: i64"
-            FROM request_log_view
-            WHERE ts >= datetime('now', ?1) AND ip IS NOT NULL AND (?2 = 'All' OR ua_class = ?2)
+            FROM request_log
+            WHERE ts >= datetime('now', ?1) AND ip IS NOT NULL AND (?2 IS NULL OR is_bot = ?2)
             GROUP BY substr(ts, 1, 10)
             ORDER BY substr(ts, 1, 10) ASC
             "#,
             w,
-            aud
+            bot
         )
         .fetch_all(executor)
         .await?)
@@ -419,18 +447,15 @@ impl RequestLogDao {
         limit: i64,
     ) -> Result<Vec<PathCount>> {
         let w = window(since_days);
-        let aud = audience.as_filter();
-        // `path` is annotated `!` because it comes through request_log_view — sqlx
-        // infers view passthrough columns as nullable even though the base column is
-        // NOT NULL.
+        let bot = audience.as_bot_filter();
         Ok(query_as!(
             PathCount,
             r#"
-            SELECT path as "path!: String", COUNT(*) as "count!: i64"
-            FROM request_log_view
+            SELECT path, COUNT(*) as "count!: i64"
+            FROM request_log
             WHERE ts >= datetime('now', ?1)
               AND status < ?2
-              AND (?4 = 'All' OR ua_class = ?4)
+              AND (?4 IS NULL OR is_bot = ?4)
               AND path NOT LIKE '/styles%'
               AND path NOT LIKE '/vendor%'
               AND path NOT LIKE '/scripts%'
@@ -445,7 +470,7 @@ impl RequestLogDao {
             w,
             max_status,
             limit,
-            aud
+            bot
         )
         .fetch_all(executor)
         .await?)
@@ -460,7 +485,7 @@ impl RequestLogDao {
         audience: Audience,
     ) -> Result<StatusBucketCounts> {
         let w = window(since_days);
-        let aud = audience.as_filter();
+        let bot = audience.as_bot_filter();
         Ok(query_as!(
             StatusBucketCounts,
             r#"
@@ -471,11 +496,11 @@ impl RequestLogDao {
                 COUNT(CASE WHEN status = 404 THEN 1 END) as "s404!: i64",
                 COUNT(CASE WHEN status BETWEEN 400 AND 499 AND status NOT IN (403, 404) THEN 1 END) as "s4xx!: i64",
                 COUNT(CASE WHEN status BETWEEN 500 AND 599 THEN 1 END) as "s5xx!: i64"
-            FROM request_log_view
-            WHERE ts >= datetime('now', ?1) AND (?2 = 'All' OR ua_class = ?2)
+            FROM request_log
+            WHERE ts >= datetime('now', ?1) AND (?2 IS NULL OR is_bot = ?2)
             "#,
             w,
-            aud
+            bot
         )
         .fetch_one(executor)
         .await?)
@@ -690,6 +715,61 @@ impl RequestLogDao {
         .await?)
     }
 
+    /// Recompute the stored `is_bot` for existing rows via the single-source `is_bot()`
+    /// classifier (CR.2). `only_missing = true` is the idempotent startup BACKFILL (rows
+    /// where `is_bot IS NULL`); `false` is the admin RECOMPUTE (every row — e.g. after
+    /// retuning the ruleset). Returns the rows updated. Efficient: classifies each
+    /// DISTINCT user_agent ONCE in Rust, then one bulk `UPDATE … WHERE user_agent = ?`
+    /// per value (indexed by `idx_request_log_user_agent`). A NULL UA is its own bulk
+    /// update. (A pathological UA-randomizing scanner inflates the distinct count → many
+    /// small updates; acceptable for a background/admin op at personal-site scale.)
+    pub async fn reclassify_bots(pool: &SqlitePool, only_missing: bool) -> Result<u64> {
+        let uas: Vec<Option<String>> = if only_missing {
+            query!("SELECT DISTINCT user_agent FROM request_log WHERE is_bot IS NULL")
+                .fetch_all(pool)
+                .await?
+                .into_iter()
+                .map(|r| r.user_agent)
+                .collect()
+        } else {
+            query!("SELECT DISTINCT user_agent FROM request_log")
+                .fetch_all(pool)
+                .await?
+                .into_iter()
+                .map(|r| r.user_agent)
+                .collect()
+        };
+
+        let mut updated = 0u64;
+        for ua in uas {
+            let bot = i64::from(is_bot(ua.as_deref()));
+            let res = match (ua.as_deref(), only_missing) {
+                (Some(u), true) => {
+                    query!(
+                        "UPDATE request_log SET is_bot = ?1 WHERE user_agent = ?2 AND is_bot IS NULL",
+                        bot, u
+                    ).execute(pool).await?
+                }
+                (Some(u), false) => {
+                    query!("UPDATE request_log SET is_bot = ?1 WHERE user_agent = ?2", bot, u)
+                        .execute(pool).await?
+                }
+                (None, true) => {
+                    query!(
+                        "UPDATE request_log SET is_bot = ?1 WHERE user_agent IS NULL AND is_bot IS NULL",
+                        bot
+                    ).execute(pool).await?
+                }
+                (None, false) => {
+                    query!("UPDATE request_log SET is_bot = ?1 WHERE user_agent IS NULL", bot)
+                        .execute(pool).await?
+                }
+            };
+            updated += res.rows_affected();
+        }
+        Ok(updated)
+    }
+
     /// Delete rows older than `retain_days`. Returns the number removed.
     pub async fn prune_before(executor: impl SqliteExecutor<'_>, retain_days: i64) -> Result<u64> {
         let w = window(retain_days);
@@ -717,6 +797,7 @@ mod tests {
             user_agent: ua.map(String::from),
             referer: None,
             duration_ms: 0,
+            is_bot: is_bot(ua),
         }
     }
 
@@ -894,6 +975,44 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn is_bot_classifier() {
+        assert!(is_bot(None), "no UA → bot");
+        assert!(is_bot(Some("")), "empty UA → bot");
+        assert!(is_bot(Some("Googlebot/2.1")));
+        assert!(is_bot(Some("python-requests/2.31")));
+        assert!(is_bot(Some("curl/8.0")));
+        assert!(
+            !is_bot(Some("Mozilla/5.0 (Macintosh; Intel Mac OS X) Safari/605")),
+            "a real browser is human"
+        );
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn reclassify_backfills_null_is_bot(pool: SqlitePool) -> Result<()> {
+        // Legacy rows (is_bot NULL) via raw insert + a fresh row already stamped by insert().
+        query!("INSERT INTO request_log (method, path, status, user_agent) VALUES ('GET','/',200,'Googlebot/2.1')")
+            .execute(&pool).await?;
+        query!("INSERT INTO request_log (method, path, status, user_agent) VALUES ('GET','/',200,'Mozilla/5.0 real browser')")
+            .execute(&pool).await?;
+        RequestLogDao::insert(&pool, &entry("/", 200, Some("1.1.1.1"), Some("curl/8"))).await?;
+
+        let null_before: i64 =
+            query!(r#"SELECT COUNT(*) as "c!: i64" FROM request_log WHERE is_bot IS NULL"#)
+                .fetch_one(&pool).await?.c;
+        assert_eq!(null_before, 2, "the two raw rows are unstamped; the inserted one isn't");
+
+        let updated = RequestLogDao::reclassify_bots(&pool, true).await?;
+        assert_eq!(updated, 2, "backfill only touches the NULL rows");
+
+        let c = RequestLogDao::audience_counts(&pool, 1).await?;
+        assert_eq!(c.all, 3);
+        assert_eq!(c.humans, 1, "the real browser");
+        assert_eq!(c.bots, 2, "googlebot + curl");
+        assert_eq!(c.humans + c.bots, c.all, "no NULL is_bot left → the invariant holds");
+        Ok(())
+    }
+
     #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
     async fn referer_urls_and_direct_count(pool: SqlitePool) -> Result<()> {
         // referer_urls_since returns ALL distinct non-null referers (unbounded, no host
@@ -906,6 +1025,7 @@ mod tests {
             user_agent: None,
             referer: referer.map(String::from),
             duration_ms: 0,
+            is_bot: is_bot(None),
         };
         for e in [
             r(Some("https://news.ycombinator.com/")),
