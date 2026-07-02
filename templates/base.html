@@ -44,8 +44,12 @@
                320px (2x) and the 480px Photo.avif (3x + no-srcset fallback + the
                og:image seo.rs points at). Right-sized from the master (Phase CN).
                Links home (Phase 13) — the only route back to the landing. #}
-            <a href="/" aria-label="Home" class="block hover:opacity-90">
-                <img class="size-40 m-2 rounded-full border-8 border-navy" width="160" height="160"
+            {# `display:contents` so the link adds NO layout box — the <img> stays
+               the flex child with its own `m-2` gap (a wrapping `block`/inline <a>
+               pulled that margin inside the link and the portrait overlapped the
+               name). Still fully clickable; hover feedback moves to the img. #}
+            <a href="/" aria-label="Home" class="contents">
+                <img class="size-40 m-2 rounded-full border-8 border-navy hover:opacity-90" width="160" height="160"
                     src="/images/Photo.avif?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"
                     srcset="/images/Photo-320.avif?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}} 320w, /images/Photo.avif?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}} 480w"
                     sizes="160px" alt="Christopher Hotchkiss" /></a>
