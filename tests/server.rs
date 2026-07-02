@@ -33,6 +33,11 @@ async fn harness_boots_and_serves() {
         "rendered page should contain the markdown text; body starts: {}",
         &body[..body.len().min(200)]
     );
+    // The jumbotron portrait links home (Phase 13 — the route back to the landing).
+    assert!(
+        body.contains("aria-label=\"Home\""),
+        "the header portrait should link home on every page"
+    );
 }
 
 /// End-to-end proof of the Phase CN build-time icon codegen: the 404 cat page

@@ -282,11 +282,38 @@ Your browser can't play this video.</video>"
             let Some(v) = variants.first() else {
                 return error_span("file has no content");
             };
+            // A real download BUTTON (name + size), not a bare link — the affordance
+            // for a 3MF / OpenSCAD source / zip on a project page. `download` forces
+            // save-to-disk intent (the byte route only force-attaches executable
+            // mimes; a 3MF would otherwise open inline).
             format!(
-                "<a class=\"text-navy underline\" href=\"/media/file/{}\">{alt}</a>",
-                v.url_key
+                "<a class=\"media-download inline-flex items-center gap-2 my-2 px-4 py-2 bg-navy text-div-grey rounded no-underline hover:bg-navy/90\" \
+href=\"/media/file/{key}\" download=\"{alt}\">{DOWNLOAD_ICON_SVG}<span>Download {alt} <span class=\"opacity-70\">({size})</span></span></a>",
+                key = v.url_key,
+                size = human_bytes(v.bytes),
             )
         }
+    }
+}
+
+/// Inline download glyph for the file button (arrow into a tray). The embed HTML is
+/// built as a Rust string, not askama, so the `icons::*` macros aren't reachable
+/// here — this is the equivalent hand-inlined SVG, sized to the text (`1em`).
+const DOWNLOAD_ICON_SVG: &str = "<svg viewBox=\"0 0 16 16\" width=\"1em\" height=\"1em\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M8 2v8\"/><path d=\"M4.5 7 8 10.5 11.5 7\"/><path d=\"M2.5 13.5h11\"/></svg>";
+
+/// Human-readable byte size for the download button (1024-based). Bytes below 1 KiB
+/// stay exact; KB whole, MB/GB one decimal.
+fn human_bytes(bytes: i64) -> String {
+    const K: f64 = 1024.0;
+    let b = bytes as f64;
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if b < K * K {
+        format!("{:.0} KB", b / K)
+    } else if b < K * K * K {
+        format!("{:.1} MB", b / (K * K))
+    } else {
+        format!("{:.1} GB", b / (K * K * K))
     }
 }
 
@@ -481,5 +508,27 @@ mod tests {
         let html = render_embed_html(&media("stl"), &[variant("stlkey", "model/stl", None)]);
         assert!(html.contains("<object class=\"stl-view"), "{html}");
         assert!(html.contains("data-filename=\"/media/file/stlkey\""), "{html}");
+    }
+
+    #[test]
+    fn file_renders_download_button_with_size() {
+        let mut m = media("file");
+        m.title = Some("Bracket.3mf".to_string());
+        let mut v = variant("filekey", "model/3mf", None);
+        v.bytes = 2_517_000; // ~2.4 MB
+        let html = render_embed_html(&m, &[v]);
+        assert!(html.contains("href=\"/media/file/filekey\""), "{html}");
+        assert!(html.contains("download=\"Bracket.3mf\""), "download attr forces save: {html}");
+        assert!(html.contains("Download Bracket.3mf"), "labelled with the name: {html}");
+        assert!(html.contains("(2.4 MB)"), "shows a human size: {html}");
+        assert!(html.contains("<svg"), "carries the download glyph: {html}");
+    }
+
+    #[test]
+    fn human_bytes_scales_units() {
+        assert_eq!(human_bytes(512), "512 B");
+        assert_eq!(human_bytes(2048), "2 KB");
+        assert_eq!(human_bytes(2_517_000), "2.4 MB");
+        assert_eq!(human_bytes(5_368_709_120), "5.0 GB");
     }
 }
