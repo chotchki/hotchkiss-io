@@ -586,6 +586,18 @@ mod tests {
     }
 
     #[test]
+    fn model_item_that_is_only_a_3mf_renders_a_color_viewer() {
+        // A model published as a single colored 3MF (bowtie's shape). The item's
+        // kind is Stl (probe types .3mf as viewable), so it must render the VIEWER
+        // in 3mf format — not a bare download.
+        let html = render_embed_html(&media("stl"), &[variant("mfkey", "model/3mf", None)]);
+        assert!(html.contains("<object class=\"stl-view"), "renders a viewer, not a download: {html}");
+        assert!(html.contains("data-filename=\"/media/file/mfkey\""), "{html}");
+        assert!(html.contains("data-format=\"3mf\""), "loads via 3MFLoader: {html}");
+        assert!(html.contains("href=\"/media/file/mfkey\""), "the 3mf is also downloadable: {html}");
+    }
+
+    #[test]
     fn stl_item_with_3mf_variant_views_in_color_downloads_full_stl() {
         // fab publishes a COLORED 3MF alongside the STL LOD, all one item. The viewer
         // prefers the 3MF (STL has no color); the download offers the full-res STL.

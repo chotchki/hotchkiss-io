@@ -71,13 +71,15 @@ pub fn probe(path: &Path, original_name: &str) -> Result<Probed> {
             duration_ms: None,
         });
     }
-    // `.3mf` stays a downloadable File on its own (Bambu plates are downloads), but
-    // gets a recognizable `model/3mf` mime so a 3MF added as a VARIANT of an STL
-    // model item is identifiable — the render prefers it for the viewer (it carries
-    // color, unlike STL). ffprobe can't read the zip container either.
+    // `.3mf` is a VIEWABLE model (same kind as STL), with a `model/3mf` mime so the
+    // render can prefer it for the viewer (it carries COLOR, unlike STL) — whether
+    // it's the whole model item or a variant alongside an STL LOD. Plates stay
+    // downloads NOT via kind but because `fab` lists them as plain markdown LINKS,
+    // not `![]` embeds — only an embed hits this kind dispatch. ffprobe can't read
+    // the zip container. (`MediaKind::Stl` is the viewable-mesh kind; it covers 3MF.)
     if lower.ends_with(".3mf") {
         return Ok(Probed {
-            kind: MediaKind::File,
+            kind: MediaKind::Stl,
             mime: "model/3mf".to_string(),
             codecs: None,
             width: None,
@@ -219,10 +221,10 @@ mod tests {
         let stl = probe(Path::new("/nope"), "part.STL").unwrap();
         assert_eq!(stl.kind, MediaKind::Stl);
         assert_eq!(stl.mime, "model/stl");
-        // 3MF stays a downloadable File on its own, but carries a recognizable mime
-        // so the render can prefer it (color) as an STL item's viewer variant.
+        // 3MF is a VIEWABLE model (kind Stl covers viewable meshes) carrying color,
+        // with a recognizable mime so the render prefers it for the viewer.
         let mf = probe(Path::new("/nope"), "plate.3mf").unwrap();
-        assert_eq!(mf.kind, MediaKind::File);
+        assert_eq!(mf.kind, MediaKind::Stl);
         assert_eq!(mf.mime, "model/3mf");
     }
 
