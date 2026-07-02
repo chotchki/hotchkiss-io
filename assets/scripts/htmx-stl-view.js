@@ -69,10 +69,11 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
         camera.add(pl);
 
         (new STLLoader()).load(data['filename'], function (geometry) {
-            // Determine the color
+            // Determine the color — default to the site's yellow (#ffc935); a
+            // `data-color` on the <object> can override per-model.
             var colorString = data['color'];
             if (colorString != null) { var color = new THREE.Color(colorString); }
-            else { var color = 0x909090 }
+            else { var color = 0xffc935 }
 
             // Set up the material
             var material = new THREE.MeshLambertMaterial({ color: color, wireframe: false, vertexColors: false });
@@ -195,7 +196,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 
             const stl_url = stl_o.dataset.filename;
 
-            StlViewer(stl_o, { filename: stl_url });
+            StlViewer(stl_o, { filename: stl_url, color: stl_o.dataset.color });
 
             // Fullscreen the .stl-embed WRAPPER (keeps the toggle button visible so
             // you can exit; Esc works too). three.js re-fits via fullscreenchange.
