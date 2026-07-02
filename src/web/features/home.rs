@@ -99,16 +99,31 @@ pub async fn show_home(
             .then(b.1.page_id.cmp(&a.1.page_id))
     });
 
-    // Partition: pinned → Featured (all), the rest → Latest (capped). Building a
-    // card fetches its cover, so only the Latest we'll SHOW get built.
-    let mut featured: Vec<ContentCard> = Vec::new();
+    // Split pinned → Featured, the rest → Latest. `rows` is newest-first, so Latest
+    // (the auto tail) keeps that order. Featured is HAND-CURATED, so re-sort it by
+    // the manual `page_order` ASC — the same control the /projects drag-reorder sets
+    // — with a recency tiebreak (page_order is per-parent, so a blog↔project tie
+    // falls back to date then id, deterministically). Building a card fetches its
+    // cover, so only the Latest we'll SHOW get built.
+    let (mut featured_rows, rest): (Vec<_>, Vec<_>) =
+        rows.into_iter().partition(|(_, p)| p.is_featured());
+    featured_rows.sort_by(|a, b| {
+        a.1.page_order
+            .cmp(&b.1.page_order)
+            .then(b.1.page_creation_date.cmp(&a.1.page_creation_date))
+            .then(b.1.page_id.cmp(&a.1.page_id))
+    });
+
+    let mut featured: Vec<ContentCard> = Vec::with_capacity(featured_rows.len());
+    for (section, page) in &featured_rows {
+        featured.push(card_from(&state, section, page).await);
+    }
     let mut latest: Vec<ContentCard> = Vec::new();
-    for (section, page) in &rows {
-        if page.is_featured() {
-            featured.push(card_from(&state, section, page).await);
-        } else if latest.len() < LATEST_TOTAL {
-            latest.push(card_from(&state, section, page).await);
+    for (section, page) in &rest {
+        if latest.len() >= LATEST_TOTAL {
+            break;
         }
+        latest.push(card_from(&state, section, page).await);
     }
 
     // Home canonical is the site root (`canonical_path` = "").

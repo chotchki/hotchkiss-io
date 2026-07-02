@@ -2696,3 +2696,28 @@ async fn media_ref_download_redirects_to_full_res_bytes() {
     let r = client().get(server.url("/media/019f2000-dead-0000-0000-000000000000")).send().await.unwrap();
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
 }
+
+/// Featured is HAND-CURATED, so it must honor the manual `page_order` (the control
+/// the /projects drag-reorder sets), NOT creation date like the auto Latest strip.
+#[tokio::test]
+async fn featured_section_respects_page_order() {
+    let server = spawn_test_server().await.expect("spawn");
+    // Pinned projects whose page_order deliberately differs from creation order.
+    for (slug, order) in [("proj-a", 2_i64), ("proj-b", 0), ("proj-c", 1)] {
+        server.seed_project(slug, &format!("# {slug}\n\nbody")).await.unwrap();
+        sqlx::query("UPDATE content_pages SET page_category = 'featured', page_order = ?1 WHERE page_name = ?2")
+            .bind(order)
+            .bind(slug)
+            .execute(&server.pool)
+            .await
+            .unwrap();
+    }
+    let body = client().get(server.url("/")).send().await.unwrap().text().await.unwrap();
+    let region = &body[body.find(">Featured<").expect("Featured heading")..];
+    let (pa, pb, pc) = (
+        region.find("proj-a").expect("a"),
+        region.find("proj-b").expect("b"),
+        region.find("proj-c").expect("c"),
+    );
+    assert!(pb < pc && pc < pa, "Featured must order by page_order (b=0, c=1, a=2); got b={pb} c={pc} a={pa}");
+}
