@@ -270,30 +270,49 @@ Your browser can't play this video.</video>"
             )
         }
         MediaKind::Stl => {
-            let Some(v) = variants.first() else {
+            if variants.is_empty() {
                 return error_span("stl has no stored file");
-            };
+            }
+            // Multiple STL variants = LEVELS OF DETAIL (fab publish provides a
+            // decimated mesh + the full-res): the VIEWER loads the SMALLEST (fast to
+            // fetch + render in three.js), the DOWNLOAD offers the LARGEST (full-res,
+            // printable). Mirrors responsive images (smallest = thumbnail, largest =
+            // zoom/download). Ordered by `bytes` — decimation is monotonic, so
+            // smallest = lowest LOD. A single-variant STL views + downloads the same
+            // file. (`variant_id` fetch order is insertion order, NOT fidelity, so
+            // sorting here is load-bearing.)
+            let mut models: Vec<&MediaVariantDao> = variants.iter().collect();
+            models.sort_by_key(|v| v.bytes);
+            let preview = models.first().unwrap();
+            let full = models.last().unwrap();
             format!(
-                "<object class=\"stl-view size-40 m-2 rounded-md border-8 border-navy\" data-filename=\"/media/file/{}\"></object>",
-                v.url_key
+                "<div class=\"stl-embed flex flex-col items-center my-4\">\
+<object class=\"stl-view size-40 m-2 rounded-md border-8 border-navy\" data-filename=\"/media/file/{}\"></object>\
+{}</div>",
+                preview.url_key,
+                download_button(&full.url_key, &alt, full.bytes),
             )
         }
         MediaKind::File => {
             let Some(v) = variants.first() else {
                 return error_span("file has no content");
             };
-            // A real download BUTTON (name + size), not a bare link — the affordance
-            // for a 3MF / OpenSCAD source / zip on a project page. `download` forces
-            // save-to-disk intent (the byte route only force-attaches executable
-            // mimes; a 3MF would otherwise open inline).
-            format!(
-                "<a class=\"media-download inline-flex items-center gap-2 my-2 px-4 py-2 bg-navy text-div-grey rounded no-underline hover:bg-navy/90\" \
-href=\"/media/file/{key}\" download=\"{alt}\">{DOWNLOAD_ICON_SVG}<span>Download {alt} <span class=\"opacity-70\">({size})</span></span></a>",
-                key = v.url_key,
-                size = human_bytes(v.bytes),
-            )
+            download_button(&v.url_key, &alt, v.bytes)
         }
     }
+}
+
+/// A styled download BUTTON (glyph + name + human size), not a bare link — the
+/// affordance for a 3MF / OpenSCAD source / zip, and the full-res STL under a
+/// viewer. `download` forces save-to-disk intent (the byte route only
+/// force-attaches executable mimes; a 3MF would otherwise open inline). `label`
+/// MUST already be attr-escaped by the caller.
+fn download_button(url_key: &str, label: &str, bytes: i64) -> String {
+    format!(
+        "<a class=\"media-download inline-flex items-center gap-2 my-2 px-4 py-2 bg-navy text-div-grey rounded no-underline hover:bg-navy/90\" \
+href=\"/media/file/{url_key}\" download=\"{label}\">{DOWNLOAD_ICON_SVG}<span>Download {label} <span class=\"opacity-70\">({size})</span></span></a>",
+        size = human_bytes(bytes),
+    )
 }
 
 /// Inline download glyph for the file button (arrow into a tray). The embed HTML is
@@ -508,6 +527,29 @@ mod tests {
         let html = render_embed_html(&media("stl"), &[variant("stlkey", "model/stl", None)]);
         assert!(html.contains("<object class=\"stl-view"), "{html}");
         assert!(html.contains("data-filename=\"/media/file/stlkey\""), "{html}");
+        // A single-variant STL still offers a download of that same file.
+        assert!(html.contains("href=\"/media/file/stlkey\""), "single STL is downloadable: {html}");
+    }
+
+    #[test]
+    fn stl_with_lod_variants_previews_small_downloads_full() {
+        // fab publish provides a decimated mesh + the full-res, as two variants of
+        // one item. Insert order is full-then-decimated on purpose — the render must
+        // pick by BYTES, not insertion order.
+        let mut full = variant("fullkey", "model/stl", None);
+        full.bytes = 5_000_000; // ~4.8 MB full-res
+        let mut decimated = variant("previewkey", "model/stl", None);
+        decimated.bytes = 50_000; // decimated
+        let html = render_embed_html(&media("stl"), &[full, decimated]);
+        assert!(
+            html.contains("data-filename=\"/media/file/previewkey\""),
+            "viewer loads the smallest (decimated) mesh: {html}"
+        );
+        assert!(
+            html.contains("href=\"/media/file/fullkey\""),
+            "download offers the largest (full-res): {html}"
+        );
+        assert!(html.contains("(4.8 MB)"), "download shows the full-res size: {html}");
     }
 
     #[test]
