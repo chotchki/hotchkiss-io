@@ -28,20 +28,6 @@ Slice (a) of the mini blog + mobile-posting arc — see SPEC.md "Mini Blog (v1)"
 - [x] 10.12 - Compressed the PLAN.md backlog "Mini blog + mobile-posting editor facelift" line — slice (a) is now Phase 10; reduced to a one-liner pointing at SPEC for slice (b).
 - [ ] 10.13 - Deploy + manual phone e2e: install to home screen on iOS, post via the existing editor with `capture="environment"`, verify camera flow, verify the post shows up on `/blog`. Capture concrete editor pain as the slice (b) SPEC seed.
 
-## Phase 13 - Landing page + portfolio spine
-
-See SPEC.md "Portfolio — the three pillars". The landing page is the connective tissue: orient a visitor in seconds, route to the three pillars (Software / 3D / Resume).
-
-- [ ] 13.0 - Phase exit: a visitor grasps chotchki + reaches all three pillars
-- [x] 13.1 - Decide landing-page IA: hero (name + one-line value prop + what I do), three pillar doors (Software / 3D / Resume), links out (GitHub, contact/email). Wireframe it in SPEC.
-- [x] 13.2 - Implement the home page: replace the `/`→first-content-page redirect with a real landing template (or designate a landing content_page). Hand-rolled Tailwind, mobile-first.
-- [x] 13.3 - Top-nav surfaces the three pillars; verify it doesn't overflow at 390px (the Phase-10 dogfood nav fix — confirm it already shipped or land it here).
-- [x] 13.4 - Identity/jumbotron block stacks on narrow screens (confirm the dogfood min-width fix is shipped or land it here).
-- [x] 13.5 - Clear contact + GitHub links and a "resume / hire me" call-to-action above the fold.
-- [x] 13.6 - e2e (`tests/e2e_browser.rs`, mobile viewport): `/` renders the three pillar doors and has no horizontal scroll at 390px.
-- [x] 13.7 - CLAUDE.md + SPEC update: document the real landing page replacing the `/` redirect.
-
-- [x] 13.8 - Featured pinning via a category tag + Featured band above Latest
 ## Phase 14 - Software project showcase
 
 See SPEC.md Pillar 1. The side projects are the *verifiable* half of the pitch — public, clickable proof of range that the less-visible background work can't show.
