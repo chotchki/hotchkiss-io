@@ -167,6 +167,25 @@ impl ContentPageDao {
         Ok(())
     }
 
+    /// Set just `page_category` for one page — the pin button's targeted write
+    /// (Phase 13.8). Deliberately does NOT stamp `page_modified_date` (like
+    /// `set_order`): featuring is a landing-curation flag, not a content edit, so
+    /// it must not churn the feed/sitemap validators or the `<updated>` date.
+    pub async fn set_category(
+        executor: impl SqliteExecutor<'_>,
+        page_id: i64,
+        page_category: Option<String>,
+    ) -> Result<()> {
+        query!(
+            "UPDATE content_pages SET page_category = ?1 WHERE page_id = ?2",
+            page_category,
+            page_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    }
+
     pub async fn find_by_parent(
         executor: impl SqliteExecutor<'_>,
         parent_page_id: Option<i64>,
@@ -451,6 +470,13 @@ impl ContentPageDao {
             .filter(|t| !t.trim().is_empty())
             .or_else(|| Self::first_h1(&self.page_markdown))
             .unwrap_or_else(|| self.page_name.clone())
+    }
+
+    /// True iff this page is pinned to the landing's Featured band — i.e. its
+    /// `page_category` carries the reserved `featured` tag (Phase 13.8). Drives
+    /// both the editor's Pin/Unpin button state and the landing query.
+    pub fn is_featured(&self) -> bool {
+        crate::web::util::category::is_featured(self.page_category.as_deref())
     }
 
     /// The post date formatted for an `<input type="datetime-local" step="1">` —

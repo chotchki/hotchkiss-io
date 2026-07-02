@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% import "partials/icons.html" as icons %}
+
+{% block title %}Christopher Hotchkiss{% endblock %}
+{% block meta %}{% include "partials/seo_meta.html" %}{% endblock %}
+
+{% block head %}{% endblock %}
+
+{# One content card, shared by the Featured band and the Latest strip. #}
+{% macro content_card(item) %}
+<li class="border-2 border-navy rounded-md overflow-hidden bg-body-grey">
+  <a href="{{item.href}}" class="block hover:opacity-90">
+    {% if let Some(cover) = item.cover_url %}
+    <div class="h-40 bg-navy">
+      <img src="{{cover}}" alt="" class="w-full h-full object-cover" />
+    </div>
+    {% else %}
+    <div class="h-40 bg-navy flex items-center justify-center">
+      <span class="text-5xl text-yellow">
+        {% if item.section == "blog" %}{% call icons::pen_nib() %}{% else %}{% call icons::cubes_stacked() %}{% endif %}
+      </span>
+    </div>
+    {% endif %}
+    <div class="p-4">
+      <p class="text-sm text-navy/70"><span class="uppercase font-display">{{item.section_label}}</span> &middot; {{item.date}}</p>
+      <h3 class="text-lg font-display text-navy underline">{{item.title}}</h3>
+      {% if !item.excerpt.is_empty() %}
+      <p class="mt-2 text-navy">{{item.excerpt}}</p>
+      {% endif %}
+    </div>
+  </a>
+</li>
+{% endmacro %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto flex flex-col gap-10">
+
+  {# What-I-do line + connect links — above the fold (Phase 13.5). The hero
+     (photo + name + tagline) is the global base.html header; this adds the
+     concrete one-liner + the outbound links a technical visitor reaches for. #}
+  <section class="flex flex-col items-center text-center gap-4">
+    <p class="font-content text-navy text-lg max-w-2xl">
+      Full-stack software and 3D-printed hardware. This whole site is one of the builds —
+      a self-hosted Rust binary that runs its own DNS, TLS, and passkeys.
+    </p>
+    <div class="flex flex-wrap justify-center gap-3">
+      <a href="https://github.com/chotchki" target="_blank" rel="noopener"
+        class="inline-flex items-center gap-2 px-4 py-2 bg-navy text-div-grey rounded font-display text-sm uppercase hover:bg-navy/90">
+        {% call icons::link() %} GitHub
+      </a>
+      <a href="mailto:chris@hotchkiss.io"
+        class="inline-flex items-center gap-2 px-4 py-2 border-2 border-navy text-navy rounded font-display text-sm uppercase hover:bg-navy hover:text-div-grey">
+        Email
+      </a>
+    </div>
+  </section>
+
+  {# Three pillar doors — the primary route to proof. Stack 1-col on mobile,
+     3-across from sm. Projects folds Software + 3D (they share the /projects
+     tree until the Phase-15 gallery); Blog is /blog; Résumé is /resume. #}
+  <nav aria-label="Explore">
+    <ul class="grid grid-cols-1 sm:grid-cols-3 gap-4 list-none p-0">
+      <li>
+        <a href="/projects"
+          class="flex flex-col items-center text-center gap-2 h-full px-4 py-6 bg-navy rounded-lg border-b-4 border-yellow hover:bg-navy/90">
+          <span class="text-5xl text-yellow">{% call icons::cubes_stacked() %}</span>
+          <span class="font-display text-div-grey uppercase text-lg">Projects</span>
+          <span class="text-div-grey/80 text-sm">Software &amp; 3D I've built</span>
+        </a>
+      </li>
+      <li>
+        <a href="/blog"
+          class="flex flex-col items-center text-center gap-2 h-full px-4 py-6 bg-navy rounded-lg border-b-4 border-yellow hover:bg-navy/90">
+          <span class="text-5xl text-yellow">{% call icons::pen_nib() %}</span>
+          <span class="font-display text-div-grey uppercase text-lg">Blog</span>
+          <span class="text-div-grey/80 text-sm">Notes &amp; experiments</span>
+        </a>
+      </li>
+      <li>
+        <a href="/resume"
+          class="flex flex-col items-center text-center gap-2 h-full px-4 py-6 bg-navy rounded-lg border-b-4 border-yellow hover:bg-navy/90">
+          <span class="text-5xl text-yellow">{% call icons::file_pdf() %}</span>
+          <span class="font-display text-div-grey uppercase text-lg">Résumé</span>
+          <span class="text-div-grey/80 text-sm">Background &amp; hire me</span>
+        </a>
+      </li>
+    </ul>
+  </nav>
+
+  {# Featured — hand-pinned showpieces (the `featured` category tag), above Latest.
+     Omitted entirely until something is pinned. #}
+  {% if !featured.is_empty() %}
+  <section aria-label="Featured">
+    <h2 class="text-2xl font-display text-navy mb-4">Featured</h2>
+    <ul class="grid grid-cols-1 md:grid-cols-2 gap-4 list-none p-0">
+      {% for item in featured %}{% call content_card(item) %}{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {# Latest — auto-populated from newest NON-featured blog + project pages, so the
+     front door freshens itself on every publish. Omitted when there's nothing. #}
+  {% if !latest.is_empty() %}
+  <section aria-label="Latest">
+    <h2 class="text-2xl font-display text-navy mb-4">Latest</h2>
+    <ul class="grid grid-cols-1 md:grid-cols-2 gap-4 list-none p-0">
+      {% for item in latest %}{% call content_card(item) %}{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+</div>
+{% endblock %}

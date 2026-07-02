@@ -28,6 +28,9 @@ pub fn admin_router() -> Router<AppState> {
         )
         .route("/pages", get(pages::show_admin_pages))
         .route("/pages/reorder", post(pages::reorder_pages))
+        // Toggle a page's landing "Featured" pin (13.8). Two path segments, so it
+        // never collides with the static `/pages/reorder`.
+        .route("/pages/{page_id}/feature", post(pages::toggle_feature))
         // Media library (Phase BZ). Upload disables the body limit for video.
         .route("/media", get(media::show_media_library))
         .route(

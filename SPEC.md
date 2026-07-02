@@ -30,6 +30,32 @@ Each pillar is a PLAN phase (14–16), fronted by a landing page (Phase 13). The
 - A clean, current `/resume` page + a one-click downloadable PDF. Table stakes.
 - **Hard problem — making less-visible work *credible*, not just recording it:** the work can't be clicked into and verified the way the side projects can. The capture (a writing problem, best as a drafting partnership) has to extract scope, scale, impact, and decisions — and find what can be **written up in a public-safe form**. The narrative leans on the side projects as the tangible proof of range. Host the result — do **not** build a resume CMS. Decide public vs gated, and what to lead with.
 
+### Landing page (Phase 13) — the featured front door
+
+The `/` redirect-to-first-content-page is retired for a real landing template (`web/features/home.rs` → `templates/home.html`, replacing `redirect_to_first_page` at the router root). The identity/hero (headshot + name + "Concept to Code" tagline) already renders site-wide from `base.html`, so the landing OWNS only the content block: a one-line "what I do", the pillar doors, and a self-maintaining "Latest" strip. Audience is the technical visitor — orient in seconds, route to proof.
+
+**Shape — doors-first hub (chosen over magazine/featured-first):**
+
+```
+[ global hero: photo · name · tagline ]      (base.html, every page)
+─────────────────────────────────────────
+ what-I-do line + GitHub · Email links       (above the fold, Phase 13.5)
+─────────────────────────────────────────
+ ┌ PROJECTS ┐ ┌ WRITING ┐ ┌ RÉSUMÉ ┐         three pillar doors, big,
+ │ (cubes)  │ │ (pen)   │ │ (file) │         stack 1-col on mobile
+ └ /projects┘ └ /blog   ┘ └ /resume┘
+─────────────────────────────────────────
+ LATEST                                       auto: newest across
+ ▸ card  ▸ card  ▸ card                       blog + projects (grows on publish)
+```
+
+**Decided (2026-07-01, refined with chotchki — trivially re-tunable):**
+- **Two content bands: FEATURED (pinned) above LATEST (auto).** Featured is hand-curated — a **Pin button** in the page editor toggles a reserved `featured` tag inside the existing (previously vestigial) `page_category` field (`web/util/category.rs` treats the column as a comma-separated tag list, so a page can be BOTH categorized and pinned — `"3d, featured"`; `POST /admin/pages/{id}/feature` read-modify-writes it, `set_category` doesn't stamp `modified_date` so the feed doesn't churn). **No migration** — the field was fully plumbed but read by nothing. Latest stays AUTO: newest NON-featured across `blog` + `projects` (same fetch as the unified feed), so the front door still freshens itself on every publish without pinning everything. The leftover `page_category` tags are the seed for category grouping/filtering on `/projects` later (and a future dedicated **3D door** → a `3d`-tag-filtered view).
+- **Doors = Projects / Blog / Résumé** for now (chotchki debating a 4th, `3d`). The three LIVE, distinct destinations — Software+3D fold into `/projects` (they share the projects tree; 3D lands there via `fab publish`) until the Phase-15 gallery splits them. Plain template markup, one-line edits.
+- **Layout = doors-first hub** (nav-hub, on-SPEC "three doors") over featured-first/magazine.
+
+Mobile-first, hand-rolled Tailwind. The nav hamburger (base.html `<details>`, below `lg`) and the `w-full min-w-0` content-column cap (the Phase-CB overflow fix) already satisfy 13.3/13.4 — the landing rides them.
+
 ### Supporting content (lower priority)
 - **Mini Blog** — v1 shipped (Phase 10); proof-of-life. **Editor facelift + admin UX shipped (Phase F):** title↔slug separation (`page_title`), create-by-title with auto-slug, reader-view-default with an `?edit` toggle, restyled editor, a dedicated admin bar, and a login-state indicator.
 - **Analytics** — v1 shipped 2026-05 (`/admin/analytics`, admin-only). See PLAN_ARCHIVE Phase 7. **v2 (Phase C):** views-over-time — date-range chips (7/30/90, default 30), a server-rendered inline-SVG views/day chart with a total↔unique-visitors toggle, top pages with a Content↔All toggle (Content hides 404 scanner probes; All surfaces them — static assets always excluded), and top external referrers (directional only — referrers are spoofable/often-stripped). On-the-fly aggregation over `request_log` (90-day window, no rollup). A richer interactive (d3) dashboard is backlogged — it's an internal tool, basic is fine.
@@ -38,7 +64,7 @@ Each pillar is a PLAN phase (14–16), fronted by a landing page (Phase 13). The
 
 ## Current site's pain
 - ~~deployment is fragile, unsure if I should finally move to docker~~ — **solved 2026-05**: `git push origin main` → post-receive hook on the mini builds, atomic-swaps the `.app`, restarts the LaunchAgent. No docker, no copying stuff around. (See PLAN.md Phase 0.)
-- ~~What should be the landing page? that's always hard~~ — **answered 2026-06**: with the audience pinned to a technical visitor, the landing page is identity + a one-line value prop + three pillar doors (Software / 3D / Resume). See Phase 13.
+- ~~What should be the landing page? that's always hard~~ — **answered 2026-06, built 2026-07 (Phase 13)**: identity + one-line value prop + three pillar doors, PLUS a self-maintaining "Latest" strip (content keeps growing, so the front door freshens itself instead of going stale). Doors are the live set — Projects / Writing / Résumé — mapping Software+3D onto `/projects` until the 3D gallery ships. See the "Landing page (Phase 13)" section above.
 - ~~No mini blog~~ — **solved 2026-05**: `/blog` shipped (Phase 10).
 - Mobile posting is too hard, I am very open to enabling a PWA version to enable easier posting
   - easier == I can add an annoucement, attach a couple photos from a phone with a nice interface

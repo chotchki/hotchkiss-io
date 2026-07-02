@@ -5,7 +5,8 @@ use crate::{
         features::{
             admin::admin_router,
             blog::blog_router,
-            pages::{pages_router, projects::projects_router, redirect_to_first_page},
+            home::show_home,
+            pages::{pages_router, projects::projects_router},
         },
         middleware::{
             api_key_auth::api_key_auth, refresh_session_role::refresh_session_role,
@@ -57,7 +58,7 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
     // Live role-recheck middleware (Phase CC) also needs the pool.
     let refresh_state = app_state.clone();
     let router = Router::new()
-        .route("/", get(redirect_to_first_page))
+        .route("/", get(show_home))
         .nest("/login", login_router())
         .nest("/pages", pages_router())
         .nest("/projects", projects_router())

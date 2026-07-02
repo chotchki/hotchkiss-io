@@ -2,12 +2,13 @@ use crate::{
     db::dao::content_pages::ContentPageDao,
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
-        features::top_bar::TopBar, html_template::HtmlTemplate, session::SessionData,
+        features::top_bar::TopBar, html_template::HtmlTemplate, htmx_responses::htmx_refresh,
+        session::SessionData, util::category,
     },
 };
 use askama::Template;
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -79,4 +80,23 @@ pub async fn reorder_pages(
     tx.commit().await?;
 
     Ok(StatusCode::OK.into_response())
+}
+
+/// Toggle a page's landing "Featured" pin (Phase 13.8): flip the reserved
+/// `featured` tag in its `page_category`. Read-modify-write against the CURRENT DB
+/// value (not a form field), so it composes with a page's other category tags and
+/// never depends on unsaved editor state. Admin-gated (the `/admin` require_admin
+/// layer + the fail-closed non-GET layer); the editor's Pin button posts here by
+/// `page_id`, which sidesteps the `/pages/{*path}` catch-all. `htmx_refresh` so the
+/// button + the category field re-render with the new state.
+pub async fn toggle_feature(
+    State(state): State<AppState>,
+    Path(page_id): Path<i64>,
+) -> Result<Response, AppError> {
+    let Some(page) = ContentPageDao::find_by_id(&state.pool, page_id).await? else {
+        return Ok((StatusCode::NOT_FOUND, "No such page").into_response());
+    };
+    let toggled = category::toggle_featured(page.page_category.as_deref());
+    ContentPageDao::set_category(&state.pool, page_id, toggled).await?;
+    Ok(htmx_refresh())
 }

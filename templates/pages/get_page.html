@@ -31,6 +31,13 @@
 <div class="mb-4 flex flex-row items-center gap-2">
   <h2 class="text-2xl font-display text-navy">Page Editor</h2>
   <div class="grow"></div>
+  {# Pin toggle (13.8): flips the reserved `featured` category tag → shows this
+     page in the landing's Featured band. Separate POST (type=button, not the
+     editor form), refreshes so the state + category field re-render. #}
+  <button hx-post="/admin/pages/{{page.page_id}}/feature" type="button"
+    title="Show this on the landing page's Featured band"
+    class="px-3 py-1.5 rounded text-sm {% if page.is_featured() %}bg-yellow text-navy hover:bg-yellow/90{% else %}bg-navy hover:bg-navy/90 text-div-grey{% endif %}">
+    {% if page.is_featured() %}Unpin{% else %}Pin{% endif %}</button>
   <button hx-delete="/pages/{{page_path}}" hx-confirm="Are you sure you wish to delete this page?" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 rounded text-div-grey text-sm" type="submit">
     Delete {% call icons::trash_can() %}</button>
   <button class="px-3 py-1.5 bg-navy hover:bg-navy/90 rounded text-div-grey text-sm" type="submit" form="update-page">

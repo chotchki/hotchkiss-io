@@ -2522,3 +2522,115 @@ async fn setting_a_cover_accepts_the_copyable_media_forms() {
     put("![](/media/does-not-exist)").await.unwrap();
     assert_eq!(cover_id().await, Some(media_id), "an unresolvable ref preserves the cover");
 }
+
+// ───────────────────── Phase 13: featured landing page ─────────────────────
+
+#[tokio::test]
+async fn landing_page_serves_doors_and_auto_latest() {
+    // `/` is now a real landing (not the old redirect): three pillar doors +
+    // a self-maintaining "Latest" strip pulled from newest blog + project pages.
+    let server = spawn_test_server().await.expect("spawn");
+    server.seed_blog_post("hello-world", "# Hello World\n\nfirst post body").await.unwrap();
+    server.seed_project("skylander", "# Skylander Mount\n\na printed bracket").await.unwrap();
+
+    let resp = client().get(server.url("/")).send().await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "/ must render the landing, not redirect");
+    let body = resp.text().await.unwrap();
+
+    // The three live pillar doors.
+    assert!(body.contains("href=\"/projects\""), "Projects door present");
+    assert!(body.contains("href=\"/blog\""), "Writing door present");
+    assert!(body.contains("href=\"/resume\""), "Résumé door present");
+
+    // Above-the-fold connect links (13.5).
+    assert!(body.contains("github.com/chotchki"), "GitHub link present");
+    assert!(body.contains("mailto:chris@hotchkiss.io"), "Email link present");
+
+    // Latest strip surfaces both sections, linking to the real detail routes.
+    assert!(body.contains("Latest"), "Latest heading present");
+    assert!(body.contains("Hello World"), "newest blog post shown in Latest");
+    assert!(body.contains("/blog/hello-world"), "blog card links to the post");
+    assert!(body.contains("Skylander Mount"), "newest project shown in Latest");
+    assert!(
+        body.contains("/pages/projects/skylander"),
+        "project card links into the /pages tree, not a dead /projects/<slug>"
+    );
+}
+
+/// Phase 13.8: the Pin button toggles the reserved `featured` category tag, and a
+/// pinned page moves into the landing's Featured band (above Latest) and OUT of
+/// Latest (no duplicate). Admin-gated.
+#[tokio::test]
+async fn pinning_features_a_page_on_the_landing() {
+    let server = spawn_test_server().await.expect("spawn");
+    server.seed_project("show-piece", "# Show Piece\n\nthe flagship build").await.unwrap();
+    let page_id: i64 =
+        sqlx::query("SELECT page_id FROM content_pages WHERE page_name = 'show-piece'")
+            .fetch_one(&server.pool)
+            .await
+            .unwrap()
+            .get("page_id");
+
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // The editor renders the Pin button, wired to the id-based toggle endpoint.
+    let editor = admin
+        .get(server.url("/pages/projects/show-piece?edit=1"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        editor.contains(&format!("hx-post=\"/admin/pages/{page_id}/feature\"")),
+        "editor shows the Pin button posting to the feature endpoint"
+    );
+    assert!(!editor.contains("Unpin"), "button reads 'Pin' (not 'Unpin') before featuring");
+
+    // A non-admin cannot pin (fail-closed non-GET layer → 403).
+    let anon = client();
+    let r = anon.post(server.url(&format!("/admin/pages/{page_id}/feature"))).send().await.unwrap();
+    assert_eq!(r.status(), StatusCode::FORBIDDEN, "anonymous pin must be forbidden");
+
+    let category = || async {
+        sqlx::query("SELECT page_category FROM content_pages WHERE page_id = ?1")
+            .bind(page_id)
+            .fetch_one(&server.pool)
+            .await
+            .unwrap()
+            .get::<Option<String>, _>("page_category")
+    };
+
+    // Pin: the `featured` tag lands in page_category.
+    let r = admin.post(server.url(&format!("/admin/pages/{page_id}/feature"))).send().await.unwrap();
+    assert!(r.status().is_success(), "pin: {}", r.status());
+    assert_eq!(category().await.as_deref(), Some("featured"), "pin adds the featured tag");
+
+    // The landing now shows it under Featured, and NOT under Latest (no dupe).
+    let body = client().get(server.url("/")).send().await.unwrap().text().await.unwrap();
+    let feat_idx = body.find("Featured").expect("Featured band present");
+    let show_idx = body.find("Show Piece").expect("pinned page shown");
+    assert!(feat_idx < show_idx, "the pinned card sits under the Featured heading");
+    assert_eq!(body.matches("Show Piece").count(), 1, "pinned page shown once (Featured, not also Latest)");
+
+    // Unpin: the tag is removed, the column clears to NULL, and Featured disappears.
+    admin.post(server.url(&format!("/admin/pages/{page_id}/feature"))).send().await.unwrap();
+    assert_eq!(category().await, None, "unpin clears the tag to NULL");
+    let body = client().get(server.url("/")).send().await.unwrap().text().await.unwrap();
+    assert!(!body.contains(">Featured<"), "no Featured band once nothing is pinned");
+    assert!(body.contains("Show Piece"), "unpinned page falls back into Latest");
+}
+
+#[tokio::test]
+async fn landing_page_empty_state_still_renders_doors() {
+    // With no blog/project children, the Latest section is omitted but the doors
+    // (and the page) still render — never a 500.
+    let server = spawn_test_server().await.expect("spawn");
+    let resp = client().get(server.url("/")).send().await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("href=\"/projects\""), "doors render with no content");
+    assert!(!body.contains(">Latest<"), "no Latest heading when there's nothing to show");
+}

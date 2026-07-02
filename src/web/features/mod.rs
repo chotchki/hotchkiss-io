@@ -2,6 +2,7 @@ pub mod admin;
 pub mod blog;
 pub mod diagram;
 pub mod feed;
+pub mod home;
 pub mod listing;
 pub mod login;
 pub mod media;

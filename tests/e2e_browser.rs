@@ -408,3 +408,47 @@ async fn analytics_usable_on_mobile() {
     let _ = std::fs::remove_dir_all(&profile);
     drop(server);
 }
+
+#[tokio::test]
+async fn landing_doors_render_no_horizontal_scroll_on_mobile() {
+    // Phase 13: `/` is the featured landing. On a 390px viewport the three pillar
+    // doors must render and nothing may force the document wider than the phone
+    // (13.3/13.4 ride the base.html hamburger + `w-full min-w-0` content cap).
+    let _e2e = e2e_lock().await;
+    let server: TestServer = spawn_test_server().await.expect("spawn harness");
+    // Seed content so the Latest strip (cards + a long title) is in the layout too.
+    server
+        .seed_blog_post(
+            "a-rather-long-post-title",
+            "# A Rather Long Post Title That Could Push The Layout Wide\n\nbody",
+        )
+        .await
+        .unwrap();
+    server.seed_project("printed-bracket", "# Printed Bracket\n\nbody").await.unwrap();
+
+    let (mut browser, handle, profile) = launch().await;
+    let page = browser.new_page("about:blank").await.expect("new page");
+    use_mobile_viewport(&page).await;
+
+    page.goto(server.url("/")).await.expect("goto /");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // The three live pillar doors are present.
+    for href in ["/projects", "/blog", "/resume"] {
+        let present: bool =
+            js(&page, &format!("!!document.querySelector('a[href=\"{href}\"]')")).await;
+        assert!(present, "pillar door for {href} should render on the landing");
+    }
+
+    let scroll_width: i64 = js(&page, "document.documentElement.scrollWidth").await;
+    let inner_width: i64 = js(&page, "window.innerWidth").await;
+    assert!(
+        scroll_width <= inner_width,
+        "/ (landing) has horizontal scroll on a 390px viewport: scrollWidth={scroll_width}, innerWidth={inner_width}",
+    );
+
+    browser.close().await.ok();
+    handle.await.ok();
+    let _ = std::fs::remove_dir_all(&profile);
+    drop(server);
+}

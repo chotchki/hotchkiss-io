@@ -1,3 +1,4 @@
+pub mod category;
 pub mod deserialize;
 pub mod host;
 pub mod media_ref;

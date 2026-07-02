@@ -1,0 +1,132 @@
+//! The landing page (Phase 13) — the featured front door, replacing the old
+//! `/` → first-content-page redirect.
+//!
+//! The identity/hero (headshot + name + tagline) renders site-wide from
+//! `base.html`, so this owns only the content block: a one-line "what I do" +
+//! GitHub/email links, three pillar DOORS (Projects / Writing / Résumé — the live,
+//! distinct destinations; Software+3D share the `/projects` tree until the Phase-15
+//! gallery), and a self-maintaining **Latest** strip. "Latest" is AUTO — newest
+//! across `blog` + `projects`, the same fetch the unified feed uses — so the front
+//! door freshens itself on every publish with no curation step and no new schema.
+
+use crate::{
+    db::dao::content_pages::ContentPageDao,
+    web::{
+        app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
+        features::top_bar::TopBar, html_template::HtmlTemplate,
+        markdown::render_cache::cached_excerpt, session::SessionData,
+    },
+};
+use askama::Template;
+use axum::{
+    extract::State,
+    response::{IntoResponse, Response},
+};
+
+/// How many recent items the "Latest" strip shows.
+const LATEST_TOTAL: usize = 6;
+/// How many children to pull per section before partitioning. Generous so a
+/// FEATURED pin on an older item is still found (Featured isn't recency-limited).
+/// A pinned item beyond the newest-N-per-section won't surface — moot at
+/// personal-site scale; a `WHERE page_category LIKE` query is the scale lever.
+const PER_SECTION_FETCH: i64 = 100;
+
+/// One content card (used by both the Featured band and the Latest strip).
+/// `section`/`section_label` drive the fallback icon + badge; `href` is the
+/// section's real detail route (blog → `/blog/<slug>`, projects →
+/// `/pages/projects/<slug>`).
+pub struct ContentCard {
+    pub section: &'static str,
+    pub section_label: &'static str,
+    pub href: String,
+    pub title: String,
+    pub date: String,
+    pub cover_url: Option<String>,
+    pub excerpt: String,
+}
+
+#[derive(Template)]
+#[template(path = "home.html")]
+pub struct HomeTemplate {
+    pub top_bar: TopBar,
+    pub auth_state: AuthenticationState,
+    /// Pinned showpieces (the `featured` category tag), newest-first, ALL of them.
+    pub featured: Vec<ContentCard>,
+    /// Newest NON-featured content (so a pinned item isn't shown twice).
+    pub latest: Vec<ContentCard>,
+    pub meta: crate::web::features::seo::Meta,
+}
+
+async fn card_from(state: &AppState, section: &'static str, page: &ContentPageDao) -> ContentCard {
+    let (section_label, href) = match section {
+        "blog" => ("Blog", format!("/blog/{}", page.page_name)),
+        _ => ("Project", format!("/pages/projects/{}", page.page_name)),
+    };
+    ContentCard {
+        section,
+        section_label,
+        href,
+        title: page.display_title(),
+        date: page.page_creation_date.format("%B %-d, %Y").to_string(),
+        cover_url: crate::web::features::media::cover_url_for(&state.pool, page.page_id).await,
+        excerpt: cached_excerpt(&page.page_markdown),
+    }
+}
+
+pub async fn show_home(
+    State(state): State<AppState>,
+    session_data: SessionData,
+) -> Result<Response, AppError> {
+    // Newest across both content sections, merged. Mirrors the unified feed's
+    // sort (creation date DESC, page_id DESC tiebreak) so ordering agrees.
+    let mut rows: Vec<(&'static str, ContentPageDao)> = Vec::new();
+    for section in ["blog", "projects"] {
+        if let Some(parent) = ContentPageDao::find_by_name(&state.pool, None, section).await? {
+            let children = ContentPageDao::find_by_parent_newest_first(
+                &state.pool,
+                Some(parent.page_id),
+                Some(PER_SECTION_FETCH),
+            )
+            .await?;
+            for page in children {
+                rows.push((section, page));
+            }
+        }
+    }
+    rows.sort_by(|a, b| {
+        b.1.page_creation_date
+            .cmp(&a.1.page_creation_date)
+            .then(b.1.page_id.cmp(&a.1.page_id))
+    });
+
+    // Partition: pinned → Featured (all), the rest → Latest (capped). Building a
+    // card fetches its cover, so only the Latest we'll SHOW get built.
+    let mut featured: Vec<ContentCard> = Vec::new();
+    let mut latest: Vec<ContentCard> = Vec::new();
+    for (section, page) in &rows {
+        if page.is_featured() {
+            featured.push(card_from(&state, section, page).await);
+        } else if latest.len() < LATEST_TOTAL {
+            latest.push(card_from(&state, section, page).await);
+        }
+    }
+
+    // Home canonical is the site root (`canonical_path` = "").
+    let meta = crate::web::features::seo::Meta::section(
+        &state.site_host,
+        "Christopher Hotchkiss".to_string(),
+        "Full-stack software and 3D-printed hardware. This whole site is one of the \
+         builds — self-hosted Rust, its own DNS and TLS."
+            .to_string(),
+        "",
+    );
+
+    let template = HomeTemplate {
+        top_bar: TopBar::create(&state.pool, "home").await?,
+        auth_state: session_data.auth_state,
+        featured,
+        latest,
+        meta,
+    };
+    Ok(HtmlTemplate(template).into_response())
+}

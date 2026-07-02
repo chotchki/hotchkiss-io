@@ -1,22 +1,24 @@
 //! Smoke test for the test harness itself (Phase 8.1.2): the in-process server
-//! boots, migrations run (incl. the `0007` special-pages seed, so `/` redirects),
-//! and a seeded content page renders.
+//! boots, migrations run (incl. the special-pages seed), the `/` landing page
+//! renders (Phase 13), and a seeded content page renders.
 
 use hotchkiss_io::test_support::spawn_test_server;
-use reqwest::{redirect::Policy, StatusCode};
+use reqwest::StatusCode;
 
 #[tokio::test]
 async fn harness_boots_and_serves() {
     let server = spawn_test_server().await.expect("spawn test server");
 
-    let no_redirect = reqwest::Client::builder()
-        .redirect(Policy::none())
-        .build()
-        .unwrap();
-
-    // migrations + the `0007` special-pages seed ran → `/` redirects to a page
-    let resp = no_redirect.get(server.url("/")).send().await.unwrap();
-    assert_eq!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
+    // `/` serves the featured landing (Phase 13 — no longer a redirect): 200 with
+    // the pillar doors routing to the special pages the migrations seeded.
+    let resp = reqwest::get(server.url("/")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.text().await.unwrap();
+    assert!(
+        body.contains("href=\"/projects\""),
+        "landing should render the pillar doors; body starts: {}",
+        &body[..body.len().min(200)]
+    );
 
     // a seeded content page renders its markdown
     server
