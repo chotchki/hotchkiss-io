@@ -297,26 +297,28 @@ Your browser can't play this video.</video>"
             )
         }
         MediaKind::Stl => {
-            if variants.is_empty() {
-                return error_span("stl has no stored file");
+            // Select ONLY over `model/*` variants (STL/3MF) — an image variant on a
+            // model item is a THUMBNAIL/poster (library card, page cover), NEVER the
+            // mesh, so it must not be mis-picked as the viewer or download.
+            let models: Vec<&MediaVariantDao> =
+                variants.iter().filter(|v| v.mime.starts_with("model/")).collect();
+            if models.is_empty() {
+                return error_span("stl has no stored mesh");
             }
-            // Multiple STL variants = LEVELS OF DETAIL (fab publish provides a
-            // decimated mesh + the full-res): the VIEWER loads the SMALLEST (fast to
-            // fetch + render in three.js), the DOWNLOAD offers the LARGEST (full-res,
-            // printable). Mirrors responsive images (smallest = thumbnail, largest =
-            // zoom/download). Ordered by `bytes` — decimation is monotonic, so
-            // smallest = lowest LOD. A single-variant STL views + downloads the same
-            // file. (`variant_id` fetch order is insertion order, NOT fidelity, so
-            // sorting here is load-bearing.)
-            // Viewer source: prefer a 3MF variant — it carries COLOR (STL doesn't);
-            // else the smallest mesh (the decimated LOD preview). Download: the
-            // largest variant (full-res), whatever the format.
-            let viewer = variants
+            // Multiple model variants = LEVELS OF DETAIL (a decimated mesh + full-res)
+            // and/or formats. Viewer source: prefer a 3MF — it carries COLOR (STL
+            // doesn't); else the SMALLEST mesh (the decimated LOD preview, fast to
+            // fetch + render). Download: the LARGEST mesh (full-res, printable).
+            // (`variant_id` fetch order is insertion order, NOT fidelity, so the
+            // min/max-by-bytes is load-bearing.) A single-variant model views +
+            // downloads the same file.
+            let viewer = models
                 .iter()
+                .copied()
                 .find(|v| v.mime == "model/3mf")
-                .unwrap_or_else(|| variants.iter().min_by_key(|v| v.bytes).unwrap());
+                .unwrap_or_else(|| models.iter().copied().min_by_key(|v| v.bytes).unwrap());
             let fmt = if viewer.mime == "model/3mf" { "3mf" } else { "stl" };
-            let full = variants.iter().max_by_key(|v| v.bytes).unwrap();
+            let full = models.iter().copied().max_by_key(|v| v.bytes).unwrap();
             format!(
                 "<span class=\"flex flex-col items-center gap-2 my-4\">{}{}</span>",
                 stl_viewer_block(&format!("/media/file/{}", viewer.url_key), fmt),
@@ -622,6 +624,21 @@ mod tests {
         assert!(html.contains("data-filename=\"/media/file/mfkey\""), "{html}");
         assert!(html.contains("data-format=\"3mf\""), "loads via 3MFLoader: {html}");
         assert!(html.contains("href=\"/media/file/mfkey\""), "the 3mf is also downloadable: {html}");
+    }
+
+    #[test]
+    fn model_item_ignores_image_variant_for_viewer_and_download() {
+        // A model item can carry a render IMAGE (its library/card thumbnail). The
+        // viewer + download must select over MODEL variants only — never load the
+        // image as the mesh.
+        let mut render = variant("renderkey", "image/avif", None);
+        render.bytes = 20_000; // smaller than the stl — must NOT be picked as viewer
+        let mut stl = variant("meshkey", "model/stl", None);
+        stl.bytes = 400_000;
+        let html = render_embed_html(&media("stl"), &[render, stl]);
+        assert!(html.contains("data-filename=\"/media/file/meshkey\""), "viewer is the mesh, not the image: {html}");
+        assert!(html.contains("href=\"/media/file/meshkey\""), "download is the mesh: {html}");
+        assert!(!html.contains("renderkey"), "the image variant is not the viewer or download: {html}");
     }
 
     #[test]

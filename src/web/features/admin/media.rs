@@ -156,6 +156,23 @@ fn format_bytes(b: i64) -> String {
     }
 }
 
+/// The item kind when an upload GROUPS several files: a MODEL (STL/3MF) or VIDEO
+/// beats an IMAGE, which beats a generic FILE. So a render image grouped with a
+/// model/video is treated as its THUMBNAIL/poster, not the item's type — and the
+/// kind is order-INDEPENDENT (it used to be just the first file's, so an
+/// image-first group silently lost its viewer).
+fn dominant_kind(kinds: &[MediaKind]) -> MediaKind {
+    if kinds.contains(&MediaKind::Stl) {
+        MediaKind::Stl
+    } else if kinds.contains(&MediaKind::Video) {
+        MediaKind::Video
+    } else if kinds.contains(&MediaKind::Image) {
+        MediaKind::Image
+    } else {
+        MediaKind::File
+    }
+}
+
 pub async fn upload_media(
     State(state): State<AppState>,
     mut multipart: Multipart,
@@ -228,17 +245,23 @@ pub async fn upload_media(
         .await?
         .key_value;
 
-    // The media row takes its kind + dims/duration from the first file.
-    let first = &ingested[0].1;
-    let kind = first.kind;
+    // The item's kind is the DOMINANT kind across the grouped files (a model/video
+    // beats an image), NOT just the first file's — so a render image grouped with a
+    // model is its THUMBNAIL, not the item's type, order-independently. Dims/duration
+    // come from the first variant OF that kind (an image grouped into a model item
+    // must not set the model's dims).
+    let kinds: Vec<MediaKind> = ingested.iter().map(|(_, p, _, _)| p.kind).collect();
+    let kind = dominant_kind(&kinds);
+    let primary = ingested.iter().find(|(_, p, _, _)| p.kind == kind).unwrap_or(&ingested[0]);
+    let (primary_sha, primary_probed) = (primary.0.clone(), &primary.1);
     let media = MediaDao::create(
         &state.pool,
         media_ref.clone(),
         kind,
         title,
-        first.width,
-        first.height,
-        first.duration_ms,
+        primary_probed.width,
+        primary_probed.height,
+        primary_probed.duration_ms,
     )
     .await?;
 
@@ -262,13 +285,12 @@ pub async fn upload_media(
     // AVIFs from the original so the render can emit a srcset and the browser
     // pulls an appropriately-sized file. Best-effort — the original still serves.
     if kind == MediaKind::Image {
-        let sha = ingested[0].0.clone();
-        maybe_add_responsive_variants(&state, &hmac_key, media.media_id, sha).await;
+        maybe_add_responsive_variants(&state, &hmac_key, media.media_id, primary_sha.clone()).await;
     }
 
     // Auto-poster for video (non-fatal — the video still plays without one).
     if kind == MediaKind::Video {
-        maybe_add_poster(&state, &hmac_key, media.media_id, ingested[0].0.clone()).await;
+        maybe_add_poster(&state, &hmac_key, media.media_id, primary_sha.clone()).await;
     }
 
     Ok(Json(json!({
@@ -537,3 +559,23 @@ fn strip_media_suffixes(filename: &str) -> String {
     stem.to_string()
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dominant_kind_lets_a_model_or_video_beat_an_image() {
+        use MediaKind::*;
+        // A render image grouped with a model → the item is a viewable model, not
+        // an image (order-independent).
+        assert_eq!(dominant_kind(&[Image, Stl]), Stl);
+        assert_eq!(dominant_kind(&[Stl, Image]), Stl);
+        assert_eq!(dominant_kind(&[Image, Video]), Video);
+        // No model/video → image wins over a generic file; all-file → File.
+        assert_eq!(dominant_kind(&[File, Image]), Image);
+        assert_eq!(dominant_kind(&[File]), File);
+        // Homogeneous groups keep their kind.
+        assert_eq!(dominant_kind(&[Image, Image]), Image);
+    }
+}
