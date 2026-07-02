@@ -286,10 +286,8 @@ Your browser can't play this video.</video>"
             let preview = models.first().unwrap();
             let full = models.last().unwrap();
             format!(
-                "<div class=\"stl-embed flex flex-col items-center my-4\">\
-<object class=\"stl-view size-40 m-2 rounded-md border-8 border-navy\" data-filename=\"/media/file/{}\"></object>\
-{}</div>",
-                preview.url_key,
+                "<span class=\"flex flex-col items-center gap-2 my-4\">{}{}</span>",
+                stl_viewer_block(&format!("/media/file/{}", preview.url_key)),
                 download_button(&full.url_key, &alt, full.bytes),
             )
         }
@@ -300,6 +298,31 @@ Your browser can't play this video.</video>"
             download_button(&v.url_key, &alt, v.bytes)
         }
     }
+}
+
+/// Inline fullscreen (expand-to-corners) glyph for the STL viewer's zoom button.
+const FULLSCREEN_ICON_SVG: &str = "<svg viewBox=\"0 0 16 16\" width=\"1em\" height=\"1em\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M6 2H2v4\"/><path d=\"M10 2h4v4\"/><path d=\"M6 14H2v-4\"/><path d=\"M10 14h4v-4\"/></svg>";
+
+/// The interactive STL viewer block: the three.js `<object>` (sized like a content
+/// image/diagram — full width to a cap, `h-96`, centered by the caller) plus a
+/// fullscreen toggle overlaid top-right. `htmx-stl-view.js` renders into the
+/// `.stl-view` object and binds the `.stl-fullscreen` button (fullscreens the
+/// `.stl-embed` wrapper so the button stays reachable; three.js re-sizes on
+/// `fullscreenchange`). Shared by the `/media` embed and the transformer's `.stl`
+/// rewrite so both look identical. `data_filename` is attr-escaped (the transformer
+/// path carries an author-supplied URL).
+pub(crate) fn stl_viewer_block(data_filename: &str) -> String {
+    // `<span>` (not `<div>`) with a `block` display: a standalone `![](x.stl)` is
+    // parsed inside a `<p>`, and a block `<div>` there is invalid (auto-closes the
+    // p). A span is phrasing content — valid in a paragraph — and `<object>` +
+    // `<button>` are too.
+    format!(
+        "<span class=\"stl-embed relative block w-full max-w-2xl\">\
+<object class=\"stl-view block w-full h-96 rounded-md border-4 border-navy\" data-filename=\"{url}\"></object>\
+<button type=\"button\" class=\"stl-fullscreen absolute top-2 right-2 bg-navy/80 text-div-grey rounded p-2 leading-none hover:bg-navy\" title=\"View fullscreen\" aria-label=\"View fullscreen\">{FULLSCREEN_ICON_SVG}</button>\
+</span>",
+        url = attr_escape(data_filename),
+    )
 }
 
 /// A styled download BUTTON (glyph + name + human size), not a bare link — the
@@ -529,6 +552,8 @@ mod tests {
         assert!(html.contains("data-filename=\"/media/file/stlkey\""), "{html}");
         // A single-variant STL still offers a download of that same file.
         assert!(html.contains("href=\"/media/file/stlkey\""), "single STL is downloadable: {html}");
+        // Fullscreen zoom affordance is present.
+        assert!(html.contains("stl-fullscreen"), "has the fullscreen zoom button: {html}");
     }
 
     #[test]

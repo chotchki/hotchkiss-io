@@ -32,11 +32,15 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
         renderer.setSize(elem.clientWidth, elem.clientHeight);
         elem.appendChild(renderer.domElement);
 
-        window.addEventListener('resize', function () {
+        function resize() {
             renderer.setSize(elem.clientWidth, elem.clientHeight);
             camera.aspect = elem.clientWidth / elem.clientHeight;
             camera.updateProjectionMatrix();
-        }, false);
+        }
+        window.addEventListener('resize', resize, false);
+        // Entering/leaving fullscreen resizes the element's box to/from the screen;
+        // re-fit after the browser applies the fullscreen layout (a tick later).
+        document.addEventListener('fullscreenchange', function () { setTimeout(resize, 60); });
 
         var controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
@@ -192,6 +196,20 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
             const stl_url = stl_o.dataset.filename;
 
             StlViewer(stl_o, { filename: stl_url });
+
+            // Fullscreen the .stl-embed WRAPPER (keeps the toggle button visible so
+            // you can exit; Esc works too). three.js re-fits via fullscreenchange.
+            const wrapper = stl_o.closest('.stl-embed');
+            const fsBtn = wrapper && wrapper.querySelector('.stl-fullscreen');
+            if (fsBtn) {
+                fsBtn.addEventListener('click', function () {
+                    if (document.fullscreenElement) {
+                        document.exitFullscreen();
+                    } else if (wrapper.requestFullscreen) {
+                        wrapper.requestFullscreen().catch(function () { });
+                    }
+                });
+            }
         }
     });
 })();

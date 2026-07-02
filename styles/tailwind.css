@@ -2,6 +2,7 @@
 @plugin "@tailwindcss/typography";
 @source "templates";
 @source "src/web/markdown";
+@source "src/web/features";
 
 @theme {
     --color-navy: #14213d;
@@ -56,6 +57,22 @@
     to {
         transform: rotate(360deg);
     }
+}
+
+/* STL viewer fullscreen zoom: htmx-stl-view.js requests fullscreen on the
+ * .stl-embed wrapper (so the toggle button stays reachable). Fill the screen on a
+ * navy backdrop; the three.js canvas tracks the .stl-view box, resized on
+ * fullscreenchange. */
+.stl-embed:fullscreen {
+    width: 100vw;
+    height: 100vh;
+    background: #14213d;
+}
+.stl-embed:fullscreen .stl-view {
+    width: 100vw;
+    height: 100vh;
+    border: 0;
+    border-radius: 0;
 }
 
 /* Diagram click-to-zoom lightbox (assets/scripts/diagram-zoom.js).

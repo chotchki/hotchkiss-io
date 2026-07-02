@@ -24,6 +24,11 @@ async fn main() -> Result<()> {
     // TailwindCSS and Sqlx Migrations Change Tracking
     println!("cargo::rerun-if-changed=assets/scripts");
     println!("cargo::rerun-if-changed=templates");
+    // Tailwind also scans these for utility classes emitted from Rust string
+    // builders (the media embeds + the markdown transformer), so a class change
+    // there must recompile the CSS.
+    println!("cargo::rerun-if-changed=src/web/markdown");
+    println!("cargo::rerun-if-changed=src/web/features");
     println!("cargo::rerun-if-changed=src/db/migrations");
 
     // Inline-SVG icon set: codegen the askama macro partial from the vendored

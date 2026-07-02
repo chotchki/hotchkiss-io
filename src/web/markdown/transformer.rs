@@ -88,10 +88,13 @@ fn transform_inner(markdown: &str) -> Result<String> {
                         position: None,
                     })
                 } else if image.url.ends_with(".stl") {
+                    // Same interactive viewer + fullscreen zoom as the /media embed,
+                    // centered like a content image/diagram (shared helper escapes
+                    // the author URL).
                     *node = Node::Html(Html {
                         value: format!(
-                            "<object class=\"stl-view size-40 m-2 rounded-md border-8 border-navy\" data-filename=\"{}\"></object>",
-                            image.url
+                            "<span class=\"flex flex-col items-center my-4\">{}</span>",
+                            crate::web::features::media::stl_viewer_block(&image.url)
                         ),
                         position: None,
                     })
@@ -235,10 +238,16 @@ mod tests {
 
         let rendered = transform(input)?;
 
-        assert_eq!(
-            rendered,
-            "<p><object class=\"stl-view size-40 m-2 rounded-md border-8 border-navy\" data-filename=\"https://beta.hotchkiss.io/image.stl\"></object></p>\n"
+        // Interactive viewer pointed at the STL URL, plus the fullscreen zoom
+        // button — same shared block the /media embed uses.
+        assert!(rendered.contains("<object class=\"stl-view"), "{rendered}");
+        assert!(
+            rendered.contains("data-filename=\"https://beta.hotchkiss.io/image.stl\""),
+            "{rendered}"
         );
+        assert!(rendered.contains("stl-fullscreen"), "has the fullscreen zoom button: {rendered}");
+        // A `<span>` wrapper (not a block `<div>`) so it's valid inside the `<p>`.
+        assert!(!rendered.contains("<div"), "no block div inside the paragraph: {rendered}");
 
         Ok(())
     }
