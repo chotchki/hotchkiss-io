@@ -87,14 +87,15 @@ fn transform_inner(markdown: &str) -> Result<String> {
                         ),
                         position: None,
                     })
-                } else if image.url.ends_with(".stl") {
+                } else if image.url.ends_with(".stl") || image.url.ends_with(".3mf") {
                     // Same interactive viewer + fullscreen zoom as the /media embed,
                     // centered like a content image/diagram (shared helper escapes
-                    // the author URL).
+                    // the author URL). `.3mf` renders in color via 3MFLoader.
+                    let fmt = if image.url.ends_with(".3mf") { "3mf" } else { "stl" };
                     *node = Node::Html(Html {
                         value: format!(
                             "<span class=\"flex flex-col items-center my-4\">{}</span>",
-                            crate::web::features::media::stl_viewer_block(&image.url)
+                            crate::web::features::media::stl_viewer_block(&image.url, fmt)
                         ),
                         position: None,
                     })

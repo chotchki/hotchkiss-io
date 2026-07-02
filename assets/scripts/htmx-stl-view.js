@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js';
 
 /*
  * From: https://wejn.org/2020/12/cracking-the-threejs-object-fitting-nut/
@@ -67,6 +68,35 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
         pl.position.z = 10;
         pl.position.normalize();
         camera.add(pl);
+
+        var to_rad = Math.PI / 180;
+
+        // Shared tail once a model object is in hand (STL Mesh or 3MF Group):
+        // center at the origin, apply optional rotation, fit the camera, animate.
+        function present(object) {
+            var box = new THREE.Box3().setFromObject(object);
+            var mid = new THREE.Vector3();
+            box.getCenter(mid);
+            object.position.set(-mid.x, -mid.y, -mid.z);
+            object.rotation.x = to_rad * (data['rotationx'] || 0);
+            object.rotation.y = to_rad * (data['rotationy'] || 0);
+            object.rotation.z = to_rad * (data['rotationz'] || 0);
+            scene.add(object);
+            fitCameraToCenteredObject(camera, object, data['camoffset'] || 1, controls);
+            (function animate() {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            })();
+        }
+
+        // 3MF carries its OWN materials (colors) — load it as-is, don't recolor.
+        if ((data['format'] || '').toLowerCase() === '3mf') {
+            (new ThreeMFLoader()).load(data['filename'], function (object) {
+                present(object);
+            });
+            return;
+        }
 
         (new STLLoader()).load(data['filename'], function (geometry) {
             // Determine the color — default to the site's yellow (#ffc935); a
@@ -196,7 +226,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 
             const stl_url = stl_o.dataset.filename;
 
-            StlViewer(stl_o, { filename: stl_url, color: stl_o.dataset.color });
+            StlViewer(stl_o, { filename: stl_url, color: stl_o.dataset.color, format: stl_o.dataset.format });
 
             // Fullscreen the .stl-embed WRAPPER (keeps the toggle button visible so
             // you can exit; Esc works too). three.js re-fits via fullscreenchange.

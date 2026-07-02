@@ -60,10 +60,25 @@ pub(crate) fn resolve_bin(env: &str, name: &str) -> Option<String> {
 /// the bytes.
 #[allow(dead_code)] // wired by the upload ingest (BZ.5/BZ.7)
 pub fn probe(path: &Path, original_name: &str) -> Result<Probed> {
-    if original_name.to_ascii_lowercase().ends_with(".stl") {
+    let lower = original_name.to_ascii_lowercase();
+    if lower.ends_with(".stl") {
         return Ok(Probed {
             kind: MediaKind::Stl,
             mime: "model/stl".to_string(),
+            codecs: None,
+            width: None,
+            height: None,
+            duration_ms: None,
+        });
+    }
+    // `.3mf` stays a downloadable File on its own (Bambu plates are downloads), but
+    // gets a recognizable `model/3mf` mime so a 3MF added as a VARIANT of an STL
+    // model item is identifiable — the render prefers it for the viewer (it carries
+    // color, unlike STL). ffprobe can't read the zip container either.
+    if lower.ends_with(".3mf") {
+        return Ok(Probed {
+            kind: MediaKind::File,
+            mime: "model/3mf".to_string(),
             codecs: None,
             width: None,
             height: None,
@@ -196,6 +211,20 @@ fn av1_codecs(v: &FfStream) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // `.stl` / `.3mf` are typed by extension BEFORE ffprobe runs, so these need no
+    // binary or real file.
+    #[test]
+    fn stl_and_3mf_are_typed_by_extension() {
+        let stl = probe(Path::new("/nope"), "part.STL").unwrap();
+        assert_eq!(stl.kind, MediaKind::Stl);
+        assert_eq!(stl.mime, "model/stl");
+        // 3MF stays a downloadable File on its own, but carries a recognizable mime
+        // so the render can prefer it (color) as an STL item's viewer variant.
+        let mf = probe(Path::new("/nope"), "plate.3mf").unwrap();
+        assert_eq!(mf.kind, MediaKind::File);
+        assert_eq!(mf.mime, "model/3mf");
+    }
 
     // Fixtures match the REAL shapes from skylander dev-data + the cat AVIF
     // (captured via `ffprobe -print_format json`).

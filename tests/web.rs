@@ -2634,3 +2634,26 @@ async fn landing_page_empty_state_still_renders_doors() {
     assert!(body.contains("href=\"/projects\""), "doors render with no content");
     assert!(!body.contains(">Latest<"), "no Latest heading when there's nothing to show");
 }
+
+/// Phase (3MF): the 3MF viewer loader + its fflate dependency must actually ship
+/// and serve at the importmap paths — a broken import at the top of
+/// `htmx-stl-view.js` would break EVERY STL viewer, not just 3MF. Guards the
+/// vendoring (and the `../libs/fflate.module.js` relative path 3MFLoader uses).
+#[tokio::test]
+async fn threejs_3mf_loader_assets_are_served() {
+    let server = spawn_test_server().await.expect("spawn");
+    for path in [
+        "/vendor/threejs/three.module.js",
+        "/vendor/threejs/loaders/STLLoader.js",
+        "/vendor/threejs/loaders/3MFLoader.js",
+        "/vendor/threejs/libs/fflate.module.js",
+    ] {
+        let r = reqwest::get(server.url(path)).await.unwrap();
+        assert_eq!(r.status(), StatusCode::OK, "{path} must serve");
+        let ct = r.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("");
+        assert!(
+            ct.contains("javascript"),
+            "{path} should be served as JS, got {ct}"
+        );
+    }
+}

@@ -281,13 +281,18 @@ Your browser can't play this video.</video>"
             // smallest = lowest LOD. A single-variant STL views + downloads the same
             // file. (`variant_id` fetch order is insertion order, NOT fidelity, so
             // sorting here is load-bearing.)
-            let mut models: Vec<&MediaVariantDao> = variants.iter().collect();
-            models.sort_by_key(|v| v.bytes);
-            let preview = models.first().unwrap();
-            let full = models.last().unwrap();
+            // Viewer source: prefer a 3MF variant — it carries COLOR (STL doesn't);
+            // else the smallest mesh (the decimated LOD preview). Download: the
+            // largest variant (full-res), whatever the format.
+            let viewer = variants
+                .iter()
+                .find(|v| v.mime == "model/3mf")
+                .unwrap_or_else(|| variants.iter().min_by_key(|v| v.bytes).unwrap());
+            let fmt = if viewer.mime == "model/3mf" { "3mf" } else { "stl" };
+            let full = variants.iter().max_by_key(|v| v.bytes).unwrap();
             format!(
                 "<span class=\"flex flex-col items-center gap-2 my-4\">{}{}</span>",
-                stl_viewer_block(&format!("/media/file/{}", preview.url_key)),
+                stl_viewer_block(&format!("/media/file/{}", viewer.url_key), fmt),
                 download_button(&full.url_key, &alt, full.bytes),
             )
         }
@@ -311,17 +316,19 @@ const FULLSCREEN_ICON_SVG: &str = "<svg viewBox=\"0 0 16 16\" width=\"1em\" heig
 /// `fullscreenchange`). Shared by the `/media` embed and the transformer's `.stl`
 /// rewrite so both look identical. `data_filename` is attr-escaped (the transformer
 /// path carries an author-supplied URL).
-pub(crate) fn stl_viewer_block(data_filename: &str) -> String {
+pub(crate) fn stl_viewer_block(data_filename: &str, format: &str) -> String {
     // `<span>` (not `<div>`) with a `block` display: a standalone `![](x.stl)` is
     // parsed inside a `<p>`, and a block `<div>` there is invalid (auto-closes the
     // p). A span is phrasing content — valid in a paragraph — and `<object>` +
-    // `<button>` are too.
+    // `<button>` are too. `data-format` (stl|3mf) tells the viewer which loader to
+    // use, since the `/media/file/<url_key>` URL carries no extension.
     format!(
         "<span class=\"stl-embed relative block w-full max-w-2xl\">\
-<object class=\"stl-view block w-full h-96 rounded-md border-4 border-navy\" data-filename=\"{url}\"></object>\
+<object class=\"stl-view block w-full h-96 rounded-md border-4 border-navy\" data-filename=\"{url}\" data-format=\"{fmt}\"></object>\
 <button type=\"button\" class=\"stl-fullscreen absolute top-2 right-2 bg-navy/80 text-div-grey rounded p-2 leading-none hover:bg-navy\" title=\"View fullscreen\" aria-label=\"View fullscreen\">{FULLSCREEN_ICON_SVG}</button>\
 </span>",
         url = attr_escape(data_filename),
+        fmt = attr_escape(format),
     )
 }
 
@@ -575,6 +582,26 @@ mod tests {
             "download offers the largest (full-res): {html}"
         );
         assert!(html.contains("(4.8 MB)"), "download shows the full-res size: {html}");
+        assert!(html.contains("data-format=\"stl\""), "an all-STL item views as stl: {html}");
+    }
+
+    #[test]
+    fn stl_item_with_3mf_variant_views_in_color_downloads_full_stl() {
+        // fab publishes a COLORED 3MF alongside the STL LOD, all one item. The viewer
+        // prefers the 3MF (STL has no color); the download offers the full-res STL.
+        let mut decimated = variant("deckey", "model/stl", None);
+        decimated.bytes = 50_000;
+        let mut full = variant("fullstlkey", "model/stl", None);
+        full.bytes = 5_000_000;
+        let mut colored = variant("colorkey", "model/3mf", None);
+        colored.bytes = 800_000;
+        let html = render_embed_html(&media("stl"), &[decimated, full, colored]);
+        assert!(html.contains("data-filename=\"/media/file/colorkey\""), "viewer uses the 3MF: {html}");
+        assert!(html.contains("data-format=\"3mf\""), "viewer format is 3mf: {html}");
+        assert!(
+            html.contains("href=\"/media/file/fullstlkey\""),
+            "download offers the full-res STL: {html}"
+        );
     }
 
     #[test]
