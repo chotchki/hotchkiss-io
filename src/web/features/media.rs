@@ -305,17 +305,22 @@ Your browser can't play this video.</video>"
             if models.is_empty() {
                 return error_span("stl has no stored mesh");
             }
-            // Multiple model variants = LEVELS OF DETAIL (a decimated mesh + full-res)
-            // and/or formats. Viewer source: prefer a 3MF — it carries COLOR (STL
-            // doesn't); else the SMALLEST mesh (the decimated LOD preview, fast to
-            // fetch + render). Download: the LARGEST mesh (full-res, printable).
-            // (`variant_id` fetch order is insertion order, NOT fidelity, so the
-            // min/max-by-bytes is load-bearing.) A single-variant model views +
+            // Multiple model variants = LEVELS OF DETAIL (decimated + full-res) and/or
+            // formats (image + low-res 3MF + high-res 3MF is the common set). Pick by
+            // TYPE then SIZE:
+            //   VIEWER   = the SMALLEST 3MF (color + fast to fetch/render); if there's
+            //              no 3MF, the smallest mesh (the STL LOD preview).
+            //   DOWNLOAD = the LARGEST mesh (full-res, printable).
+            // `bytes` is the fidelity key — decimation is monotonic (low-res < full),
+            // and `variant_id` fetch order is insertion order (NOT fidelity), so the
+            // min/max-by-bytes is load-bearing. A single-variant model views +
             // downloads the same file.
-            let viewer = models
+            let smallest_3mf = models
                 .iter()
                 .copied()
-                .find(|v| v.mime == "model/3mf")
+                .filter(|v| v.mime == "model/3mf")
+                .min_by_key(|v| v.bytes);
+            let viewer = smallest_3mf
                 .unwrap_or_else(|| models.iter().copied().min_by_key(|v| v.bytes).unwrap());
             let fmt = if viewer.mime == "model/3mf" { "3mf" } else { "stl" };
             let full = models.iter().copied().max_by_key(|v| v.bytes).unwrap();
@@ -624,6 +629,24 @@ mod tests {
         assert!(html.contains("data-filename=\"/media/file/mfkey\""), "{html}");
         assert!(html.contains("data-format=\"3mf\""), "loads via 3MFLoader: {html}");
         assert!(html.contains("href=\"/media/file/mfkey\""), "the 3mf is also downloadable: {html}");
+    }
+
+    #[test]
+    fn model_with_image_and_two_3mfs_views_low_downloads_high() {
+        // The real fab set: a render image + a low-res 3MF + a high-res 3MF. Viewer =
+        // the SMALLEST 3MF (color + fast); download = the LARGEST mesh; image = neither.
+        let mut img = variant("imgkey", "image/avif", None);
+        img.bytes = 20_000;
+        let mut low = variant("lowkey", "model/3mf", None);
+        low.bytes = 120_000;
+        let mut high = variant("highkey", "model/3mf", None);
+        high.bytes = 2_400_000;
+        // Insert order shuffled — selection is by type+size, not order.
+        let html = render_embed_html(&media("stl"), &[high, img, low]);
+        assert!(html.contains("data-filename=\"/media/file/lowkey\""), "viewer = low-res 3MF: {html}");
+        assert!(html.contains("data-format=\"3mf\""), "{html}");
+        assert!(html.contains("href=\"/media/file/highkey\""), "download = high-res 3MF: {html}");
+        assert!(!html.contains("imgkey"), "image is the thumbnail, not viewer/download: {html}");
     }
 
     #[test]
