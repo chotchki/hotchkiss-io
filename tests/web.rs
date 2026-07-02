@@ -2657,3 +2657,42 @@ async fn threejs_3mf_loader_assets_are_served() {
         );
     }
 }
+
+/// `fab publish`'s Downloads links use `/media/<ref>` (the upload API returns a
+/// media_ref, not the byte url_key). That must resolve — redirect to the item's
+/// FULL-RES bytes — not 404 (the bowtie regression: the 3MF download link 404'd).
+#[tokio::test]
+async fn media_ref_download_redirects_to_full_res_bytes() {
+    let server = spawn_test_server().await.expect("spawn");
+    let media_ref = "019f2000-aaaa-bbbb-cccc-000000000001";
+    let media_id: i64 = sqlx::query(
+        "INSERT INTO media (media_ref, kind, title) VALUES (?1, 'Stl', 'Bowtie') RETURNING media_id",
+    )
+    .bind(media_ref)
+    .fetch_one(&server.pool)
+    .await
+    .unwrap()
+    .get("media_id");
+    // A small preview + the full-res; the ref download must pick the LARGEST.
+    for (key, bytes) in [("smallkey", 1000_i64), ("fullkey", 900_000_i64)] {
+        sqlx::query(
+            "INSERT INTO media_variant (media_id, sha256, url_key, mime, bytes) VALUES (?1, ?2, ?3, 'model/3mf', ?4)",
+        )
+        .bind(media_id)
+        .bind(format!("sha-{key}"))
+        .bind(key)
+        .bind(bytes)
+        .execute(&server.pool)
+        .await
+        .unwrap();
+    }
+
+    let r = client().get(server.url(&format!("/media/{media_ref}"))).send().await.unwrap();
+    assert_eq!(r.status(), StatusCode::TEMPORARY_REDIRECT, "ref download must redirect to bytes");
+    let loc = r.headers().get("location").and_then(|v| v.to_str().ok()).unwrap_or("");
+    assert_eq!(loc, "/media/file/fullkey", "redirects to the largest (full-res) variant, got {loc}");
+
+    // Unknown ref → 404, not a redirect.
+    let r = client().get(server.url("/media/019f2000-dead-0000-0000-000000000000")).send().await.unwrap();
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+}

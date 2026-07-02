@@ -11,7 +11,7 @@
 //! kind + variants and return the right element (same pattern as inline diagrams).
 
 use axum::extract::{Path, Request, State};
-use axum::response::{Html, IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
 use http::{header, HeaderValue, StatusCode};
@@ -29,6 +29,33 @@ pub fn media_router() -> Router<AppState> {
     Router::new()
         .route("/file/{url_key}", get(serve_media_file))
         .route("/embed/{media_ref}", get(render_media_embed))
+        // Download by the author ref (one path segment — never collides with the
+        // two-segment /file/ and /embed/ routes above).
+        .route("/{media_ref}", get(serve_media_by_ref))
+}
+
+/// Download route for the author ref: `GET /media/<media_ref>` → 302 to the item's
+/// full-res bytes. The upload API hands `fab publish` a `media_ref` (not the byte
+/// `url_key`), so its Downloads links use this form; resolve the ref → the LARGEST
+/// variant (full-res) → the canonical `/media/file/<url_key>` byte route (which
+/// owns range / caching / nosniff / content-disposition). A UUIDv7 ref is
+/// unguessable, so this adds no enumeration oracle.
+async fn serve_media_by_ref(State(state): State<AppState>, Path(media_ref): Path<String>) -> Response {
+    let media = match MediaDao::find_by_ref(&state.pool, &media_ref).await {
+        Ok(Some(m)) => m,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Not found").into_response(),
+        Err(e) => {
+            tracing::error!("media lookup by ref failed: {e:?}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "media lookup failed").into_response();
+        }
+    };
+    let variants = MediaVariantDao::find_by_media_id(&state.pool, media.media_id)
+        .await
+        .unwrap_or_default();
+    match variants.iter().max_by_key(|v| v.bytes) {
+        Some(v) => Redirect::temporary(&format!("/media/file/{}", v.url_key)).into_response(),
+        None => (StatusCode::NOT_FOUND, "no downloadable file for this media").into_response(),
+    }
 }
 
 /// Stream the bytes for a variant, addressed by its public HMAC `url_key`. Range
