@@ -53,20 +53,6 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] 15.4 - Auto-generate a lower-res STL (SPEC goal) — decide build-time vs on-upload; may defer.
 - [ ] 15.5 - Author the 5 gallery entries (photos + descriptions + files).
 - [ ] 15.6 - e2e coverage for the 3D gallery; CLAUDE.md/SPEC update.
-## Phase CU - Scheduled / timed publishing
-- [ ] CU.0 - Phase exit: future-dated pages hidden from non-admins on every public read path; admin sees them inline + badged; Publish-now/Unpublish work; tests green; docs updated
-- [x] CU.1 - Shared visibility predicate: is_scheduled/is_published on ContentPageDao + is_visible(page, is_admin) helper
-- [x] CU.2 - Direct-serve gates (security-critical): get_page_path scans whole pages_path; show_post gates leaf + filters future prev/next siblings
-- [x] CU.3 - Résumé gates: newest_resume_child picks newest VISIBLE child (drop LIMIT 1); add session_data to show_resume_pdf
-- [x] CU.4 - Paginated list gates (SQL, count-consistent): viewer_is_admin + datetime()-normalized predicate through count_children + find_children_*_paged
-- [x] CU.5 - Feed + sitemap gates (unconditional, no session): filter collect_entries at the chokepoint; guard sitemap's three content loops
-- [x] CU.6 - Feed 304 correctness: fold the publish instant into Last-Modified so If-Modified-Since-only crawlers catch the go-live flip
-- [x] CU.7 - Home + nav gates (role-conditional, admin sees inline): show_home retains published-or-admin before partition; TopBar filters top-level tabs
-- [x] CU.8 - set_creation_date targeted DAO setter (stamps modified_date, unlike Pin) + unit test
-- [x] CU.9 - Publish-now + Unpublish buttons, cloned from the Pin/feature button
-- [x] CU.10 - Scheduled badges (cards + editor + admin reader view) + UTC Posted-field relabel/echo
-- [x] CU.11 - Tests: unit (predicate boundary, set_creation_date, count-consistency) + integration (anon 404/absence, admin sees, résumé fallback, PDF gate, feed flip)
-- [ ] CU.12 - Docs + deploy: CLAUDE.md gate writeup; version bump; main->beta, verify, tag->prod
 
 ## Backlog (not yet phased)
 
