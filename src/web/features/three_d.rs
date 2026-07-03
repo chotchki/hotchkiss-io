@@ -171,7 +171,8 @@ const EDITOR_HTML: &str = r#"<!doctype html>
 </head>
 <body>
 <a id="back" href="/3d">&larr; 3D</a>
-<canvas id="fab-web"></canvas>
+<!-- data-inset-top: px of top-left page chrome (the back link) the app insets its UI under -->
+<canvas id="fab-web" data-inset-top="44"></canvas>
 <script type="module">
   import init from '__GLUE_URL__';
   init().catch(e => {
