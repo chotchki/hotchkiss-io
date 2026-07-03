@@ -53,6 +53,15 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] 15.4 - Auto-generate a lower-res STL (SPEC goal) — decide build-time vs on-upload; may defer.
 - [ ] 15.5 - Author the 5 gallery entries (photos + descriptions + files).
 - [ ] 15.6 - e2e coverage for the 3D gallery; CLAUDE.md/SPEC update.
+## Phase CW - Fab / 3D section — host the WASM slicer/placer editor
+- [ ] CW.0 - Phase exit: the Fab/3D tab hosts the live WASM slicer/placer editor (cross-origin isolated, own route, consuming the pinned fab-scad release) with models nested; tests + docs; shipped
+- [ ] CW.1 - Nail the consume-contract with fab-scad (GATING, cross-repo): the GitHub-release asset shape + pinned-download mechanism + confirm SAB/threads
+- [ ] CW.2 - build.rs: download the pinned fab-scad WASM release into OUT_DIR (mirror the Tailwind-CLI download) + stage for rust-embed
+- [ ] CW.3 - Dedicated editor route serving the bundle with COOP+COEP scoped to that route only
+- [ ] CW.4 - Add Cross-Origin-Resource-Policy to the media byte route so the isolated editor can fetch models
+- [ ] CW.5 - The fab/3d special page + nav tab; models nest as its content-page children
+- [ ] CW.6 - Models gallery under the tab: reparent/curate the Phase-15 hand-picked models (existing STL/3MF viewer + fab-publish)
+- [ ] CW.7 - Tests (route serves bundle + COOP/COEP scoped; media CORP; models render) + CLAUDE.md + deploy
 
 ## Backlog (not yet phased)
 
