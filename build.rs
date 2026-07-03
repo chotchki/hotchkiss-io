@@ -111,6 +111,10 @@ async fn main() -> Result<()> {
     fetch_fab_web(&out_dir)
         .await
         .context("fetching the pinned fab-web WASM bundle")?;
+    // Expose the pinned version to the runtime so the editor version-paths its
+    // resource URLs (cache-bust — the URL changes only on a bundle bump, letting
+    // the glue + wasm cache `immutable` and stay version-consistent).
+    println!("cargo::rustc-env=FAB_WEB_VERSION={FAB_WEB_VERSION}");
 
     Ok(())
 }

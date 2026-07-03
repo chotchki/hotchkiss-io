@@ -108,7 +108,7 @@ async fn editor_route_is_cross_origin_isolated_and_confined() {
         "editor document carries COEP"
     );
     let body = resp.text().await.unwrap();
-    assert!(body.contains("/3d/editor/fab_web.js"), "document loads the glue: {body}");
+    assert!(body.contains("/fab_web.js"), "document loads the glue: {body}");
     assert!(
         body.contains("id=\"fab-web\""),
         "document provides the bind canvas the app requires: {body}"
@@ -131,7 +131,25 @@ async fn editor_route_is_cross_origin_isolated_and_confined() {
 async fn editor_serves_glue_and_wasm() {
     let server = spawn_test_server().await.expect("spawn");
 
-    let js = reqwest::get(server.url("/3d/editor/fab_web.js")).await.unwrap();
+    // Discover the version-pathed glue URL from the document (cache-bust: the path
+    // carries the bundle version, so glue + wasm cache immutable + version-consistent).
+    let doc = reqwest::get(server.url("/3d/editor"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let glue = doc
+        .split("import init from '")
+        .nth(1)
+        .and_then(|s| s.split('\'').next())
+        .expect("document imports the glue");
+    assert!(
+        glue.starts_with("/3d/editor/") && glue.ends_with("/fab_web.js"),
+        "glue URL is version-pathed: {glue}"
+    );
+
+    let js = reqwest::get(server.url(glue)).await.unwrap();
     assert_eq!(js.status(), StatusCode::OK);
     assert!(
         js.headers()
@@ -141,8 +159,18 @@ async fn editor_serves_glue_and_wasm() {
             .contains("javascript"),
         "glue is served as javascript"
     );
+    assert!(
+        js.headers()
+            .get("cache-control")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .contains("immutable"),
+        "version-pathed glue caches immutable"
+    );
 
-    let wasm = reqwest::get(server.url("/3d/editor/fab_web_bg.wasm")).await.unwrap();
+    // The wasm sits alongside the glue (the glue resolves it relative to its path).
+    let wasm_url = glue.replace("fab_web.js", "fab_web_bg.wasm");
+    let wasm = reqwest::get(server.url(&wasm_url)).await.unwrap();
     assert_eq!(wasm.status(), StatusCode::OK);
     assert_eq!(
         wasm.headers().get("content-type").and_then(|v| v.to_str().ok()),

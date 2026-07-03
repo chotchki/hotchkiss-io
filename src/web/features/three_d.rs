@@ -34,10 +34,16 @@ pub fn three_d_router() -> Router<AppState> {
     Router::new()
         .route("/", get(show_3d_index))
         // The WASM slicer/placer editor (Phase CW) on its OWN route, so the
-        // COOP/COEP cross-origin isolation stays off the rest of the site.
+        // COOP/COEP cross-origin isolation stays off the rest of the site. The
+        // resource URLs are VERSION-PATHED (`/editor/<ver>/…`) so a bundle bump
+        // changes the URL (cache-bust); the glue resolves the wasm relative to its
+        // own path, so the version rides through to fab_web_bg.wasm — both
+        // immutable within a version, and never version-skewed. `{_v}` is ignored
+        // (the embed is always the current version; the document only ever links
+        // the current path).
         .route("/editor", get(editor_document))
-        .route("/editor/fab_web.js", get(editor_js))
-        .route("/editor/fab_web_bg.wasm", get(editor_wasm))
+        .route("/editor/{_v}/fab_web.js", get(editor_js))
+        .route("/editor/{_v}/fab_web_bg.wasm", get(editor_wasm))
 }
 
 /// A model card for the `/3d` gallery — cover render, title, excerpt — linking to
@@ -134,6 +140,11 @@ pub async fn show_3d_index(
 #[folder = "$OUT_DIR/fab-web"]
 struct FabWeb;
 
+/// The pinned bundle version (from build.rs), used to version-path the editor's
+/// resource URLs so a bump busts the cache — same intent as the site's `?cb=`, but
+/// in the PATH because the glue drops the query when resolving the wasm relatively.
+const FAB_WEB_VERSION: &str = env!("FAB_WEB_VERSION");
+
 /// The editor's top-level document — the site OWNS it (the bundle ships an
 /// `index.reference.html` to crib from). Two load-bearing pieces from the reference:
 /// the `<canvas id="fab-web">` MUST exist before `init()` — the app binds to it
@@ -162,7 +173,7 @@ const EDITOR_HTML: &str = r#"<!doctype html>
 <a id="back" href="/3d">&larr; 3D</a>
 <canvas id="fab-web"></canvas>
 <script type="module">
-  import init from '/3d/editor/fab_web.js';
+  import init from '__GLUE_URL__';
   init().catch(e => {
     if (!`${e}`.includes('Using exceptions for control flow')) console.error('INIT ERROR:', e);
   });
@@ -175,12 +186,16 @@ const EDITOR_HTML: &str = r#"<!doctype html>
 /// rest of the site (content pages, media embeds, the model gallery) is never
 /// cross-origin isolated.
 async fn editor_document() -> Response {
+    let html = EDITOR_HTML.replace(
+        "__GLUE_URL__",
+        &format!("/3d/editor/{FAB_WEB_VERSION}/fab_web.js"),
+    );
     Response::builder()
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header("cross-origin-opener-policy", "same-origin")
         .header("cross-origin-embedder-policy", "require-corp")
         .header(header::CACHE_CONTROL, "no-cache")
-        .body(Body::from(EDITOR_HTML))
+        .body(Body::from(html))
         .expect("static editor document is a valid response")
 }
 
@@ -190,7 +205,7 @@ async fn editor_js() -> Response {
     match FabWeb::get("fab_web.js") {
         Some(f) => Response::builder()
             .header(header::CONTENT_TYPE, "text/javascript; charset=utf-8")
-            .header(header::CACHE_CONTROL, "public, max-age=3600")
+            .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
             .body(Body::from(f.data))
             .expect("embedded js is a valid response"),
         None => bundle_missing("fab_web.js"),
@@ -212,7 +227,7 @@ async fn editor_wasm(headers: HeaderMap) -> Response {
         Some(f) => Response::builder()
             .header(header::CONTENT_TYPE, "application/wasm")
             .header(header::CONTENT_ENCODING, encoding)
-            .header(header::CACHE_CONTROL, "public, max-age=3600")
+            .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
             .body(Body::from(f.data))
             .expect("embedded wasm is a valid response"),
         None => bundle_missing(asset),
