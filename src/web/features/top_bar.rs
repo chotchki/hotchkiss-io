@@ -16,6 +16,12 @@ impl TopBar {
         let tabs = ContentPageDao::find_by_parent(executor, None)
             .await?
             .into_iter()
+            // Hide future-dated (scheduled/draft) top-level pages from the global
+            // nav — they'd otherwise show as a live tab site-wide before their
+            // publish instant (Phase CU). Special pages (blog/projects/resume/login)
+            // are exempt via is_visible_to; admin reaches a scheduled top-level page
+            // through its direct URL or the admin Manage Pages list, not the nav.
+            .filter(|cpd| cpd.is_visible_to(false))
             .map(|cpd| cpd.page_name)
             .map(|name| {
                 let m = name == active_page;

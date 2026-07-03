@@ -22,6 +22,7 @@
     </div>
     {% endif %}
     <div class="p-4">
+      {% if item.is_scheduled %}<p class="mb-1"><span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow text-navy uppercase tracking-wide">Scheduled</span></p>{% endif %}
       <p class="text-sm text-navy/70"><span class="uppercase font-display">{{item.section_label}}</span> &middot; {{item.date}}</p>
       <h3 class="text-lg font-display text-navy underline">{{item.title}}</h3>
       {% if !item.excerpt.is_empty() %}

@@ -102,16 +102,20 @@ fn urlencode(s: &str) -> String {
 /// Fetch one page of `parent`'s children (ordered per `order`, filtered by the
 /// trimmed query) plus the `Pagination` describing the window. `page` is clamped
 /// into `[1, total_pages]`; an empty/whitespace query disables the search filter.
+/// `viewer_is_admin` gates unpublished (future-dated) children — non-admins never
+/// see OR count them, so the window and the count stay consistent (Phase CU).
 pub async fn paginate(
     pool: &SqlitePool,
     parent_page_id: Option<i64>,
     query: &ListingQuery,
     order: ListOrder,
     base_path: &str,
+    viewer_is_admin: bool,
 ) -> Result<(Vec<ContentPageDao>, Pagination)> {
     let search = query.q.as_deref().unwrap_or("").trim().to_string();
 
-    let total = ContentPageDao::count_children(pool, parent_page_id, &search).await?;
+    let total =
+        ContentPageDao::count_children(pool, parent_page_id, &search, viewer_is_admin).await?;
     let total_pages = ((total + PAGE_SIZE - 1) / PAGE_SIZE).max(1);
     let current_page = query.page.unwrap_or(1).clamp(1, total_pages);
     let offset = (current_page - 1) * PAGE_SIZE;
@@ -124,6 +128,7 @@ pub async fn paginate(
                 &search,
                 PAGE_SIZE,
                 offset,
+                viewer_is_admin,
             )
             .await?
         }
@@ -134,6 +139,7 @@ pub async fn paginate(
                 &search,
                 PAGE_SIZE,
                 offset,
+                viewer_is_admin,
             )
             .await?
         }

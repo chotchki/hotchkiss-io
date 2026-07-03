@@ -32,6 +32,8 @@ pub struct ProjectCard {
     pub title: String,
     pub cover_url: Option<String>,
     pub excerpt: String,
+    /// Future-dated (scheduled/draft) — admin-only, drives the "Scheduled" badge.
+    pub is_scheduled: bool,
 }
 
 #[derive(Template)]
@@ -56,22 +58,26 @@ pub async fn show_all_projects(
         );
     };
 
+    let is_admin = session_data.auth_state.is_admin();
     let (raw_projects, pagination) = paginate(
         &state.pool,
         Some(project_page.page_id),
         &query,
         ListOrder::Ordered,
         "/projects",
+        is_admin,
     )
     .await?;
     let mut projects: Vec<ProjectCard> = Vec::with_capacity(raw_projects.len());
     for p in raw_projects {
         let cover_url = crate::web::features::media::cover_url_for(&state.pool, p.page_id).await;
+        let is_scheduled = p.is_scheduled();
         projects.push(ProjectCard {
             title: p.display_title(),
             page_name: p.page_name,
             cover_url,
             excerpt: cached_excerpt(&p.page_markdown),
+            is_scheduled,
         });
     }
 

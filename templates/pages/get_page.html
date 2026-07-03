@@ -30,7 +30,23 @@
 {% if auth_state.is_admin() && edit %}
 <div class="mb-4 flex flex-row items-center gap-2">
   <h2 class="text-2xl font-display text-navy">Page Editor</h2>
+  {% if page.is_scheduled() %}
+  <span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow text-navy uppercase tracking-wide"
+    title="Hidden from non-admins until its Posted date">Scheduled</span>
+  {% endif %}
   <div class="grow"></div>
+  {# Publish-now / Unpublish (Phase CU): a scheduled page can go live NOW; a live
+     page can drop back to a draft (far-future date). Separate POST by page_id
+     (type=button), refreshes so the buttons + Scheduled pill re-render. #}
+  {% if page.is_scheduled() %}
+  <button hx-post="/admin/pages/{{page.page_id}}/publish" type="button"
+    title="Publish immediately (sets the Posted date to now)"
+    class="px-3 py-1.5 rounded text-sm bg-yellow text-navy hover:bg-yellow/90">Publish now</button>
+  {% else %}
+  <button hx-post="/admin/pages/{{page.page_id}}/unpublish" type="button"
+    title="Hide as a draft (sets a far-future date)"
+    class="px-3 py-1.5 rounded text-sm bg-navy hover:bg-navy/90 text-div-grey">Unpublish</button>
+  {% endif %}
   {# Pin toggle (13.8): flips the reserved `featured` category tag → shows this
      page in the landing's Featured band. Separate POST (type=button, not the
      editor form), refreshes so the state + category field re-render. #}
@@ -92,8 +108,13 @@
       <input class="border border-navy/30 rounded px-3 py-2" name="page_order" value="{{page.page_order}}" type="number" />
     </label>
     <label class="flex flex-col gap-1">
-      <span class="text-sm font-display text-navy uppercase">Posted</span>
+      <span class="text-sm font-display text-navy uppercase">Posted (UTC)</span>
       <input class="border border-navy/30 rounded px-3 py-2" name="page_creation_date" value="{{page.creation_date_input()}}" type="datetime-local" step="1" />
+      {% if page.is_scheduled() %}
+      <span class="text-xs text-navy/60">Scheduled — goes live {{page.creation_date_utc_label()}}</span>
+      {% else %}
+      <span class="text-xs text-navy/50">A future date schedules this page (hidden until then). Times are UTC.</span>
+      {% endif %}
     </label>
   </div>
 </form>
@@ -137,8 +158,15 @@
 </div>
 {% endif %}
 <h1 class="font-display text-3xl md:text-4xl font-bold text-navy leading-tight mt-2 mb-1">{{page.display_title()}}</h1>
+{% if page.is_scheduled() %}
+{# Only an admin can reach a scheduled page (non-admins are 404'd), so this badge is
+   admin-only by construction — flags a draft/scheduled page in the reader view. #}
+<p class="mb-4"><span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow text-navy uppercase tracking-wide">Scheduled</span>
+  <span class="text-sm text-navy/60 ml-1">goes live {{page.creation_date_utc_label()}}</span></p>
+{% else %}
 {% if let Some(posted) = posted_date %}
 <p class="text-sm text-navy/60 mb-4">{{posted}}</p>
+{% endif %}
 {% endif %}
 <div class="prose max-w-none" id="rendered">
   {{rendered_markdown|safe}}

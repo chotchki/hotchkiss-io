@@ -131,7 +131,9 @@ pub async fn sitemap_xml(
                 "resume" => urls.push((format!("{base}/resume"), Some(p.page_modified_date))),
                 _ => {}
             }
-        } else {
+        } else if p.is_visible_to(false) {
+            // Skip future-dated (scheduled) pages — never leak an unpublished URL
+            // to crawlers (the sitemap is unconditional, no session). Phase CU.
             urls.push((
                 format!("{base}/pages/{}", p.page_name),
                 Some(p.page_modified_date),
@@ -140,20 +142,24 @@ pub async fn sitemap_xml(
     }
     if let Some(id) = blog_id {
         for c in ContentPageDao::find_by_parent_newest_first(&state.pool, Some(id), None).await? {
-            urls.push((
-                format!("{base}/blog/{}", c.page_name),
-                Some(c.page_modified_date),
-            ));
+            if c.is_visible_to(false) {
+                urls.push((
+                    format!("{base}/blog/{}", c.page_name),
+                    Some(c.page_modified_date),
+                ));
+            }
         }
     }
     if let Some(id) = projects_id {
         // Project DETAIL pages are content-tree pages at `/pages/projects/<slug>`
         // (the `/projects` route is the index only) — NOT `/projects/<slug>`.
         for c in ContentPageDao::find_by_parent(&state.pool, Some(id)).await? {
-            urls.push((
-                format!("{base}/pages/projects/{}", c.page_name),
-                Some(c.page_modified_date),
-            ));
+            if c.is_visible_to(false) {
+                urls.push((
+                    format!("{base}/pages/projects/{}", c.page_name),
+                    Some(c.page_modified_date),
+                ));
+            }
         }
     }
 

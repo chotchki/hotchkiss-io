@@ -37,6 +37,7 @@
             </div>
             {% endif %}
             <div class="p-4">
+                {% if post.is_scheduled %}<p class="mb-1"><span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow text-navy uppercase tracking-wide">Scheduled</span></p>{% endif %}
                 <p class="text-sm text-navy/70">{{post.page_creation_date}}</p>
                 <h2 class="text-lg font-display text-navy underline">{{post.title}}</h2>
                 {% if !post.excerpt.is_empty() %}

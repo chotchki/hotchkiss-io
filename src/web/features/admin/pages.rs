@@ -14,6 +14,7 @@ use axum::{
 };
 use axum_extra::extract::Form;
 use serde::Deserialize;
+use sqlx::types::chrono::{DateTime, Utc};
 use std::collections::HashSet;
 
 #[derive(Template)]
@@ -98,5 +99,45 @@ pub async fn toggle_feature(
     };
     let toggled = category::toggle_featured(page.page_category.as_deref());
     ContentPageDao::set_category(&state.pool, page_id, toggled).await?;
+    Ok(htmx_refresh())
+}
+
+/// Publish a scheduled/draft page NOW (Phase CU): stamp `page_creation_date` to the
+/// current instant so it goes live immediately. Read-modify-write by `page_id` (like
+/// the Pin button), so it never touches unsaved editor state; `set_creation_date`
+/// stamps `page_modified_date` too, keeping the feed/sitemap validators fresh.
+/// Admin-gated by the `/admin` require_admin layer.
+pub async fn publish_now(
+    State(state): State<AppState>,
+    Path(page_id): Path<i64>,
+) -> Result<Response, AppError> {
+    if ContentPageDao::find_by_id(&state.pool, page_id)
+        .await?
+        .is_none()
+    {
+        return Ok((StatusCode::NOT_FOUND, "No such page").into_response());
+    }
+    ContentPageDao::set_creation_date(&state.pool, page_id, Utc::now()).await?;
+    Ok(htmx_refresh())
+}
+
+/// Unpublish a live page back to a DRAFT (Phase CU): stamp `page_creation_date` far
+/// in the future so `is_scheduled()` is true and every public read path hides it. A
+/// sentinel, not a real schedule — to schedule for a SPECIFIC time set the editor's
+/// Posted field instead; Publish-now later stamps `now`. Admin-gated.
+pub async fn unpublish(
+    State(state): State<AppState>,
+    Path(page_id): Path<i64>,
+) -> Result<Response, AppError> {
+    if ContentPageDao::find_by_id(&state.pool, page_id)
+        .await?
+        .is_none()
+    {
+        return Ok((StatusCode::NOT_FOUND, "No such page").into_response());
+    }
+    let draft_sentinel: DateTime<Utc> = "2999-01-01T00:00:00Z"
+        .parse()
+        .expect("valid far-future draft sentinel");
+    ContentPageDao::set_creation_date(&state.pool, page_id, draft_sentinel).await?;
     Ok(htmx_refresh())
 }

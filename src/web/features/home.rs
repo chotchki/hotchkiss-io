@@ -43,6 +43,8 @@ pub struct ContentCard {
     pub date: String,
     pub cover_url: Option<String>,
     pub excerpt: String,
+    /// Future-dated (scheduled/draft) — admin-only, drives the "Scheduled" badge.
+    pub is_scheduled: bool,
 }
 
 #[derive(Template)]
@@ -70,6 +72,7 @@ async fn card_from(state: &AppState, section: &'static str, page: &ContentPageDa
         date: page.page_creation_date.format("%B %-d, %Y").to_string(),
         cover_url: crate::web::features::media::cover_url_for(&state.pool, page.page_id).await,
         excerpt: cached_excerpt(&page.page_markdown),
+        is_scheduled: page.is_scheduled(),
     }
 }
 
@@ -98,6 +101,13 @@ pub async fn show_home(
             .cmp(&a.1.page_creation_date)
             .then(b.1.page_id.cmp(&a.1.page_id))
     });
+
+    // Scheduled/timed publishing gate (Phase CU): drop future-dated pages before
+    // the Featured/Latest split so a scheduled post — even a pinned one — never
+    // surfaces on the front door to anon; admin sees them inline (badged) to
+    // preview placement, and the LATEST_TOTAL cap then counts only published items.
+    let is_admin = session_data.auth_state.is_admin();
+    rows.retain(|(_, p)| p.is_visible_to(is_admin));
 
     // Split pinned → Featured, the rest → Latest. `rows` is newest-first, so Latest
     // (the auto tail) keeps that order. Featured is HAND-CURATED, so re-sort it by

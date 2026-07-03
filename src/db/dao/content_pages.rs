@@ -186,6 +186,28 @@ impl ContentPageDao {
         Ok(())
     }
 
+    /// Set just `page_creation_date` (the publish instant) for one page — the
+    /// Publish-now / Unpublish buttons' targeted write (Phase CU). Unlike
+    /// `set_category`/`set_order` this DOES stamp `page_modified_date`: publishing
+    /// or unpublishing changes the page's feed/sitemap position + visibility, so the
+    /// validators (and the feed's `<updated>`) must move. Writes ONE column against
+    /// the current DB row (like the Pin button), so it never clobbers unsaved editor
+    /// markdown the way the whole-row `update()` would.
+    pub async fn set_creation_date(
+        executor: impl SqliteExecutor<'_>,
+        page_id: i64,
+        page_creation_date: DateTime<Utc>,
+    ) -> Result<()> {
+        query!(
+            "UPDATE content_pages SET page_creation_date = ?1, page_modified_date = datetime('now', 'utc') WHERE page_id = ?2",
+            page_creation_date,
+            page_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    }
+
     pub async fn find_by_parent(
         executor: impl SqliteExecutor<'_>,
         parent_page_id: Option<i64>,
@@ -328,11 +350,15 @@ impl ContentPageDao {
     /// Count children of `parent_page_id`, optionally filtered by `search`
     /// (matched case-insensitively against title / markdown / slug; an empty
     /// string disables the filter). Shared by the paginated `/blog` + `/projects`
-    /// listings (see `web/features/listing.rs`).
+    /// listings (see `web/features/listing.rs`). For a non-admin viewer
+    /// (`viewer_is_admin = false`) it counts ONLY published pages — the SQL-side
+    /// `datetime()`-normalized publish gate, special pages exempt — so the count
+    /// matches the filtered fetch and the pager stays consistent (Phase CU).
     pub async fn count_children(
         executor: impl SqliteExecutor<'_>,
         parent_page_id: Option<i64>,
         search: &str,
+        viewer_is_admin: bool,
     ) -> Result<i64> {
         let row = query!(
             r#"
@@ -343,9 +369,13 @@ impl ContentPageDao {
                        or page_title    like '%' || ?2 || '%'
                        or page_markdown like '%' || ?2 || '%'
                        or page_name     like '%' || ?2 || '%')
+                  and (?3
+                       or special_page = 1
+                       or datetime(page_creation_date) <= datetime('now'))
             "#,
             parent_page_id,
-            search
+            search,
+            viewer_is_admin
         )
         .fetch_one(executor)
         .await?;
@@ -353,13 +383,16 @@ impl ContentPageDao {
     }
 
     /// One page of children newest-first (the `/blog` ordering), with optional
-    /// `search` + LIMIT/OFFSET. Empty `search` disables the filter.
+    /// `search` + LIMIT/OFFSET. Empty `search` disables the filter. Non-admins see
+    /// only published rows (the same `datetime()`-normalized gate as
+    /// `count_children`) so the window matches the count (Phase CU).
     pub async fn find_children_newest_paged(
         executor: impl SqliteExecutor<'_>,
         parent_page_id: Option<i64>,
         search: &str,
         limit: i64,
         offset: i64,
+        viewer_is_admin: bool,
     ) -> Result<Vec<ContentPageDao>> {
         let content_pages: Vec<ContentPageDao> = query_as!(
             ContentPageDao,
@@ -382,13 +415,17 @@ impl ContentPageDao {
                        or page_title    like '%' || ?2 || '%'
                        or page_markdown like '%' || ?2 || '%'
                        or page_name     like '%' || ?2 || '%')
+                  and (?5
+                       or special_page = 1
+                       or datetime(page_creation_date) <= datetime('now'))
                 order by page_creation_date DESC, page_id DESC
                 limit ?3 offset ?4
             "#,
             parent_page_id,
             search,
             limit,
-            offset
+            offset,
+            viewer_is_admin
         )
         .fetch_all(executor)
         .await?;
@@ -396,13 +433,16 @@ impl ContentPageDao {
     }
 
     /// One page of children by manual `page_order` (the `/projects` ordering),
-    /// with optional `search` + LIMIT/OFFSET.
+    /// with optional `search` + LIMIT/OFFSET. Non-admins see only published rows
+    /// (the same `datetime()`-normalized gate as `count_children`) so the window
+    /// matches the count (Phase CU).
     pub async fn find_children_ordered_paged(
         executor: impl SqliteExecutor<'_>,
         parent_page_id: Option<i64>,
         search: &str,
         limit: i64,
         offset: i64,
+        viewer_is_admin: bool,
     ) -> Result<Vec<ContentPageDao>> {
         let content_pages: Vec<ContentPageDao> = query_as!(
             ContentPageDao,
@@ -425,13 +465,17 @@ impl ContentPageDao {
                        or page_title    like '%' || ?2 || '%'
                        or page_markdown like '%' || ?2 || '%'
                        or page_name     like '%' || ?2 || '%')
+                  and (?5
+                       or special_page = 1
+                       or datetime(page_creation_date) <= datetime('now'))
                 order by page_order, page_id
                 limit ?3 offset ?4
             "#,
             parent_page_id,
             search,
             limit,
-            offset
+            offset,
+            viewer_is_admin
         )
         .fetch_all(executor)
         .await?;
@@ -479,11 +523,38 @@ impl ContentPageDao {
         crate::web::util::category::is_featured(self.page_category.as_deref())
     }
 
+    /// True iff this page's publish instant (`page_creation_date`) is in the
+    /// future — SCHEDULED / a draft, not yet live. Single source of truth for the
+    /// "future = hidden" rule (Phase CU): drives the Scheduled badge, the
+    /// Publish-now/Unpublish button state, and `is_visible_to`. "Future" is
+    /// strictly `>` now, so a page dated exactly now is already published.
+    pub fn is_scheduled(&self) -> bool {
+        self.page_creation_date > Utc::now()
+    }
+
+    /// The visibility gate every public read path applies (Phase CU). A page is
+    /// visible to a viewer if it's a `special_page` (routing redirect, exempt), OR
+    /// the viewer is an admin (admins see scheduled/draft pages to preview + edit),
+    /// OR its publish instant has passed. Comparing the decoded `DateTime<Utc>`
+    /// here sidesteps the column's mixed TEXT date formats — the paginated queries
+    /// need the SQL-side `datetime()`-normalized equivalent instead (CU.4).
+    pub fn is_visible_to(&self, is_admin: bool) -> bool {
+        self.special_page || is_admin || !self.is_scheduled()
+    }
+
     /// The post date formatted for an `<input type="datetime-local" step="1">` —
     /// the editor's backdating field. (The blog sorts + displays by this date, so
     /// setting it back-dates a Wayback-recovered post to its real slot.)
     pub fn creation_date_input(&self) -> String {
         self.page_creation_date.format("%Y-%m-%dT%H:%M:%S").to_string()
+    }
+
+    /// The publish instant as a human UTC label (e.g. `2026-07-10 13:00 UTC`),
+    /// shown next to the editor's Posted field + on a scheduled page so its go-live
+    /// time is stated explicitly. The datetime-local input is stored as UTC verbatim,
+    /// so this reads the same wall clock with the zone made explicit (Phase CU).
+    pub fn creation_date_utc_label(&self) -> String {
+        self.page_creation_date.format("%Y-%m-%d %H:%M UTC").to_string()
     }
 
     /// First level-1 ATX heading (`# Title`) in the markdown, if any.
@@ -783,6 +854,145 @@ mod tests {
             .collect();
         assert_eq!(vec![c.page_id, b.page_id, a.page_id], ordered);
 
+        Ok(())
+    }
+
+    fn page_dated(creation: DateTime<Utc>, special_page: bool) -> ContentPageDao {
+        ContentPageDao {
+            page_id: 1,
+            parent_page_id: None,
+            page_name: "p".to_string(),
+            page_title: None,
+            page_category: None,
+            page_markdown: String::new(),
+            page_cover_attachment_id: None,
+            page_order: 0,
+            page_creation_date: creation,
+            page_modified_date: creation,
+            special_page,
+        }
+    }
+
+    #[test]
+    fn scheduled_and_visibility_gate() {
+        // Fixed far past/future so the boundary is deterministic (no now() flake).
+        let past: DateTime<Utc> = "2000-01-01T00:00:00Z".parse().unwrap();
+        let future: DateTime<Utc> = "2999-01-01T00:00:00Z".parse().unwrap();
+
+        let past_pg = page_dated(past, false);
+        let future_pg = page_dated(future, false);
+        let future_special = page_dated(future, true);
+
+        // Scheduled iff dated in the future.
+        assert!(!past_pg.is_scheduled());
+        assert!(future_pg.is_scheduled());
+
+        // Non-admin: past page visible, future page hidden.
+        assert!(past_pg.is_visible_to(false));
+        assert!(!future_pg.is_visible_to(false));
+
+        // Admin sees the scheduled page; special pages are exempt from the gate.
+        assert!(future_pg.is_visible_to(true));
+        assert!(future_special.is_visible_to(false));
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn set_creation_date_stamps_and_schedules(pool: SqlitePool) -> Result<()> {
+        let page = ContentPageDao::create(
+            &pool,
+            None,
+            "sched".to_string(),
+            None,
+            "body".to_string(),
+            None,
+        )
+        .await?;
+        // Force modified_date into the past so the stamp is observable.
+        sqlx::query(
+            "UPDATE content_pages SET page_modified_date = '2000-01-01 00:00:00' WHERE page_id = ?1",
+        )
+        .bind(page.page_id)
+        .execute(&pool)
+        .await?;
+
+        let future: DateTime<Utc> = "2999-01-01T00:00:00Z".parse().unwrap();
+        ContentPageDao::set_creation_date(&pool, page.page_id, future).await?;
+
+        let found = ContentPageDao::find_by_id(&pool, page.page_id)
+            .await?
+            .unwrap();
+        assert_eq!(found.page_creation_date, future);
+        assert!(
+            found.is_scheduled(),
+            "a future creation date must read as scheduled"
+        );
+        let old: DateTime<Utc> = "2001-01-01T00:00:00Z".parse().unwrap();
+        assert!(
+            found.page_modified_date > old,
+            "set_creation_date must stamp page_modified_date"
+        );
+        Ok(())
+    }
+
+    /// CU.4 core risk: the count and the paged fetch MUST apply the same publish
+    /// gate, or the pager (total_pages/offset) desyncs from the rows shown.
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn paginated_gate_hides_future_from_non_admin(pool: SqlitePool) -> Result<()> {
+        let parent =
+            ContentPageDao::create(&pool, None, "parent".to_string(), None, "".to_string(), None)
+                .await?;
+        for slug in ["pub-a", "pub-b"] {
+            ContentPageDao::create(
+                &pool,
+                Some(parent.page_id),
+                slug.to_string(),
+                None,
+                "".to_string(),
+                None,
+            )
+            .await?;
+        }
+        let future = ContentPageDao::create(
+            &pool,
+            Some(parent.page_id),
+            "future".to_string(),
+            None,
+            "".to_string(),
+            None,
+        )
+        .await?;
+        let far: DateTime<Utc> = "2999-01-01T00:00:00Z".parse().unwrap();
+        ContentPageDao::set_creation_date(&pool, future.page_id, far).await?;
+
+        let pid = Some(parent.page_id);
+        // Non-admin: count AND both paged fetches exclude the future child (parity).
+        assert_eq!(2, ContentPageDao::count_children(&pool, pid, "", false).await?);
+        assert_eq!(
+            2,
+            ContentPageDao::find_children_newest_paged(&pool, pid, "", 10, 0, false)
+                .await?
+                .len()
+        );
+        assert_eq!(
+            2,
+            ContentPageDao::find_children_ordered_paged(&pool, pid, "", 10, 0, false)
+                .await?
+                .len()
+        );
+        // Admin: sees all three, count + rows agree.
+        assert_eq!(3, ContentPageDao::count_children(&pool, pid, "", true).await?);
+        assert_eq!(
+            3,
+            ContentPageDao::find_children_newest_paged(&pool, pid, "", 10, 0, true)
+                .await?
+                .len()
+        );
+        assert_eq!(
+            3,
+            ContentPageDao::find_children_ordered_paged(&pool, pid, "", 10, 0, true)
+                .await?
+                .len()
+        );
         Ok(())
     }
 }

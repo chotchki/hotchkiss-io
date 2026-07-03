@@ -62,13 +62,19 @@ pub async fn show_feed(
     let mut entries = collect_entries(&state).await?;
 
     let host = request_host(&headers, &uri);
-    // Validator inputs: `updated` (max modified_date) moves on ANY edit — every
-    // save stamps page_modified_date via update()/set_cover; `count` catches an
-    // add/delete of a NON-newest entry (which wouldn't move max); `host` is folded
-    // in because the body's absolute URLs differ per host. (Feed order is by
-    // creation date, so a reorder — which doesn't touch modified_date — correctly
-    // does NOT invalidate.)
-    let updated = entries.iter().map(|e| e.page.page_modified_date).max();
+    // Validator inputs: `updated` = max over the PUBLISHED set of
+    // max(modified_date, creation_date). modified_date moves on ANY edit (every
+    // save stamps it); folding in creation_date makes a SCHEDULED post's go-live
+    // instant bump `updated` too — so when it crosses future→published on the wall
+    // clock (no DB write), an If-Modified-Since-only crawler still sees the change
+    // (Phase CU). `count` catches an add/delete of a NON-newest entry (and busts
+    // the ETag for If-None-Match clients at the same flip); `host` is folded in
+    // because the body's absolute URLs differ per host. (A reorder touches neither
+    // date, so it correctly does NOT invalidate.)
+    let updated = entries
+        .iter()
+        .map(|e| e.page.page_modified_date.max(e.page.page_creation_date))
+        .max();
     let etag = feed_etag(&host, updated, entries.len());
     let last_modified = updated.map(httpdate);
 
@@ -171,13 +177,22 @@ async fn collect_entries(state: &AppState) -> Result<Vec<FeedEntry>, AppError> {
     let mut entries: Vec<FeedEntry> = Vec::new();
     for section in ["blog", "projects"] {
         if let Some(parent) = ContentPageDao::find_by_name(&state.pool, None, section).await? {
+            // The feed is crawler-facing (no session) → ALWAYS hide future-dated
+            // (scheduled) pages. Fetch unbounded and filter to published BEFORE the
+            // per-section cap, so a batch of scheduled posts can't push published
+            // ones out of the newest-N window (the LIMIT-then-filter trap). At
+            // personal-site scale the full child list is tiny.
             let children = ContentPageDao::find_by_parent_newest_first(
                 &state.pool,
                 Some(parent.page_id),
-                Some(PER_SECTION_LIMIT),
+                None,
             )
             .await?;
-            for page in children {
+            for page in children
+                .into_iter()
+                .filter(|p| p.is_visible_to(false))
+                .take(PER_SECTION_LIMIT as usize)
+            {
                 entries.push(FeedEntry { section, page });
             }
         }

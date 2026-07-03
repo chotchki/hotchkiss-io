@@ -4,6 +4,7 @@ use crate::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
         features::{
             listing::{paginate, ListOrder, ListingQuery, Pagination},
+            not_found,
             pages::{EditQuery, GetPageTemplate, PostNavCard},
             top_bar::TopBar,
         },
@@ -19,7 +20,6 @@ use anyhow::anyhow;
 use askama::Template;
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
     Router,
@@ -40,6 +40,8 @@ pub struct BlogPostCard {
     pub page_creation_date: String,
     pub cover_url: Option<String>,
     pub excerpt: String,
+    /// Future-dated (scheduled/draft) — admin-only, drives the "Scheduled" badge.
+    pub is_scheduled: bool,
 }
 
 #[derive(Template)]
@@ -64,24 +66,28 @@ pub async fn show_index(
         );
     };
 
+    let is_admin = session_data.auth_state.is_admin();
     let (raw_posts, pagination) = paginate(
         &state.pool,
         Some(blog_page.page_id),
         &query,
         ListOrder::Newest,
         "/blog",
+        is_admin,
     )
     .await?;
 
     let mut posts: Vec<BlogPostCard> = Vec::with_capacity(raw_posts.len());
     for p in raw_posts {
         let cover_url = crate::web::features::media::cover_url_for(&state.pool, p.page_id).await;
+        let is_scheduled = p.is_scheduled();
         posts.push(BlogPostCard {
             title: p.display_title(),
             page_name: p.page_name,
             page_creation_date: p.page_creation_date.format("%B %-d, %Y").to_string(),
             cover_url,
             excerpt: cached_excerpt(&p.page_markdown),
+            is_scheduled,
         });
     }
 
@@ -110,16 +116,26 @@ pub async fn show_post(
 ) -> Result<Response, AppError> {
     let pages_path = ContentPageDao::find_by_path(&state.pool, &["blog", &slug]).await?;
 
+    // Scheduled/timed publishing gate (Phase CU): a future-dated post 404s for
+    // non-admins through the SAME cat-404 a genuine miss returns, so a non-admin
+    // can't tell "scheduled" from "nonexistent". is_admin is computed before
+    // auth_state moves into the template.
+    let is_admin = session_data.auth_state.is_admin();
     let Some(lp) = pages_path.last() else {
-        return Ok((StatusCode::NOT_FOUND, "No such post").into_response());
+        return Ok(not_found::render_not_found(&state.pool, session_data.auth_state).await);
     };
+    if !pages_path.iter().all(|n| n.is_visible_to(is_admin)) {
+        return Ok(not_found::render_not_found(&state.pool, session_data.auth_state).await);
+    }
 
     // Next/previous nav: pull the post's siblings in the SAME newest-first order
-    // the index uses, locate this post, take its neighbors. Previous = older
-    // (one step down the list), Next = newer (one step up). A side is None at the
-    // ends, so the oldest/newest post shows only one card.
-    let siblings =
+    // the index uses, drop any the viewer can't see (a scheduled post must not
+    // surface as a Prev/Next card; admin keeps all), locate this post, take its
+    // neighbors. Previous = older (one step down the list), Next = newer (one step
+    // up). A side is None at the ends, so the oldest/newest post shows only one card.
+    let mut siblings =
         ContentPageDao::find_by_parent_newest_first(&state.pool, lp.parent_page_id, None).await?;
+    siblings.retain(|p| p.is_visible_to(is_admin));
     let (prev_post, next_post) = match siblings.iter().position(|p| p.page_id == lp.page_id) {
         Some(i) => (
             siblings.get(i + 1).map(nav_card),

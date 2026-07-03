@@ -31,6 +31,10 @@ pub fn admin_router() -> Router<AppState> {
         // Toggle a page's landing "Featured" pin (13.8). Two path segments, so it
         // never collides with the static `/pages/reorder`.
         .route("/pages/{page_id}/feature", post(pages::toggle_feature))
+        // Publish a scheduled/draft page now, or unpublish a live page back to a
+        // draft (Phase CU) — same two-path-segment shape as /feature.
+        .route("/pages/{page_id}/publish", post(pages::publish_now))
+        .route("/pages/{page_id}/unpublish", post(pages::unpublish))
         // Media library (Phase BZ). Upload disables the body limit for video.
         .route("/media", get(media::show_media_library))
         .route(
