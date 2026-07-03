@@ -430,6 +430,44 @@ pub(crate) async fn cover_url_for(pool: &sqlx::SqlitePool, page_id: i64) -> Opti
     .map(|k| format!("/media/file/{k}"))
 }
 
+/// A page's cover rendered as a hero (Phase CV): the LARGEST width-stepped image
+/// variant — contrast `cover_url_for`, which serves the SMALLEST for a ~300px card
+/// thumbnail — plus a `srcset` so a phone still pulls a smaller step. Rendered as a
+/// stacked banner at the top of the detail view.
+pub(crate) struct CoverHero {
+    /// `/media/file/<url_key>` of the largest image variant (the no-srcset src).
+    pub src: String,
+    /// `"…480w, …960w"` when the cover has ≥2 sized variants; `None` for a legacy
+    /// (unresized) cover, which then renders a single `src`.
+    pub srcset: Option<String>,
+}
+
+/// `None` when the page has no cover or the cover has no image variant.
+pub(crate) async fn cover_hero_for(pool: &sqlx::SqlitePool, page_id: i64) -> Option<CoverHero> {
+    // Same cover join as `cover_url_for`, but LARGEST-first: a hero is a full-width
+    // banner, so the biggest sized AVIF is the src (a NULL-width original sorts
+    // last, so a real resize wins), with the sized variants as the srcset.
+    let rows = sqlx::query!(
+        r#"SELECT v.url_key AS "url_key!", v.width AS "width?: i64"
+           FROM content_pages c
+           JOIN media_variant v ON v.media_id = c.page_cover_media_id
+           WHERE c.page_id = ?1 AND v.mime LIKE 'image/%'
+           ORDER BY (v.width IS NULL), v.width DESC, v.variant_id"#,
+        page_id
+    )
+    .fetch_all(pool)
+    .await
+    .ok()?;
+    let largest = rows.first()?;
+    let src = format!("/media/file/{}", largest.url_key);
+    let sized: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.width.map(|w| format!("/media/file/{} {w}w", r.url_key)))
+        .collect();
+    let srcset = (sized.len() >= 2).then(|| sized.join(", "));
+    Some(CoverHero { src, srcset })
+}
+
 /// The current cover's media REF (token) for a page, for the editor's cover field
 /// pre-fill. `None` when no cover is set.
 pub(crate) async fn cover_ref_for(pool: &sqlx::SqlitePool, page_id: i64) -> Option<String> {

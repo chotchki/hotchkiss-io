@@ -103,6 +103,10 @@ pub struct GetPageTemplate {
     /// The post date as a human string, shown under the title — `Some` only for
     /// blog posts (`None` on `/pages` + `/resume`, which aren't dated).
     pub posted_date: Option<String>,
+    /// The cover rendered as a hero banner at the top of the reader view (Phase
+    /// CV) — `Some` when the page has an image cover, `None` otherwise + on the
+    /// résumé. Reader-view only (not shown in the editor).
+    pub hero: Option<crate::web::features::media::CoverHero>,
 }
 
 /// `?edit` (any value) toggles the admin editor on a page view; absent = the
@@ -175,6 +179,7 @@ pub async fn get_page_path(
                 .await,
                 meta,
                 posted_date: None,
+                hero: crate::web::features::media::cover_hero_for(&state.pool, lp.page_id).await,
             };
 
             Ok(HtmlTemplate(gpt).into_response())

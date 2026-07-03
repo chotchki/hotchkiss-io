@@ -169,6 +169,7 @@ pub async fn show_post(
         cover_media_ref: crate::web::features::media::cover_ref_for(&state.pool, lp.page_id).await,
         meta,
         posted_date: Some(lp.page_creation_date.format("%B %-d, %Y").to_string()),
+        hero: crate::web::features::media::cover_hero_for(&state.pool, lp.page_id).await,
     };
     Ok(HtmlTemplate(gpt).into_response())
 }

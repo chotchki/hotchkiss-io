@@ -53,6 +53,12 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] 15.4 - Auto-generate a lower-res STL (SPEC goal) — decide build-time vs on-upload; may defer.
 - [ ] 15.5 - Author the 5 gallery entries (photos + descriptions + files).
 - [ ] 15.6 - e2e coverage for the 3D gallery; CLAUDE.md/SPEC update.
+## Phase CV - Hero images on post + project pages
+added 2026-07-03.
+- [ ] CV.0 - Phase exit: any page with a cover renders a stacked hero on its detail view (largest AVIF variant + srcset); tests + docs; shipped
+- [x] CV.1 - cover_hero_for helper: largest image variant of a page's cover + srcset (contrast cover_url_for's smallest) + CoverHero struct
+- [x] CV.2 - Render stacked hero in get_page.html + wire GetPageTemplate.hero through the handlers
+- [ ] CV.3 - Tests + docs + deploy for the hero
 
 ## Backlog (not yet phased)
 
@@ -91,4 +97,3 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - **Optional: re-parallelize the browser e2e via a shared WebAuthn fixture. They currently serialize on E2E_LOCK (test isolation) because concurrent passkey ceremonies race. A pre-registered-credential fixture (one virtual authenticator + seeded admin reused across tests) could let independent assertions run in parallel again. Only worth it if the serial ~6s run becomes a bottleneck.** — added 2026-06-28.
 - **Backlog: client-side source hash (File API) → pre-flight dedup + integrity** — added 2026-06-29.
 - CR.4 - Trim redundant scans (measure-gated): fold count_since into audience_counts.all + combine any queries where one windowed scan yields multiple aggregates; only if the diagnostic still shows it matters after CR.1-CR.3 *(deferred from phase `CR` on 2026-07-01)*
-- **Render the page cover as a real hero image on blog post + project detail pages** — added 2026-07-03.

@@ -143,6 +143,13 @@
   <a href="?edit=1" class="px-2 py-1 bg-navy rounded-sm text-div-grey text-sm">Edit this page {% call icons::pen() %}</a>
 </div>
 {% endif %}
+{# Cover hero (Phase CV): a stacked, capped-height banner at the top of the reader
+   view when the page has an image cover. Reused CN AVIF ladder — largest variant +
+   srcset. Not shown in the editor. alt="" (decorative; the <h1> below carries it). #}
+{% if !edit %}{% if let Some(hero) = hero %}
+<img data-hero src="{{hero.src}}"{% if let Some(ss) = hero.srcset %} srcset="{{ss}}" sizes="(max-width: 768px) 100vw, 768px"{% endif %}
+  alt="" class="w-full h-56 md:h-72 object-cover rounded-lg border border-navy/20 mb-4" />
+{% endif %}{% endif %}
 {% if pages_path.len() > 2 %}
 <ul class="flex text-sm text-navy/60 mb-1">
   {% for path_node in pages_path.iter().skip(1) %}
