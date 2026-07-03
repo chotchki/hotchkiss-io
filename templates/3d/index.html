@@ -35,6 +35,8 @@
 <div class="max-w-5xl mx-auto">
 <h1 class="text-2xl font-display text-navy mb-4">3D Printing</h1>
 
+<a href="/3d/editor" class="inline-flex items-center gap-2 px-4 py-2 bg-yellow text-navy rounded font-display text-sm uppercase hover:bg-yellow/90 mb-4">Open the slicer / placer editor &rarr;</a>
+
 {% if auth_state.is_admin() %}
 <form hx-post="/pages/3d" class="mb-4 flex flex-row gap-2">
     <input class="border border-navy px-2 grow min-w-0" name="page_title" type="text"

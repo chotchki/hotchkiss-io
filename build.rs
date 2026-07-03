@@ -19,6 +19,13 @@ use tokio::io::AsyncWriteExt;
 /// changes the cache filename, forcing a re-download.
 const TAILWIND_VERSION: &str = "v4.3.0";
 
+/// Pinned fab-scad web bundle — the WASM slicer/placer editor served under `/3d`
+/// (Phase CW). The GitHub release tag is `web-v<version>`; the asset is
+/// `fab-web-<version>.tar.gz`. Bumping the version re-downloads (a sibling marker
+/// in OUT_DIR holds the fetched version).
+const FAB_WEB_VERSION: &str = "0.1.0";
+const FAB_WEB_TAG: &str = "web-v0.1.0";
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // TailwindCSS and Sqlx Migrations Change Tracking
@@ -101,6 +108,79 @@ async fn main() -> Result<()> {
     io::stderr().write_all(&output.stderr)?;
     assert!(output.status.success(), "tailwind css build failed");
 
+    fetch_fab_web(&out_dir)
+        .await
+        .context("fetching the pinned fab-web WASM bundle")?;
+
+    Ok(())
+}
+
+/// Download + extract the pinned fab-web WASM bundle into `$OUT_DIR/fab-web` (the
+/// rust-embed folder), version-keyed by a sibling marker so a bump re-downloads —
+/// same shape as the Tailwind CLI fetch. The per-file sha256 in `manifest.json` is
+/// asserted (a corrupt/tampered download fails the build), then the raw 32 MB
+/// `fab_web_bg.wasm` is dropped: rust-embed carries only the brotli/gzip variants +
+/// the JS glue (~17 MB, not ~49), and the route serves the precompressed wasm.
+async fn fetch_fab_web(out_dir: &str) -> Result<()> {
+    let dir = Path::new(out_dir).join("fab-web");
+    let marker = Path::new(out_dir).join("fab-web.version");
+    let up_to_date = std::fs::read_to_string(&marker)
+        .map(|v| v.trim() == FAB_WEB_VERSION)
+        .unwrap_or(false);
+    if up_to_date && dir.is_dir() {
+        return Ok(());
+    }
+
+    let url = format!(
+        "https://github.com/chotchki/fab-scad/releases/download/{FAB_WEB_TAG}/fab-web-{FAB_WEB_VERSION}.tar.gz"
+    );
+    let bytes = reqwest::get(&url)
+        .await?
+        .error_for_status()
+        .with_context(|| format!("downloading the fab-web bundle from {url}"))?
+        .bytes()
+        .await?;
+
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir)?;
+    }
+    std::fs::create_dir_all(&dir)?;
+    let gz = flate2::read::GzDecoder::new(Cursor::new(bytes.as_ref()));
+    tar::Archive::new(gz)
+        .unpack(&dir)
+        .context("unpacking the fab-web tar.gz")?;
+
+    verify_fab_web(&dir).context("verifying fab-web sha256 against manifest.json")?;
+
+    // The .br/.gz variants (served precompressed) cover every browser that can run
+    // this app, so the raw 32 MB wasm has no runtime use — drop it before embed.
+    let _ = std::fs::remove_file(dir.join("fab_web_bg.wasm"));
+
+    std::fs::write(&marker, FAB_WEB_VERSION)?;
+    Ok(())
+}
+
+/// Assert every file `manifest.json` lists hashes to its declared sha256 — the
+/// build-time half of the fab-web contract.
+fn verify_fab_web(dir: &Path) -> Result<()> {
+    use sha2::{Digest, Sha256};
+    let manifest_raw =
+        std::fs::read_to_string(dir.join("manifest.json")).context("reading fab-web manifest.json")?;
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_raw)?;
+    let sums = manifest
+        .get("sha256")
+        .and_then(|v| v.as_object())
+        .context("manifest.json missing the sha256 map")?;
+    for (name, want) in sums {
+        let want = want.as_str().context("a sha256 entry is not a string")?;
+        let bytes =
+            std::fs::read(dir.join(name)).with_context(|| format!("reading {name} for hashing"))?;
+        let got = format!("{:x}", Sha256::digest(&bytes));
+        anyhow::ensure!(
+            got == want,
+            "fab-web {name}: sha256 mismatch (want {want}, got {got})"
+        );
+    }
     Ok(())
 }
 

@@ -55,10 +55,10 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] 15.6 - e2e coverage for the 3D gallery; CLAUDE.md/SPEC update.
 ## Phase CW - Fab / 3D section — host the WASM slicer/placer editor
 - [ ] CW.0 - Phase exit: the Fab/3D tab hosts the live WASM slicer/placer editor (cross-origin isolated, own route, consuming the pinned fab-scad release) with models nested; tests + docs; shipped
-- [ ] CW.1 - Nail the consume-contract with fab-scad (GATING, cross-repo): the GitHub-release asset shape + pinned-download mechanism + confirm SAB/threads
-- [ ] CW.2 - build.rs: download the pinned fab-scad WASM release into OUT_DIR (mirror the Tailwind-CLI download) + stage for rust-embed
-- [ ] CW.3 - Dedicated editor route serving the bundle with COOP+COEP scoped to that route only
-- [ ] CW.4 - Add Cross-Origin-Resource-Policy to the media byte route so the isolated editor can fetch models
+- [x] CW.1 - Nail the consume-contract with fab-scad (GATING, cross-repo): the GitHub-release asset shape + pinned-download mechanism + confirm SAB/threads
+- [x] CW.2 - build.rs: download the pinned fab-scad WASM release into OUT_DIR (mirror the Tailwind-CLI download) + stage for rust-embed
+- [x] CW.3 - Dedicated editor route serving the bundle with COOP+COEP scoped to that route only
+- [>] CW.4 - Add Cross-Origin-Resource-Policy to the media byte route so the isolated editor can fetch models
 - [x] CW.5 - The fab/3d special page + nav tab; models nest as its content-page children
 - [ ] CW.6 - Models gallery under the tab: reparent/curate the Phase-15 hand-picked models (existing STL/3MF viewer + fab-publish)
 - [ ] CW.7 - Tests (route serves bundle + COOP/COEP scoped; media CORP; models render) + CLAUDE.md + deploy
@@ -100,3 +100,4 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - **Optional: re-parallelize the browser e2e via a shared WebAuthn fixture. They currently serialize on E2E_LOCK (test isolation) because concurrent passkey ceremonies race. A pre-registered-credential fixture (one virtual authenticator + seeded admin reused across tests) could let independent assertions run in parallel again. Only worth it if the serial ~6s run becomes a bottleneck.** — added 2026-06-28.
 - **Backlog: client-side source hash (File API) → pre-flight dedup + integrity** — added 2026-06-29.
 - CR.4 - Trim redundant scans (measure-gated): fold count_since into audience_counts.all + combine any queries where one windowed scan yields multiple aggregates; only if the diagnostic still shows it matters after CR.1-CR.3 *(deferred from phase `CR` on 2026-07-01)*
+- **Add Cross-Origin-Resource-Policy to the media byte route so the isolated editor can fetch models** — deferred from CW.4 on 2026-07-03.

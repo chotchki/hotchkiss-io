@@ -90,3 +90,65 @@ async fn three_d_create_form_admin_only() {
     let anon = reqwest::get(server.url("/3d")).await.unwrap().text().await.unwrap();
     assert!(!anon.contains("New model"), "anon must not see the create form");
 }
+
+#[tokio::test]
+async fn editor_route_is_cross_origin_isolated_and_confined() {
+    let server = spawn_test_server().await.expect("spawn");
+    let resp = reqwest::get(server.url("/3d/editor")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let h = resp.headers().clone();
+    assert_eq!(
+        h.get("cross-origin-opener-policy").and_then(|v| v.to_str().ok()),
+        Some("same-origin"),
+        "editor document carries COOP"
+    );
+    assert_eq!(
+        h.get("cross-origin-embedder-policy").and_then(|v| v.to_str().ok()),
+        Some("require-corp"),
+        "editor document carries COEP"
+    );
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("/3d/editor/fab_web.js"), "document loads the glue: {body}");
+
+    // The isolation must NOT bleed onto the rest of the site.
+    let home = reqwest::get(server.url("/")).await.unwrap();
+    assert!(
+        home.headers().get("cross-origin-embedder-policy").is_none(),
+        "the home page must NOT be cross-origin isolated"
+    );
+    let gallery = reqwest::get(server.url("/3d")).await.unwrap();
+    assert!(
+        gallery.headers().get("cross-origin-embedder-policy").is_none(),
+        "the 3D gallery index must NOT be cross-origin isolated"
+    );
+}
+
+#[tokio::test]
+async fn editor_serves_glue_and_wasm() {
+    let server = spawn_test_server().await.expect("spawn");
+
+    let js = reqwest::get(server.url("/3d/editor/fab_web.js")).await.unwrap();
+    assert_eq!(js.status(), StatusCode::OK);
+    assert!(
+        js.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .contains("javascript"),
+        "glue is served as javascript"
+    );
+
+    let wasm = reqwest::get(server.url("/3d/editor/fab_web_bg.wasm")).await.unwrap();
+    assert_eq!(wasm.status(), StatusCode::OK);
+    assert_eq!(
+        wasm.headers().get("content-type").and_then(|v| v.to_str().ok()),
+        Some("application/wasm"),
+        "wasm carries the exact MIME instantiateStreaming needs"
+    );
+    let bytes = wasm.bytes().await.unwrap();
+    assert!(
+        bytes.len() > 1_000_000,
+        "wasm body is substantial (got {} bytes)",
+        bytes.len()
+    );
+}
