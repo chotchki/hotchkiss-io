@@ -107,9 +107,6 @@ pub struct GetPageTemplate {
     /// CV) — `Some` when the page has an image cover, `None` otherwise + on the
     /// résumé. Reader-view only (not shown in the editor).
     pub hero: Option<crate::web::features::media::CoverHero>,
-    /// `?hero=overlay` preview toggle (Phase CV): render the title over the image
-    /// instead of the stacked band. Comparison aid; default false (stacked).
-    pub hero_overlay: bool,
 }
 
 /// `?edit` (any value) toggles the admin editor on a page view; absent = the
@@ -117,9 +114,6 @@ pub struct GetPageTemplate {
 #[derive(Debug, Deserialize)]
 pub struct EditQuery {
     pub edit: Option<String>,
-    /// `?hero=overlay` renders the overlay hero variant instead of stacked — a
-    /// Phase-CV beta comparison toggle (stacked stays the default).
-    pub hero: Option<String>,
 }
 
 pub async fn get_page_path(
@@ -186,7 +180,6 @@ pub async fn get_page_path(
                 meta,
                 posted_date: None,
                 hero: crate::web::features::media::cover_hero_for(&state.pool, lp.page_id).await,
-                hero_overlay: edit_q.hero.as_deref() == Some("overlay"),
             };
 
             Ok(HtmlTemplate(gpt).into_response())

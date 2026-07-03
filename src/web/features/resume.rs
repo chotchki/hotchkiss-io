@@ -96,7 +96,6 @@ pub async fn show_resume(
         posted_date: None,
         // The résumé has no cover hero (Phase CV).
         hero: None,
-        hero_overlay: false,
     };
     Ok(HtmlTemplate(gpt).into_response())
 }

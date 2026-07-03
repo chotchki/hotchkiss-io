@@ -170,7 +170,6 @@ pub async fn show_post(
         meta,
         posted_date: Some(lp.page_creation_date.format("%B %-d, %Y").to_string()),
         hero: crate::web::features::media::cover_hero_for(&state.pool, lp.page_id).await,
-        hero_overlay: edit_q.hero.as_deref() == Some("overlay"),
     };
     Ok(HtmlTemplate(gpt).into_response())
 }
