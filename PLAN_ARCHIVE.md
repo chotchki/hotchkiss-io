@@ -632,3 +632,14 @@ See SPEC.md "Portfolio — the three pillars". The landing page is the connectiv
 - [x] CU.11 - Tests: unit (predicate boundary, set_creation_date, count-consistency) + integration (anon 404/absence, admin sees, résumé fallback, PDF gate, feed flip)
 - [x] CU.12 - Docs + deploy: CLAUDE.md gate writeup; version bump; main->beta, verify, tag->prod
 
+---
+
+## 2026-07-03
+
+## Phase CV - Hero images on post + project pages
+added 2026-07-03.
+- [x] CV.0 - Phase exit: any page with a cover renders a stacked hero on its detail view (largest AVIF variant + srcset); tests + docs; shipped
+- [x] CV.1 - cover_hero_for helper: largest image variant of a page's cover + srcset (contrast cover_url_for's smallest) + CoverHero struct
+- [x] CV.2 - Render stacked hero in get_page.html + wire GetPageTemplate.hero through the handlers
+- [x] CV.3 - Tests + docs + deploy for the hero
+

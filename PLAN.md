@@ -53,12 +53,6 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] 15.4 - Auto-generate a lower-res STL (SPEC goal) — decide build-time vs on-upload; may defer.
 - [ ] 15.5 - Author the 5 gallery entries (photos + descriptions + files).
 - [ ] 15.6 - e2e coverage for the 3D gallery; CLAUDE.md/SPEC update.
-## Phase CV - Hero images on post + project pages
-added 2026-07-03.
-- [ ] CV.0 - Phase exit: any page with a cover renders a stacked hero on its detail view (largest AVIF variant + srcset); tests + docs; shipped
-- [x] CV.1 - cover_hero_for helper: largest image variant of a page's cover + srcset (contrast cover_url_for's smallest) + CoverHero struct
-- [x] CV.2 - Render stacked hero in get_page.html + wire GetPageTemplate.hero through the handlers
-- [ ] CV.3 - Tests + docs + deploy for the hero
 
 ## Backlog (not yet phased)
 
