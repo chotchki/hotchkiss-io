@@ -109,6 +109,10 @@ async fn editor_route_is_cross_origin_isolated_and_confined() {
     );
     let body = resp.text().await.unwrap();
     assert!(body.contains("/3d/editor/fab_web.js"), "document loads the glue: {body}");
+    assert!(
+        body.contains("id=\"fab-web\""),
+        "document provides the bind canvas the app requires: {body}"
+    );
 
     // The isolation must NOT bleed onto the rest of the site.
     let home = reqwest::get(server.url("/")).await.unwrap();

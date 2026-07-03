@@ -135,11 +135,15 @@ pub async fn show_3d_index(
 struct FabWeb;
 
 /// The editor's top-level document — the site OWNS it (the bundle ships an
-/// `index.reference.html` to crib from). Absolute import path so the glue's
-/// `import.meta.url` resolves the wasm under `/3d/editor/`. The `init().catch`
-/// swallows winit's "control flow" exit exception (it would otherwise read as a
-/// crash). COOP/COEP live on THIS document (per the contract — future wasm-threads
-/// headroom; the v1 bundle is single-threaded and runs without them).
+/// `index.reference.html` to crib from). Two load-bearing pieces from the reference:
+/// the `<canvas id="fab-web">` MUST exist before `init()` — the app binds to it
+/// (missing = panic) and `fit_canvas_to_parent` tracks its parent's size — and the
+/// `init().catch` swallows winit's "control flow" exit exception (it would otherwise
+/// read as a crash). Absolute import path so the glue's `import.meta.url` resolves
+/// the wasm under `/3d/editor/`. COOP/COEP live on THIS document (per the contract —
+/// future wasm-threads headroom; the bundle is single-threaded today). Append
+/// `?demo` for a no-file smoke (loads the embedded sample) — the app reads
+/// `location.search` itself, so the route needs no query handling.
 const EDITOR_HTML: &str = r#"<!doctype html>
 <html lang="en">
 <head>
@@ -148,7 +152,7 @@ const EDITOR_HTML: &str = r#"<!doctype html>
 <title>fab — 3D slicer/placer · Christopher Hotchkiss</title>
 <style>
   html,body{margin:0;height:100%;background:#1a2b4a;overflow:hidden}
-  canvas{display:block}
+  canvas{display:block;width:100%;height:100%}
   #back{position:fixed;top:.5rem;left:.5rem;z-index:10;background:#1a2b4a;color:#ffc935;
         font:600 .8rem system-ui,sans-serif;padding:.35rem .6rem;border-radius:.3rem;text-decoration:none}
   #back:hover{background:#24365a}
@@ -156,6 +160,7 @@ const EDITOR_HTML: &str = r#"<!doctype html>
 </head>
 <body>
 <a id="back" href="/3d">&larr; 3D</a>
+<canvas id="fab-web"></canvas>
 <script type="module">
   import init from '/3d/editor/fab_web.js';
   init().catch(e => {
