@@ -147,8 +147,19 @@
    view when the page has an image cover. Reused CN AVIF ladder — largest variant +
    srcset. Not shown in the editor. alt="" (decorative; the <h1> below carries it). #}
 {% if !edit %}{% if let Some(hero) = hero %}
-<img data-hero src="{{hero.src}}"{% if let Some(ss) = hero.srcset %} srcset="{{ss}}" sizes="(max-width: 768px) 100vw, 768px"{% endif %}
-  alt="" class="w-full h-56 md:h-72 object-cover rounded-lg border border-navy/20 mb-4" />
+{% if hero_overlay %}
+{# Overlay preview (Phase CV comparison): title over the image with a bottom scrim. #}
+<div data-hero class="relative w-full h-56 md:h-72 rounded-lg overflow-hidden mb-4">
+  <img src="{{hero.src}}"{% if let Some(ss) = hero.srcset %} srcset="{{ss}}" sizes="(max-width: 768px) 100vw, 768px"{% endif %} alt="" class="w-full h-full object-cover" />
+  <div class="absolute inset-0 bg-gradient-to-t from-navy/80 via-navy/30 to-transparent"></div>
+  <div class="absolute inset-x-0 bottom-0 p-4 md:p-6">
+    <h1 class="font-display text-3xl md:text-4xl font-bold text-white leading-tight">{{page.display_title()}}</h1>
+    {% if let Some(posted) = posted_date %}<p class="text-sm text-white/80 mt-1">{{posted}}</p>{% endif %}
+  </div>
+</div>
+{% else %}
+<img data-hero src="{{hero.src}}"{% if let Some(ss) = hero.srcset %} srcset="{{ss}}" sizes="(max-width: 768px) 100vw, 768px"{% endif %} alt="" class="w-full h-56 md:h-72 object-cover rounded-lg border border-navy/20 mb-4" />
+{% endif %}
 {% endif %}{% endif %}
 {% if pages_path.len() > 2 %}
 <ul class="flex text-sm text-navy/60 mb-1">
@@ -164,6 +175,7 @@
   <a href="{{pdf}}" class="px-3 py-1.5 bg-navy hover:bg-navy/90 rounded text-div-grey text-sm">Download PDF {% call icons::file_pdf() %}</a>
 </div>
 {% endif %}
+{% if !hero_overlay || hero.is_none() %}
 <h1 class="font-display text-3xl md:text-4xl font-bold text-navy leading-tight mt-2 mb-1">{{page.display_title()}}</h1>
 {% if page.is_scheduled() %}
 {# Only an admin can reach a scheduled page (non-admins are 404'd), so this badge is
@@ -173,6 +185,7 @@
 {% else %}
 {% if let Some(posted) = posted_date %}
 <p class="text-sm text-navy/60 mb-4">{{posted}}</p>
+{% endif %}
 {% endif %}
 {% endif %}
 <div class="prose max-w-none" id="rendered">
