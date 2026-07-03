@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% import "partials/icons.html" as icons %}
+
+{% block title %}3D{% endblock %}
+{% block meta %}{% include "partials/seo_meta.html" %}{% endblock %}
+
+{% block head %}{% endblock %}
+
+{# One model card — cover render (or fallback icon), title, excerpt — linking the
+   detail page at /pages/3d/<slug>. Mirrors the project card. #}
+{% macro model_card(m) %}
+<li class="border-2 border-navy rounded-md overflow-hidden bg-body-grey">
+    <a href="/pages/3d/{{m.page_name}}" class="block hover:opacity-90">
+        {% if let Some(cover) = m.cover_url %}
+        <div class="h-40 bg-navy">
+            <img src="{{cover}}" alt="" class="w-full h-full object-cover" />
+        </div>
+        {% else %}
+        <div class="h-40 bg-navy flex items-center justify-center">
+            <span class="text-5xl text-yellow">{% call icons::cubes_stacked() %}</span>
+        </div>
+        {% endif %}
+        <div class="p-4">
+            {% if m.is_scheduled %}<p class="mb-1"><span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow text-navy uppercase tracking-wide">Scheduled</span></p>{% endif %}
+            <h2 class="text-lg font-display text-navy underline">{{m.title}}</h2>
+            {% if !m.excerpt.is_empty() %}
+            <p class="mt-2 text-navy">{{m.excerpt}}</p>
+            {% endif %}
+        </div>
+    </a>
+</li>
+{% endmacro %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+<h1 class="text-2xl font-display text-navy mb-4">3D Printing</h1>
+
+{% if auth_state.is_admin() %}
+<form hx-post="/pages/3d" class="mb-4 flex flex-row gap-2">
+    <input class="border border-navy px-2 grow min-w-0" name="page_title" type="text"
+        placeholder="Model name" required />
+    <button class="px-3 bg-navy border-navy rounded-sm text-div-grey" type="submit">{% call icons::plus() %} New model</button>
+</form>
+{% endif %}
+
+{% if featured.is_empty() && models.is_empty() %}
+<p class="text-navy italic">No models yet.</p>
+{% endif %}
+
+{% if !featured.is_empty() %}
+<section aria-label="Featured">
+    <h2 class="text-xl font-display text-navy mb-3">Featured</h2>
+    <ul class="grid grid-cols-1 md:grid-cols-2 gap-4 list-none p-0 mb-8">
+        {% for m in featured %}{% call model_card(m) %}{% endfor %}
+    </ul>
+</section>
+{% endif %}
+
+{% if !models.is_empty() %}
+<ul class="grid grid-cols-1 md:grid-cols-2 gap-4 list-none p-0">
+    {% for m in models %}{% call model_card(m) %}{% endfor %}
+</ul>
+{% endif %}
+</div>
+{% endblock %}

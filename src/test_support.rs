@@ -146,6 +146,24 @@ impl TestServer {
         .await?;
         Ok(())
     }
+
+    /// Seed a child of the `3d` special_page (seeded by migration 0023) — a
+    /// gallery model page.
+    pub async fn seed_3d_model(&self, slug: &str, markdown: &str) -> Result<()> {
+        let three_d = ContentPageDao::find_by_name(&self.pool, None, "3d")
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("3d special_page missing — migration 0023?"))?;
+        ContentPageDao::create(
+            &self.pool,
+            Some(three_d.page_id),
+            slug.to_string(),
+            None,
+            markdown.to_string(),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 impl Drop for TestServer {

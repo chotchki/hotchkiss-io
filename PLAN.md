@@ -59,7 +59,7 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] CW.2 - build.rs: download the pinned fab-scad WASM release into OUT_DIR (mirror the Tailwind-CLI download) + stage for rust-embed
 - [ ] CW.3 - Dedicated editor route serving the bundle with COOP+COEP scoped to that route only
 - [ ] CW.4 - Add Cross-Origin-Resource-Policy to the media byte route so the isolated editor can fetch models
-- [ ] CW.5 - The fab/3d special page + nav tab; models nest as its content-page children
+- [x] CW.5 - The fab/3d special page + nav tab; models nest as its content-page children
 - [ ] CW.6 - Models gallery under the tab: reparent/curate the Phase-15 hand-picked models (existing STL/3MF viewer + fab-publish)
 - [ ] CW.7 - Tests (route serves bundle + COOP/COEP scoped; media CORP; models render) + CLAUDE.md + deploy
 

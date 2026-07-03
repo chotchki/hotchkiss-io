@@ -7,6 +7,7 @@ use crate::{
             blog::blog_router,
             home::show_home,
             pages::{pages_router, projects::projects_router},
+            three_d::three_d_router,
         },
         middleware::{
             api_key_auth::api_key_auth, refresh_session_role::refresh_session_role,
@@ -62,6 +63,7 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
         .nest("/login", login_router())
         .nest("/pages", pages_router())
         .nest("/projects", projects_router())
+        .nest("/3d", three_d_router())
         .nest("/blog", blog_router())
         .nest("/admin", admin_router())
         // Public media (Phase BZ): byte serve route + the embed swap target.

@@ -12,4 +12,5 @@ pub mod resume;
 pub mod seo;
 #[cfg(debug_assertions)]
 pub mod test_login;
+pub mod three_d;
 pub mod top_bar;
