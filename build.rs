@@ -23,8 +23,8 @@ const TAILWIND_VERSION: &str = "v4.3.0";
 /// (Phase CW). The GitHub release tag is `web-v<version>`; the asset is
 /// `fab-web-<version>.tar.gz`. Bumping the version re-downloads (a sibling marker
 /// in OUT_DIR holds the fetched version).
-const FAB_WEB_VERSION: &str = "0.8.2";
-const FAB_WEB_TAG: &str = "web-v0.8.2";
+const FAB_WEB_VERSION: &str = "0.11.0";
+const FAB_WEB_TAG: &str = "web-v0.11.0";
 
 #[tokio::main]
 async fn main() -> Result<()> {

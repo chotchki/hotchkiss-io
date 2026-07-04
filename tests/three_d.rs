@@ -253,6 +253,62 @@ async fn editor_serves_openscad_tree() {
 }
 
 #[tokio::test]
+async fn editor_serves_geom_worker_tree() {
+    // The 0.11.0+ bundle adds a SECOND worker tree — geom/ (fab_geom wasm +
+    // geom-worker.js) — beside openscad/. Like the openscad worker it loads into the
+    // COEP:require-corp editor, so it must serve with require-corp + CORP or the
+    // Worker load is blocked. The generic {*path} handler + universal headers cover
+    // it; this locks that in so a future bundle shape can't silently regress it.
+    let server = spawn_test_server().await.expect("spawn");
+    let doc = reqwest::get(server.url("/3d/editor")).await.unwrap().text().await.unwrap();
+    let glue = doc
+        .split("import init from '")
+        .nth(1)
+        .and_then(|s| s.split('\'').next())
+        .expect("glue");
+    let base = glue.trim_end_matches("fab_web.js"); // /3d/editor/<ver>/
+
+    let worker = reqwest::get(server.url(&format!("{base}geom/geom-worker.js")))
+        .await
+        .unwrap();
+    assert_eq!(worker.status(), StatusCode::OK, "geom worker must serve, not 404");
+    assert!(
+        worker
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .contains("javascript"),
+        "geom worker served as javascript"
+    );
+    assert_eq!(
+        worker
+            .headers()
+            .get("cross-origin-embedder-policy")
+            .and_then(|v| v.to_str().ok()),
+        Some("require-corp"),
+        "geom worker carries COEP require-corp"
+    );
+    assert_eq!(
+        worker
+            .headers()
+            .get("cross-origin-resource-policy")
+            .and_then(|v| v.to_str().ok()),
+        Some("same-origin"),
+        "geom worker carries CORP"
+    );
+
+    let gw = reqwest::get(server.url(&format!("{base}geom/fab_geom_bg.wasm")))
+        .await
+        .unwrap();
+    assert_eq!(gw.status(), StatusCode::OK, "geom wasm must serve");
+    assert_eq!(
+        gw.headers().get("content-type").and_then(|v| v.to_str().ok()),
+        Some("application/wasm")
+    );
+}
+
+#[tokio::test]
 async fn editor_wasm_identity_for_no_encoding_client() {
     // Issue-3 fix: a client accepting no compression gets the RAW wasm (gunzipped
     // from the .gz), never a mislabeled compressed blob.
