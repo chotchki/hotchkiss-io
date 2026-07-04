@@ -218,6 +218,24 @@ async fn editor_serves_openscad_tree() {
             .contains("javascript"),
         "worker served as javascript"
     );
+    // The worker loads into the COEP:require-corp editor, so it must itself carry
+    // require-corp (+ CORP) or the load is blocked.
+    assert_eq!(
+        worker
+            .headers()
+            .get("cross-origin-embedder-policy")
+            .and_then(|v| v.to_str().ok()),
+        Some("require-corp"),
+        "worker script carries COEP require-corp"
+    );
+    assert_eq!(
+        worker
+            .headers()
+            .get("cross-origin-resource-policy")
+            .and_then(|v| v.to_str().ok()),
+        Some("same-origin"),
+        "worker script carries CORP"
+    );
 
     let ow = reqwest::get(server.url(&format!("{base}openscad/openscad.wasm")))
         .await

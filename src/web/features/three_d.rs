@@ -264,7 +264,15 @@ fn bundle_response(
 ) -> Response {
     let mut rb = Response::builder()
         .header(header::CONTENT_TYPE, content_type)
-        .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable");
+        .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+        // The editor document is COEP:require-corp, so its dedicated WORKER
+        // (openscad-worker.js) must ITSELF be served require-corp or the load is
+        // blocked — a same-origin module/wasm passes without these, but a Worker
+        // script does not. CORP satisfies the resource-policy check; both are inert
+        // on the non-worker files. (This is the CORP I wrongly dropped, thinking
+        // same-origin was always exempt — true for subresources, NOT for workers.)
+        .header("cross-origin-embedder-policy", "require-corp")
+        .header("cross-origin-resource-policy", "same-origin");
     if let Some(enc) = encoding {
         rb = rb.header(header::CONTENT_ENCODING, enc);
     }
