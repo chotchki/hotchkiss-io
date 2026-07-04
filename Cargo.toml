@@ -96,6 +96,9 @@ http-body-util = "0.1.2"
 image = "0.25.5"
 mime_guess = "2.0.5"
 rust-embed = { version = "8.5.0", features = ["interpolate-folder-path"] }
+# Gunzip the embedded fab-web .gz → identity wasm bytes for a no-encoding client
+# (the raw wasm is dropped at build). Phase CW.
+flate2 = "1.0"
 time = "0.3.37"
 tower = { version = "0.5.2", features = ["util"] }
 tower-http = { version = "0.6.2", features = ["full"] }

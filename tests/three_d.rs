@@ -184,3 +184,77 @@ async fn editor_serves_glue_and_wasm() {
         bytes.len()
     );
 }
+
+#[tokio::test]
+async fn editor_serves_openscad_tree() {
+    // Regression for the tree bug: the 0.8.0+ bundle includes an openscad/ worker +
+    // wasm + libs.json the app fetches at runtime — they must serve, not 404.
+    let server = spawn_test_server().await.expect("spawn");
+    let doc = reqwest::get(server.url("/3d/editor")).await.unwrap().text().await.unwrap();
+    let glue = doc
+        .split("import init from '")
+        .nth(1)
+        .and_then(|s| s.split('\'').next())
+        .expect("glue");
+    let base = glue.trim_end_matches("fab_web.js"); // /3d/editor/<ver>/
+
+    let worker = reqwest::get(server.url(&format!("{base}openscad/openscad-worker.js")))
+        .await
+        .unwrap();
+    assert_eq!(worker.status(), StatusCode::OK, "openscad worker must serve, not 404");
+    assert!(
+        worker
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .contains("javascript"),
+        "worker served as javascript"
+    );
+
+    let ow = reqwest::get(server.url(&format!("{base}openscad/openscad.wasm")))
+        .await
+        .unwrap();
+    assert_eq!(ow.status(), StatusCode::OK, "openscad wasm must serve");
+    assert_eq!(
+        ow.headers().get("content-type").and_then(|v| v.to_str().ok()),
+        Some("application/wasm")
+    );
+
+    let libs = reqwest::get(server.url(&format!("{base}openscad/libs.json")))
+        .await
+        .unwrap();
+    assert_eq!(libs.status(), StatusCode::OK, "libs.json must serve");
+}
+
+#[tokio::test]
+async fn editor_wasm_identity_for_no_encoding_client() {
+    // Issue-3 fix: a client accepting no compression gets the RAW wasm (gunzipped
+    // from the .gz), never a mislabeled compressed blob.
+    let server = spawn_test_server().await.expect("spawn");
+    let doc = reqwest::get(server.url("/3d/editor")).await.unwrap().text().await.unwrap();
+    let glue = doc
+        .split("import init from '")
+        .nth(1)
+        .and_then(|s| s.split('\'').next())
+        .unwrap();
+    let wasm_url = glue.replace("fab_web.js", "fab_web_bg.wasm");
+
+    let resp = reqwest::Client::new()
+        .get(server.url(&wasm_url))
+        .header("accept-encoding", "identity")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(
+        resp.headers().get("content-encoding").is_none(),
+        "identity response carries no Content-Encoding"
+    );
+    assert_eq!(
+        resp.headers().get("content-type").and_then(|v| v.to_str().ok()),
+        Some("application/wasm")
+    );
+    let bytes = resp.bytes().await.unwrap();
+    assert_eq!(&bytes[..4], b"\0asm", "identity body is a raw wasm module");
+}

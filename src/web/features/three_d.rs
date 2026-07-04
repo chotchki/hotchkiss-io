@@ -22,7 +22,7 @@ use anyhow::anyhow;
 use askama::Template;
 use axum::{
     body::Body,
-    extract::State,
+    extract::{Path, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
@@ -42,8 +42,10 @@ pub fn three_d_router() -> Router<AppState> {
         // (the embed is always the current version; the document only ever links
         // the current path).
         .route("/editor", get(editor_document))
-        .route("/editor/{_v}/fab_web.js", get(editor_js))
-        .route("/editor/{_v}/fab_web_bg.wasm", get(editor_wasm))
+        // ALL bundle files under the versioned prefix. The 0.8.0+ bundle is a TREE
+        // (fab_web.js/.wasm PLUS an openscad/ worker + wasm + libs.json); the glue
+        // fetches them relative to its own path, so one wildcard serves the lot.
+        .route("/editor/{_v}/{*path}", get(editor_asset))
 }
 
 /// A model card for the `/3d` gallery — cover render, title, excerpt — linking to
@@ -200,39 +202,78 @@ async fn editor_document() -> Response {
         .expect("static editor document is a valid response")
 }
 
-/// The wasm-bindgen JS glue (ES module). Same-origin → loads under the document's
-/// COEP `require-corp` with no CORP needed.
-async fn editor_js() -> Response {
-    match FabWeb::get("fab_web.js") {
-        Some(f) => Response::builder()
-            .header(header::CONTENT_TYPE, "text/javascript; charset=utf-8")
-            .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
-            .body(Body::from(f.data))
-            .expect("embedded js is a valid response"),
-        None => bundle_missing("fab_web.js"),
+/// Serve ANY file from the version-pathed bundle tree (`fab_web.js`, the wasm, and
+/// the `openscad/` worker + wasm + libs.json). Prefers a precompressed sibling the
+/// client accepts (`.br`, then `.gz`) with the matching `Content-Encoding`;
+/// otherwise serves identity — reconstructing it by gunzipping the `.gz` when the
+/// raw was dropped at build (only `fab_web_bg.wasm` is dropped, and it ships a
+/// `.gz`). So a no-`Accept-Encoding` client (curl, a proxy) always gets correct
+/// identity bytes, never a mislabeled compressed blob. `{_v}` is ignored (the embed
+/// is always the current version; the document only ever links the current path).
+async fn editor_asset(
+    Path((_v, path)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let ctype = bundle_content_type(&path);
+    // A precompressed variant the client accepts, served with its Content-Encoding
+    // (so it skips the site's on-the-fly CompressionLayer — never double-compressed).
+    if accepts_encoding(&headers, "br") {
+        if let Some(f) = FabWeb::get(&format!("{path}.br")) {
+            return bundle_response(f.data, &ctype, Some("br"));
+        }
+    }
+    if accepts_encoding(&headers, "gzip") {
+        if let Some(f) = FabWeb::get(&format!("{path}.gz")) {
+            return bundle_response(f.data, &ctype, Some("gzip"));
+        }
+    }
+    // Identity: the file itself, or gunzip its `.gz` if the raw was dropped.
+    if let Some(f) = FabWeb::get(&path) {
+        return bundle_response(f.data, &ctype, None);
+    }
+    if let Some(gz) = FabWeb::get(&format!("{path}.gz")) {
+        if let Ok(raw) = gunzip(&gz.data) {
+            return bundle_response(raw.into(), &ctype, None);
+        }
+    }
+    bundle_missing(&path)
+}
+
+/// `application/wasm` for `.wasm` (instantiateStreaming demands the exact MIME);
+/// otherwise guess from the extension.
+fn bundle_content_type(path: &str) -> String {
+    if path.ends_with(".wasm") {
+        "application/wasm".to_string()
+    } else {
+        mime_guess::from_path(path)
+            .first_or_octet_stream()
+            .to_string()
     }
 }
 
-/// The wasm, served PRECOMPRESSED (brotli if accepted, gzip otherwise) with
-/// `Content-Type: application/wasm` — the glue uses `instantiateStreaming`, so the
-/// MIME must be exact. Already carrying `Content-Encoding`, it skips the site's
-/// on-the-fly CompressionLayer (never double-compressed). The raw wasm isn't
-/// embedded, so a client here must accept br or gz (every browser does).
-async fn editor_wasm(headers: HeaderMap) -> Response {
-    let (asset, encoding) = if accepts_encoding(&headers, "br") {
-        ("fab_web_bg.wasm.br", "br")
-    } else {
-        ("fab_web_bg.wasm.gz", "gzip")
-    };
-    match FabWeb::get(asset) {
-        Some(f) => Response::builder()
-            .header(header::CONTENT_TYPE, "application/wasm")
-            .header(header::CONTENT_ENCODING, encoding)
-            .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
-            .body(Body::from(f.data))
-            .expect("embedded wasm is a valid response"),
-        None => bundle_missing(asset),
+/// A version-pathed bundle-file response — immutable (the version is in the path).
+fn bundle_response(
+    data: std::borrow::Cow<'static, [u8]>,
+    content_type: &str,
+    encoding: Option<&str>,
+) -> Response {
+    let mut rb = Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable");
+    if let Some(enc) = encoding {
+        rb = rb.header(header::CONTENT_ENCODING, enc);
     }
+    rb.body(Body::from(data))
+        .expect("embedded bundle file is a valid response")
+}
+
+/// Gunzip embedded bytes to reconstruct an identity file (the raw wasm dropped at
+/// build) for a client that accepts no compression.
+fn gunzip(data: &[u8]) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    flate2::read::GzDecoder::new(data).read_to_end(&mut out)?;
+    Ok(out)
 }
 
 /// Does the client's `Accept-Encoding` list `enc`?
