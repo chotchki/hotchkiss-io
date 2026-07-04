@@ -173,8 +173,10 @@ const EDITOR_HTML: &str = r#"<!doctype html>
 </head>
 <body>
 <a id="back" href="/3d">&larr; 3D</a>
-<!-- data-inset-top: px of top-left page chrome (the back link) the app insets its UI under -->
-<canvas id="fab-web" data-inset-top="44"></canvas>
+<!-- data-inset-top: px of top-left page chrome the app insets its UI under.
+     data-base: where the bundle is MOUNTED — the app resolves lazy openscad/ fetches
+     against this, NOT the document URL (which drops the versioned dir → 404). -->
+<canvas id="fab-web" data-inset-top="44" data-base="__BASE__"></canvas>
 <script type="module">
   import init from '__GLUE_URL__';
   init().catch(e => {
@@ -189,10 +191,13 @@ const EDITOR_HTML: &str = r#"<!doctype html>
 /// rest of the site (content pages, media embeds, the model gallery) is never
 /// cross-origin isolated.
 async fn editor_document() -> Response {
-    let html = EDITOR_HTML.replace(
-        "__GLUE_URL__",
-        &format!("/3d/editor/{FAB_WEB_VERSION}/fab_web.js"),
-    );
+    // The bundle's mount base — reused for the glue import AND `data-base` (the app
+    // resolves lazy openscad/ fetches against it, not the document URL). Version in
+    // the path so it cache-busts + stays consistent.
+    let base = format!("/3d/editor/{FAB_WEB_VERSION}/");
+    let html = EDITOR_HTML
+        .replace("__BASE__", &base)
+        .replace("__GLUE_URL__", &format!("{base}fab_web.js"));
     Response::builder()
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header("cross-origin-opener-policy", "same-origin")

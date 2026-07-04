@@ -148,6 +148,13 @@ async fn editor_serves_glue_and_wasm() {
         glue.starts_with("/3d/editor/") && glue.ends_with("/fab_web.js"),
         "glue URL is version-pathed: {glue}"
     );
+    // The document declares data-base = the mount dir so the app resolves lazy
+    // openscad/ fetches against the versioned bundle dir, not the document URL.
+    let base = glue.trim_end_matches("fab_web.js");
+    assert!(
+        doc.contains(&format!("data-base=\"{base}\"")),
+        "document declares data-base = the mount dir: {doc}"
+    );
 
     let js = reqwest::get(server.url(glue)).await.unwrap();
     assert_eq!(js.status(), StatusCode::OK);
