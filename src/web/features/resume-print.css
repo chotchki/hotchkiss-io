@@ -1,87 +1,43 @@
-/* Résumé print stylesheet for weasyprint (HTML -> PDF). Styles the semantic
-   HTML that the markdown transformer emits; NOT Tailwind. Single source: the same
-   markdown renders the web view and, through this, the PDF. */
+/* Résumé print stylesheet for weasyprint (HTML -> PDF) — hotchkiss.io theme:
+   navy #14213d + gold #ffc935, Oswald (display) + Quattrocento (serif body).
+   Styles the semantic HTML the markdown transformer emits; NOT Tailwind. The same
+   markdown renders the web view and, through this, the PDF. Fonts are served from
+   /vendor/fonts/ and resolve against the <base href> the renderer injects.
+   Kept visually in sync with the career-portfolio build (resume/resume.css). */
 
-@page {
-  size: Letter;
-  margin: 0.6in 0.7in;
-}
+@font-face { font-family: "Oswald"; src: url("/vendor/fonts/Oswald-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "Quattrocento"; src: url("/vendor/fonts/Quattrocento-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "Quattrocento"; src: url("/vendor/fonts/Quattrocento-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; }
 
-* {
-  box-sizing: border-box;
-}
+:root { --navy: #14213d; --gold: #ffc935; --muted: #5b6377; }
 
-body {
-  font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
-  font-size: 10.5pt;
-  line-height: 1.35;
-  color: #1a2233;
-  margin: 0;
-}
+@page { size: Letter; margin: 0.5in 0.6in; }
 
-h1.resume-name {
-  font-size: 20pt;
-  margin: 0 0 2pt;
-  color: #1a2233;
-}
+* { box-sizing: border-box; }
 
-/* Section headers (## in the résumé markdown). */
-h2 {
-  font-size: 12pt;
-  margin: 12pt 0 4pt;
-  padding-bottom: 2pt;
-  border-bottom: 1.5pt solid #1a2233;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
+body { font-family: "Quattrocento", Georgia, serif; font-size: 10.4pt; line-height: 1.35; color: var(--navy); margin: 0; }
 
-h3 {
-  font-size: 10.5pt;
-  margin: 7pt 0 1pt;
-}
+/* Name — Oswald uppercase with the signature gold underline */
+h1.resume-name { font-family: "Oswald", "Arial Narrow", sans-serif; font-weight: 400; text-transform: uppercase; letter-spacing: 0.5px; font-size: 23pt; line-height: 1.05; color: var(--navy); margin: 0; display: inline-block; border-bottom: 3px solid var(--gold); padding-bottom: 1pt; }
 
-p {
-  margin: 2pt 0;
-}
+/* Section headers (## in the résumé markdown) */
+h2 { font-family: "Oswald", sans-serif; font-weight: 400; text-transform: uppercase; letter-spacing: 1.2px; font-size: 12pt; color: var(--navy); margin: 13pt 0 5pt; padding-bottom: 2pt; border-bottom: 1.5pt solid var(--navy); break-after: avoid; }
 
-ul {
-  margin: 2pt 0 4pt;
-  padding-left: 16pt;
-}
+/* Sub-headers (### — role / project lines) */
+h3 { font-family: "Oswald", sans-serif; font-weight: 400; font-size: 11pt; color: var(--navy); margin: 8pt 0 1pt; }
 
-li {
-  margin: 1pt 0;
-}
+p { margin: 3pt 0; }
+ul { margin: 2pt 0 6pt; padding-left: 14pt; }
+li { margin: 1.6pt 0; padding-left: 2pt; }
+li::marker { color: var(--gold); }   /* gold bullets — the brand accent */
 
-a {
-  color: #1a2233;
-  text-decoration: none;
-}
+a { color: var(--navy); text-decoration: none; }
+strong { font-weight: 700; color: var(--navy); }
+em { font-style: italic; color: var(--muted); }
 
-strong {
-  font-weight: 600;
-}
+hr { border: none; border-top: 0.75pt solid #d0d3db; margin: 9pt 0; }
 
-hr {
-  border: none;
-  border-top: 0.5pt solid #aab;
-  margin: 8pt 0;
-}
+table { width: 100%; border-collapse: collapse; margin: 4pt 0; }
+td, th { text-align: left; padding: 1pt 6pt 1pt 0; vertical-align: top; }
 
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 4pt 0;
-}
-
-td,
-th {
-  text-align: left;
-  padding: 1pt 6pt 1pt 0;
-  vertical-align: top;
-}
-
-code {
-  font-family: "SF Mono", Menlo, monospace;
-  font-size: 9.5pt;
-}
+code { font-family: "SF Mono", Menlo, monospace; font-size: 9.5pt; }
