@@ -58,6 +58,8 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
     let api_key_state = app_state.clone();
     // Live role-recheck middleware (Phase CC) also needs the pool.
     let refresh_state = app_state.clone();
+    // Greylist enforcement (Phase CX) needs the challenge key + the active-set snapshot.
+    let greylist_state = app_state.clone();
     let router = Router::new()
         .route("/", get(show_home))
         .nest("/login", login_router())
@@ -68,6 +70,10 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
         .nest("/admin", admin_router())
         // Public media (Phase BZ): byte serve route + the embed swap target.
         .nest("/media", crate::web::features::media::media_router())
+        // Greylist bot-toll challenge (Phase CX): the interstitial + its endpoints.
+        // Public GETs; the enforcement middleware exempts /challenge/* so a greylisted
+        // client can actually reach the toll to solve it.
+        .nest("/challenge", crate::web::features::challenge::challenge_router())
         // HTMX swap target for inline diagrams (public; renders only
         // server-registered sources — see web/features/diagram.rs).
         .route(
@@ -143,6 +149,14 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
             .layer(axum::middleware::from_fn_with_state(
                 refresh_state,
                 refresh_session_role,
+            ))
+            // Greylist toll (Phase CX): a greylisted IP that isn't exempt / cleared /
+            // authenticated gets the 429 interstitial. INNER to refresh_session_role (so
+            // SessionData reflects the live role / API key), OUTER to the authz layer. Its
+            // tolled response is marked so the (outer) request-log stamps challenged + is_bot.
+            .layer(axum::middleware::from_fn_with_state(
+                greylist_state,
+                crate::web::middleware::greylist_challenge::greylist_challenge,
             ))
             // Fail-closed authz (Phase E): GET/HEAD/OPTIONS public; every other
             // method requires admin by default (except the anonymous auth

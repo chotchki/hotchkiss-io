@@ -20,6 +20,12 @@ impl AuthenticationState {
         }
     }
 
+    /// Whether ANY user is logged in (session or API key) — used by the greylist toll to wave
+    /// through an authenticated human of any role, not just an admin.
+    pub fn is_authenticated(&self) -> bool {
+        matches!(self, AuthenticationState::Authenticated(_))
+    }
+
     /// The authenticated user, if any — for handlers that need the current user
     /// (e.g. scoping API keys to their owner).
     pub fn user(&self) -> Option<&UserDao> {

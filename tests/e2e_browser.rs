@@ -452,3 +452,55 @@ async fn landing_doors_render_no_horizontal_scroll_on_mobile() {
     let _ = std::fs::remove_dir_all(&profile);
     drop(server);
 }
+
+/// The full toll path in a REAL browser: a greylisted client hits the site, the interstitial's
+/// worker solves the proof-of-work over the toll image, `/challenge/verify` mints the clearance
+/// cookie, and the 302 lands back on real site content (Phase CX.8).
+#[tokio::test]
+async fn greylisted_browser_pays_the_toll_and_reaches_content() {
+    let _e2e = e2e_lock().await;
+    let server: TestServer = spawn_test_server().await.expect("spawn harness");
+    // The browser connects over loopback — greylist both forms so whichever it uses is tolled.
+    server.greylist.insert("127.0.0.1");
+    server.greylist.insert("::1");
+
+    let (mut browser, handle, profile) = launch().await;
+    let page = browser.new_page("about:blank").await.expect("new page");
+
+    // Greylisted → the home page serves the toll interstitial first.
+    // Greylisted → the home page serves the toll, whose worker solves the PoW, `/challenge/verify`
+    // mints the clearance cookie, and the 302 lands back on the home page. Headless Chrome solves
+    // in well under a second, so we assert the DURABLE outcome (reached the base.html nav, toll
+    // gone) rather than trying to catch the fleeting toll frame.
+    page.goto(server.url("/")).await.expect("goto /");
+    let deadline = Instant::now() + Duration::from_secs(45);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "the toll never resolved to site content — the browser didn't solve + redirect"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let html = page.content().await.unwrap_or_default();
+        if html.contains("aria-label=\"Primary\"") && !html.contains("Dimes not accepted") {
+            break; // cleared: real site chrome is showing, toll is gone
+        }
+    }
+
+    // Prove it went THROUGH the toll (not served the site directly): a clearance was recorded on
+    // solve, and the first hit was stamped as challenged.
+    let cleared: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM greylist_clearance")
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+    assert!(cleared >= 1, "the browser actually solved the toll (clearance recorded)");
+    let challenged: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM request_log WHERE challenged = 1")
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+    assert!(challenged >= 1, "the first request was served the toll");
+
+    browser.close().await.ok();
+    handle.await.ok();
+    let _ = std::fs::remove_dir_all(&profile);
+    drop(server);
+}

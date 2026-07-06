@@ -61,9 +61,16 @@ pub async fn log_requests(State(pool): State<SqlitePool>, req: Request, next: Ne
     let duration_ms = i64::try_from(start.elapsed().as_millis()).unwrap_or(0);
 
     if !skip {
+        // A greylist-tolled response carries the `Challenged` marker (CX.5). A challenged
+        // request is provably-not-human, so force `is_bot` regardless of the UA — that's the
+        // whole point (UA-spoofing scrapers finally classify correctly).
+        let challenged = response
+            .extensions()
+            .get::<crate::web::middleware::greylist_challenge::Challenged>()
+            .is_some();
         // Stamp the bot classification at write (CR.2) so the dashboard's audience
         // filter is a cheap indexed count, not a per-row 25-LIKE scan.
-        let is_bot = crate::db::dao::request_log::is_bot(user_agent.as_deref());
+        let is_bot = challenged || crate::db::dao::request_log::is_bot(user_agent.as_deref());
         let entry = NewRequestLog {
             method,
             path,
@@ -73,6 +80,7 @@ pub async fn log_requests(State(pool): State<SqlitePool>, req: Request, next: Ne
             referer,
             duration_ms,
             is_bot,
+            challenged,
         };
         tokio::spawn(async move {
             if let Err(e) = RequestLogDao::insert(&pool, &entry).await {

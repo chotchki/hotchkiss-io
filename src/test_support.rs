@@ -31,6 +31,9 @@ pub struct TestServer {
     pub base_url: String,
     pub port: u16,
     pub pool: SqlitePool,
+    /// The same in-memory greylist snapshot the server enforces against — tests seed it via
+    /// `server.greylist.insert("127.0.0.1")` to simulate a greylisted client.
+    pub greylist: crate::greylist::active_set::GreylistSet,
     server: JoinHandle<()>,
     _db: TempDb,
 }
@@ -202,6 +205,7 @@ pub async fn spawn_test_server() -> Result<TestServer> {
     let session_store = SqliteStore::new(pool.clone());
     session_store.migrate().await?;
 
+    let greylist = crate::greylist::active_set::GreylistSet::new();
     let app_state = AppState {
         pool: pool.clone(),
         session_store,
@@ -211,6 +215,14 @@ pub async fn spawn_test_server() -> Result<TestServer> {
         media_store: MediaStore::new(
             vec![std::env::temp_dir().join(format!("hotchkiss-test-media-{}", Uuid::new_v4()))],
             0,
+        ),
+        challenge: crate::greylist::ChallengeState::load(&pool).await?,
+        greylist: greylist.clone(),
+        // A default resolver (no system-conf I/O) — the run-sweep admin action's only user, and
+        // with an empty test request_log it never actually resolves.
+        resolver: hickory_resolver::TokioAsyncResolver::tokio(
+            Default::default(),
+            Default::default(),
         ),
     };
     let router = create_router(app_state).await?;
@@ -227,7 +239,52 @@ pub async fn spawn_test_server() -> Result<TestServer> {
         base_url: format!("http://localhost:{port}"),
         port,
         pool,
+        greylist,
         server,
         _db: TempDb(db_path),
     })
+}
+
+/// Solve a fresh toll challenge against a running test server and return the `/challenge/verify`
+/// path+query a browser would navigate to on success. Uses the crate-internal challenge kernel
+/// (integration tests in `tests/` can't reach it), so it drives the SAME chain + HMAC the worker
+/// JS runs — a Rust-level end-to-end without a headless browser.
+pub async fn solve_challenge(base_url: &str, redir: &str) -> Result<String> {
+    use crate::greylist::challenge::{compute_answer, image_digest};
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+    #[derive(serde::Deserialize)]
+    struct Tok {
+        inner_seed: String,
+        ts: i64,
+        version: String,
+        seed: String,
+        image_url: String,
+    }
+
+    let client = reqwest::Client::new();
+    let tok: Tok = client
+        .get(format!("{base_url}/challenge/new"))
+        .send()
+        .await?
+        .json()
+        .await?;
+    let rgba = client
+        .get(format!("{base_url}{}", tok.image_url))
+        .send()
+        .await?
+        .bytes()
+        .await?;
+    let digest = image_digest(&rgba);
+    let seed: [u8; 32] = URL_SAFE_NO_PAD
+        .decode(tok.seed.as_bytes())?
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("challenge seed was not 32 bytes"))?;
+    let answer = URL_SAFE_NO_PAD.encode(compute_answer(&seed, &digest)?);
+    let redir_enc: String = url::form_urlencoded::byte_serialize(redir.as_bytes()).collect();
+    Ok(format!(
+        "/challenge/verify?inner_seed={}&ts={}&version={}&answer={}&redir={}",
+        tok.inner_seed, tok.ts, tok.version, answer, redir_enc
+    ))
 }

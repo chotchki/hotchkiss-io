@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod blog;
+pub mod challenge;
 pub mod diagram;
 pub mod feed;
 pub mod home;

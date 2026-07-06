@@ -37,6 +37,9 @@ pub struct NewRequestLog {
     pub duration_ms: i64,
     /// Stored bot classification (CR.2), computed at write via `is_bot(user_agent)`.
     pub is_bot: bool,
+    /// Whether this request was served the greylist toll (CX.5). A challenged request is
+    /// provably-not-human, so the write path also forces `is_bot` true when this is set.
+    pub challenged: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -191,6 +194,18 @@ pub struct IpPathStatus {
     pub count: i64,
 }
 
+/// One (ip, path, status) aggregate over the window — the raw material the greylist
+/// detection sweep (CX.2) groups by ip to derive per-IP features. Grouped in SQL by the
+/// (ip, path, status) tuple so the fetch is bounded by distinct tuples, not raw requests;
+/// all feature logic (incl. the signature-path classifier) then lives in tested Rust.
+#[derive(Clone, Debug)]
+pub struct IpPathAgg {
+    pub ip: String,
+    pub path: String,
+    pub status: i64,
+    pub count: i64,
+}
+
 /// One timed request for latency analysis (CQ.6): the raw path + its server-handler
 /// duration. Percentiles are computed Rust-side (SQLite has no percentile fn), so this
 /// pulls the whole windowed sample set — see the SPEC latency deferral (a SQL histogram
@@ -259,8 +274,8 @@ impl RequestLogDao {
     pub async fn insert(executor: impl SqliteExecutor<'_>, new: &NewRequestLog) -> Result<()> {
         query!(
             r#"
-            INSERT INTO request_log (method, path, status, ip, user_agent, referer, duration_ms, is_bot)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            INSERT INTO request_log (method, path, status, ip, user_agent, referer, duration_ms, is_bot, challenged)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
             "#,
             new.method,
             new.path,
@@ -270,6 +285,7 @@ impl RequestLogDao {
             new.referer,
             new.duration_ms,
             new.is_bot,
+            new.challenged,
         )
         .execute(executor)
         .await?;
@@ -650,6 +666,33 @@ impl RequestLogDao {
         .await?)
     }
 
+    /// Every (ip, path, status) aggregate over the window — feeds the greylist detection
+    /// sweep (CX.2), which groups by ip in Rust. Off the hot path (the sweep runs on a
+    /// timer); at personal-site volumes the distinct-tuple count is small. If it ever
+    /// grows, push the per-IP feature aggregation into SQL.
+    pub async fn ip_path_aggregates(
+        executor: impl SqliteExecutor<'_>,
+        w: &Window,
+    ) -> Result<Vec<IpPathAgg>> {
+        Ok(query_as!(
+            IpPathAgg,
+            r#"
+            SELECT
+                ip as "ip!: String",
+                path,
+                status,
+                COUNT(*) as "count!: i64"
+            FROM request_log
+            WHERE ip IS NOT NULL AND ts >= ?1 AND ts < ?2
+            GROUP BY ip, path, status
+            "#,
+            w.from,
+            w.to
+        )
+        .fetch_all(executor)
+        .await?)
+    }
+
     /// User-Agent breakdown for ONE ip over the window (CQ.4) — a rotating-UA client
     /// (many UAs from one IP) is itself a bot tell.
     pub async fn ip_user_agents(
@@ -848,6 +891,7 @@ mod tests {
             referer: None,
             duration_ms: 0,
             is_bot: is_bot(ua),
+            challenged: false,
         }
     }
 
@@ -891,6 +935,30 @@ mod tests {
         let got = |p: &str| recent.iter().find(|r| r.path == p).unwrap().duration_ms;
         assert_eq!(got("/"), Some(42), "measured duration round-trips");
         assert_eq!(got("/legacy"), None, "legacy NULL stays None, not 0");
+        Ok(())
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn ip_path_aggregates_groups_and_excludes_null_ip(pool: SqlitePool) -> Result<()> {
+        seed(&pool).await?; // 1.2.3.4×2 /pages/Resume; 5.6.7.8 /pages/Resume + /login; NULL-ip /wp-admin
+        let all = Window::custom(None, None);
+        let rows = RequestLogDao::ip_path_aggregates(&pool, &all).await?;
+
+        assert!(rows.iter().all(|r| !r.ip.is_empty()), "NULL-ip rows excluded");
+        assert!(
+            !rows.iter().any(|r| r.path == "/wp-admin"),
+            "the NULL-ip /wp-admin probe is not attributed to any IP"
+        );
+
+        let resume_2x = rows
+            .iter()
+            .find(|r| r.ip == "1.2.3.4" && r.path == "/pages/Resume")
+            .expect("1.2.3.4 hit /pages/Resume");
+        assert_eq!(resume_2x.status, 200);
+        assert_eq!(resume_2x.count, 2, "two identical hits collapse to one row, count 2");
+
+        let total_5678: i64 = rows.iter().filter(|r| r.ip == "5.6.7.8").map(|r| r.count).sum();
+        assert_eq!(total_5678, 2, "5.6.7.8 has two distinct paths, one hit each");
         Ok(())
     }
 
@@ -1115,6 +1183,7 @@ mod tests {
             referer: referer.map(String::from),
             duration_ms: 0,
             is_bot: is_bot(None),
+            challenged: false,
         };
         for e in [
             r(Some("https://news.ycombinator.com/")),

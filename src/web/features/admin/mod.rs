@@ -9,6 +9,7 @@ use crate::web::{app_state::AppState, middleware::require_admin::require_admin};
 
 pub mod analytics;
 pub mod api_keys;
+pub mod greylist;
 pub mod logs;
 pub mod media;
 pub mod pages;
@@ -61,5 +62,11 @@ pub fn admin_router() -> Router<AppState> {
         // Server log tail (Phase CO): manual-refresh viewer; excluded from
         // request_log (request_log.rs) so a self-view never feeds the access log.
         .route("/logs", get(logs::show_logs))
+        // Greylist management (Phase CX): view/pin/release. `/pin` is a fixed segment
+        // (one path element), `{ip}/release` is two — no collision.
+        .route("/greylist", get(greylist::show_greylist))
+        .route("/greylist/pin", post(greylist::pin_ip))
+        .route("/greylist/run-sweep", post(greylist::run_sweep))
+        .route("/greylist/{ip}/release", post(greylist::release_ip))
         .layer(from_fn(require_admin))
 }

@@ -13,6 +13,17 @@
 </h2>
 <p class="text-sm text-navy mb-4">Last {{ since_days }} days</p>
 
+<div class="flex flex-row flex-wrap items-center gap-3 mb-4">
+    <form hx-post="/admin/greylist/pin"
+        hx-confirm="Greylist {{ ip }}? They'll get the bot toll until you release them.">
+        <input type="hidden" name="ip" value="{{ ip }}" />
+        <button type="submit"
+            class="text-xs text-navy border border-navy/40 rounded px-3 py-1 hover:bg-navy hover:text-div-grey uppercase font-display">Greylist
+            this IP</button>
+    </form>
+    <a class="text-xs text-navy underline hover:text-navy/70" href="/admin/greylist">Manage greylist &rarr;</a>
+</div>
+
 {% if total == 0 %}
 <p class="text-navy/70">No requests recorded for this IP in the last {{ since_days }} days.</p>
 {% else %}

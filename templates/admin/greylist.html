@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Greylist{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <div class="flex flex-row items-center justify-between mb-4">
+        <h1 class="text-2xl font-display text-navy">Greylist</h1>
+        <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/analytics">← Analytics</a>
+    </div>
+    <p class="text-sm text-navy/70 mb-4">
+        Abusive IPs the detection sweep (or you) have greylisted — they get the bot toll until they
+        solve it or the entry lapses. Auto entries slide their expiry while abuse continues; a manual
+        pin never lapses until you release it. <strong>{{ challenged_count }}</strong> tolls served so far.
+    </p>
+
+    <div class="flex flex-row flex-wrap items-end gap-4 mb-6">
+        <form class="flex flex-row flex-wrap items-end gap-2" hx-post="/admin/greylist/pin">
+            <label class="text-sm text-navy">
+                <span class="block mb-1">Manually greylist an IP</span>
+                <input type="text" name="ip" placeholder="203.0.113.7" required
+                    class="border border-navy/40 rounded px-2 py-1 text-sm font-mono w-48" />
+            </label>
+            <button type="submit"
+                class="text-sm text-navy border border-navy/40 rounded px-3 py-1 hover:bg-navy hover:text-div-grey uppercase font-display">Pin</button>
+        </form>
+        <form hx-post="/admin/greylist/run-sweep">
+            <button type="submit" title="Force a detection pass now instead of waiting for the 15-min timer"
+                class="text-sm text-navy border border-navy/40 rounded px-3 py-1 hover:bg-navy hover:text-div-grey uppercase font-display">Run
+                sweep now</button>
+        </form>
+    </div>
+
+    <h2 class="font-display text-navy uppercase mb-2">Active ({{ entries.len() }})</h2>
+    {% if entries.is_empty() %}
+    <p class="text-navy/60 text-sm mb-6">Nobody's greylisted right now.</p>
+    {% else %}
+    <div class="overflow-x-auto mb-8">
+        <table class="w-full text-sm">
+            <tr class="text-left border-b border-navy/20">
+                <th class="py-2 pr-4">IP</th>
+                <th class="py-2 pr-4">Reason</th>
+                <th class="py-2 pr-4">Evidence</th>
+                <th class="py-2 pr-4">Last seen (UTC)</th>
+                <th class="py-2 pr-4">Expires (UTC)</th>
+                <th class="py-2"></th>
+            </tr>
+            {% for e in entries %}
+            <tr class="border-b border-navy/10">
+                <td class="py-2 pr-4 font-mono text-navy break-all">{{ e.ip }}</td>
+                <td class="py-2 pr-4">
+                    {{ e.reason }}
+                    {% if e.manual %}<span
+                        class="ml-1 px-1.5 py-0.5 rounded-sm bg-navy text-yellow uppercase text-xs font-display">pinned</span>{% endif %}
+                </td>
+                <td class="py-2 pr-4 text-navy/70 break-all">{{ e.evidence }}</td>
+                <td class="py-2 pr-4 text-navy/70 whitespace-nowrap">{{ e.updated_at }}</td>
+                <td class="py-2 pr-4 text-navy/70 whitespace-nowrap">{{ e.expires_at }}</td>
+                <td class="py-2 text-right">
+                    <button
+                        class="text-xs text-red-700 border border-red-700 rounded px-2 py-1 hover:bg-red-700 hover:text-white uppercase"
+                        hx-post="/admin/greylist/{{ e.ip }}/release"
+                        hx-confirm="Release {{ e.ip }}? They stop getting the toll immediately.">Release</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% endif %}
+
+    <h2 class="font-display text-navy uppercase mb-2">Candidate signatures</h2>
+    <p class="text-xs text-navy/60 mb-2">Dead paths (never a success for anyone) that greylisted IPs probe but the R1
+        signature list doesn't match yet. Worth adding to <code class="font-mono">SIGNATURE_PATTERNS</code> in
+        <code class="font-mono">src/greylist/detection.rs</code> so they trip R1 fast (≥2 hits) instead of waiting for
+        the 404-burst rule — then deploy.</p>
+    {% if candidates.is_empty() %}
+    <p class="text-navy/60 text-sm mb-8">No new candidates — R1 already covers what your greylisted IPs are probing.</p>
+    {% else %}
+    <div class="overflow-x-auto mb-8">
+        <table class="w-full text-sm">
+            <tr class="text-left border-b border-navy/20">
+                <th class="py-2 pr-4">Path</th>
+                <th class="py-2 pr-4 text-right">Hits</th>
+                <th class="py-2 pr-4 text-right">IPs</th>
+            </tr>
+            {% for c in candidates %}
+            <tr class="border-b border-navy/10">
+                <td class="py-2 pr-4 font-mono text-navy break-all">{{ c.path }}</td>
+                <td class="py-2 pr-4 text-right text-navy/70">{{ c.hits }}</td>
+                <td class="py-2 pr-4 text-right text-navy/70">{{ c.ips }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% endif %}
+
+    <h2 class="font-display text-navy uppercase mb-2">Recent clearances</h2>
+    <p class="text-xs text-navy/60 mb-2">Clients that solved the toll — a stronger human signal than the User-Agent
+        guess.</p>
+    {% if clearances.is_empty() %}
+    <p class="text-navy/60 text-sm">No toll solves recorded yet.</p>
+    {% else %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <tr class="text-left border-b border-navy/20">
+                <th class="py-2 pr-4">IP</th>
+                <th class="py-2 pr-4">When (UTC)</th>
+                <th class="py-2 pr-4">Solve</th>
+                <th class="py-2">User-Agent</th>
+            </tr>
+            {% for c in clearances %}
+            <tr class="border-b border-navy/10">
+                <td class="py-2 pr-4 font-mono text-navy break-all">{{ c.ip }}</td>
+                <td class="py-2 pr-4 text-navy/70 whitespace-nowrap">{{ c.cleared_at }}</td>
+                <td class="py-2 pr-4 text-navy/70 whitespace-nowrap">{{ c.solve }}</td>
+                <td class="py-2 text-navy/70 break-all">{{ c.user_agent }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

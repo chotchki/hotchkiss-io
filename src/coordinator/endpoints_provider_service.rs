@@ -1,5 +1,6 @@
 use crate::coordinator::backup;
 use crate::db::dao::request_log::RequestLogDao;
+use crate::greylist::active_set::GreylistSet;
 use crate::media::MediaStore;
 use crate::settings::Settings;
 use crate::web::{app_state::AppState, router::create_router};
@@ -40,10 +41,17 @@ pub struct EndpointsProviderService {
     log_path: PathBuf,
     site_host: String,
     media_store: MediaStore,
+    greylist: GreylistSet,
+    resolver: hickory_resolver::TokioAsyncResolver,
 }
 
 impl EndpointsProviderService {
-    pub async fn create(settings: Arc<Settings>, pool: SqlitePool) -> Result<Self> {
+    pub async fn create(
+        settings: Arc<Settings>,
+        pool: SqlitePool,
+        greylist: GreylistSet,
+        resolver: hickory_resolver::TokioAsyncResolver,
+    ) -> Result<Self> {
         let session_store = SqliteStore::new(pool.clone());
         session_store.migrate().await?;
 
@@ -77,6 +85,8 @@ impl EndpointsProviderService {
             // not the served beta.hotchkiss.io) so canonical links relativize on both.
             site_host: settings.webauthn_rp_id.clone(),
             media_store,
+            greylist,
+            resolver,
         })
     }
 
@@ -100,6 +110,9 @@ impl EndpointsProviderService {
             site_host: self.site_host.clone(),
             media_store: self.media_store.clone(),
             log_path: self.log_path.clone(),
+            challenge: crate::greylist::ChallengeState::load(&self.pool).await?,
+            greylist: self.greylist.clone(),
+            resolver: self.resolver.clone(),
         };
 
         let http_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.http_port);

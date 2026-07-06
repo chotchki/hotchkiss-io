@@ -40,8 +40,16 @@ impl ServiceCoordinator {
         );
         let acme_provider_service =
             AcmeProviderService::create(settings.clone(), pool.clone(), cloudflare_client)?;
-        let endpoints_provider_service =
-            EndpointsProviderService::create(settings.clone(), pool.clone()).await?;
+        // Phase CX: the shared in-memory greylist snapshot, threaded into BOTH the detection
+        // sweep (writer) and AppState (reader) so request-path enforcement never hits the DB.
+        let greylist_set = crate::greylist::active_set::GreylistSet::new();
+        let endpoints_provider_service = EndpointsProviderService::create(
+            settings.clone(),
+            pool.clone(),
+            greylist_set.clone(),
+            resolver.clone(),
+        )
+        .await?;
 
         // Phase CN: backfill responsive AVIF variants for images uploaded before
         // the pipeline existed. Detached background one-shot (NOT in the try_join)
@@ -52,6 +60,12 @@ impl ServiceCoordinator {
         // Phase CR.2: stamp the stored is_bot for request_log rows logged before the
         // column existed. Same detached / non-fatal / idempotent shape.
         super::backfill_is_bot::spawn(pool.clone());
+
+        // Phase CX: the behavioral greylist detection sweep. Detached interval loop (NOT in
+        // the try_join!) — a failed pass logs and retries, never takes the app down. Reuses
+        // the ACME resolver for FCrDNS crawler verification, and refreshes the shared snapshot
+        // the enforcement middleware reads.
+        crate::greylist::sweep::spawn(pool.clone(), resolver.clone(), greylist_set);
 
         Ok(Self {
             ip_provider_service,

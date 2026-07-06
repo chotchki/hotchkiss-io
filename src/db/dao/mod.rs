@@ -3,6 +3,7 @@ pub mod api_keys;
 pub mod certificate;
 pub mod content_pages;
 pub mod crypto_key;
+pub mod greylist;
 pub mod media;
 pub mod request_log;
 pub mod roles;

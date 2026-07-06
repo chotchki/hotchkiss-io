@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <link href="/styles/main.css?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" rel="stylesheet" />
+    <link href="/images/favicon.ico?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" rel="shortcut icon" />
+    <meta name="theme-color" content="#14213d" />
+    <title>Bot toll — hotchkiss.io</title>
+</head>
+
+<body class="bg-body-grey min-h-screen flex items-center justify-center p-6">
+    <main class="max-w-xl w-full text-center" data-redir="{{ redir }}"
+        data-worker="/scripts/challenge-worker.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}">
+        <h1 class="font-display text-2xl sm:text-4xl text-navy uppercase mb-2">
+            As a suspected bot, you need to pay a cryptographic toll to reach hotchkiss.io
+        </h1>
+        <p class="font-content text-lg text-navy/80 mb-6">Dimes not accepted.</p>
+
+        <!-- The toll image (raw RGBA fetched from /challenge/image) is painted here; the
+             worker hashes the same bytes as its proof of work. -->
+        <canvas id="toll-canvas" width="0" height="0"
+            class="mx-auto mb-4 max-w-full rounded border-4 border-navy"
+            aria-label="Blazing Saddles desert tollbooth"></canvas>
+
+        <progress id="toll-progress" class="w-full max-w-md h-3 mb-2" max="100" value="0"></progress>
+        <p id="toll-status" class="font-content text-sm text-navy/70 mb-6" aria-live="polite">
+            Paying the toll…
+        </p>
+
+        <noscript>
+            <p class="font-content text-navy/80">
+                This toll needs JavaScript and cookies turned on to pay it. Enable both and reload.
+            </p>
+        </noscript>
+
+        <p class="font-content text-xs text-navy/50">
+            Image: <em>Blazing Saddles</em> (1974), Warner Bros.
+        </p>
+    </main>
+    <script defer src="/scripts/challenge.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+</body>
+
+</html>
