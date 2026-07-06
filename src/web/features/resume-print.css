@@ -20,11 +20,9 @@ body { font-family: "Quattrocento", Georgia, serif; font-size: 10.4pt; line-heig
 /* Name — Oswald uppercase with the signature gold underline */
 h1.resume-name { font-family: "Oswald", "Arial Narrow", sans-serif; font-weight: 400; text-transform: uppercase; letter-spacing: 0.5px; font-size: 23pt; line-height: 1.05; color: var(--navy); margin: 0; display: inline-block; border-bottom: 3px solid var(--gold); padding-bottom: 1pt; }
 
-/* Section headers (## in the résumé markdown) */
-h2 { font-family: "Oswald", sans-serif; font-weight: 400; text-transform: uppercase; letter-spacing: 1.2px; font-size: 12pt; color: var(--navy); margin: 13pt 0 5pt; padding-bottom: 2pt; border-bottom: 1.5pt solid var(--navy); break-after: avoid; }
-
-/* Sub-headers (### — role / project lines) */
-h3 { font-family: "Oswald", sans-serif; font-weight: 400; font-size: 11pt; color: var(--navy); margin: 8pt 0 1pt; }
+/* Section headers — the résumé markdown uses ### (h3, the name h1 is injected + stripped);
+   ## (h2) styled too for safety in case content ever uses it */
+h2, h3 { font-family: "Oswald", sans-serif; font-weight: 400; text-transform: uppercase; letter-spacing: 1.2px; font-size: 12pt; color: var(--navy); margin: 13pt 0 5pt; padding-bottom: 2pt; border-bottom: 1.5pt solid var(--navy); break-after: avoid; }
 
 p { margin: 3pt 0; }
 ul { margin: 2pt 0 6pt; padding-left: 14pt; }
