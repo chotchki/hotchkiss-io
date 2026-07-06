@@ -8,6 +8,9 @@
 @font-face { font-family: "Oswald"; src: url("/vendor/fonts/Oswald-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; }
 @font-face { font-family: "Quattrocento"; src: url("/vendor/fonts/Quattrocento-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; }
 @font-face { font-family: "Quattrocento"; src: url("/vendor/fonts/Quattrocento-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; }
+/* Quattrocento has no italic, so italic text (em) uses Source Serif 4's italic (x-height/weight matched) */
+@font-face { font-family: "Source Serif 4"; src: url("/vendor/fonts/SourceSerif4-Italic.woff2") format("woff2"); font-weight: 400; font-style: italic; }
+@font-face { font-family: "Source Serif 4"; src: url("/vendor/fonts/SourceSerif4-BoldItalic.woff2") format("woff2"); font-weight: 700; font-style: italic; }
 
 :root { --navy: #14213d; --gold: #ffc935; --muted: #5b6377; }
 
@@ -31,7 +34,7 @@ li::marker { color: var(--gold); }   /* gold bullets — the brand accent */
 
 a { color: var(--navy); text-decoration: none; }
 strong { font-weight: 700; color: var(--navy); }
-em { font-style: italic; color: var(--muted); }
+em { font-family: "Source Serif 4", Georgia, serif; font-style: italic; color: var(--muted); }
 
 hr { border: none; border-top: 0.75pt solid #d0d3db; margin: 9pt 0; }
 
