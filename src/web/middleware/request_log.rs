@@ -44,12 +44,18 @@ pub async fn log_requests(State(pool): State<SqlitePool>, req: Request, next: Ne
     // range/audience toggle, so logging it would flood request_log with the admin's own
     // dashboard traffic + pollute the very numbers it renders. (Trade-off: the dashboard
     // can't measure its OWN render latency — a minor loss vs the self-pollution.)
+    // /challenge/* is the greylist toll's OWN ceremony (new / verify / image) — excluded (CY.4)
+    // so a solving client's ~5 requests don't pollute top-paths. The `challenged=1` stamp lives on
+    // the ORIGINAL tolled path (e.g. `/`), not here, so the signal is untouched.
     #[cfg(debug_assertions)]
     let skip = path.starts_with("/tower-livereload")
         || path.starts_with("/admin/logs")
-        || path.starts_with("/admin/analytics");
+        || path.starts_with("/admin/analytics")
+        || path.starts_with("/challenge");
     #[cfg(not(debug_assertions))]
-    let skip = path.starts_with("/admin/logs") || path.starts_with("/admin/analytics");
+    let skip = path.starts_with("/admin/logs")
+        || path.starts_with("/admin/analytics")
+        || path.starts_with("/challenge");
 
     // SERVER-handler processing time — the inner stack + handler, measured at the
     // outermost log layer. NOT client page-load/LCP (no TLS/network/download), and it

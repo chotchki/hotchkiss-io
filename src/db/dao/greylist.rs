@@ -21,6 +21,8 @@ use sqlx::{
     SqliteExecutor,
 };
 
+use crate::db::dao::request_log::Window;
+
 /// An active or lapsed greylist row. `manual` distinguishes an admin pin (never lapses)
 /// from a behavioral auto-entry (slides + expires).
 #[derive(Clone, Debug, FromRow, PartialEq, Eq)]
@@ -249,6 +251,46 @@ impl GreylistDao {
         .fetch_all(executor)
         .await?)
     }
+
+    /// Toll SOLVES over the window (CY.8) — the "got through" numerator. `cleared_at` can hold
+    /// either the space or the RFC3339 datetime form, so normalize with `datetime()`.
+    pub async fn count_clearances_since(
+        executor: impl SqliteExecutor<'_>,
+        w: &Window,
+    ) -> Result<i64> {
+        Ok(query!(
+            r#"
+            SELECT COUNT(*) as "count!: i64"
+            FROM greylist_clearance
+            WHERE datetime(cleared_at) >= datetime(?1) AND datetime(cleared_at) < datetime(?2)
+            "#,
+            w.from,
+            w.to
+        )
+        .fetch_one(executor)
+        .await?
+        .count)
+    }
+
+    /// Distinct IPs that solved the toll over the window (CY.8) — the numerator for the IP-based
+    /// solve rate (paired with `RequestLogDao::distinct_challenged_ips`).
+    pub async fn distinct_cleared_ips_since(
+        executor: impl SqliteExecutor<'_>,
+        w: &Window,
+    ) -> Result<i64> {
+        Ok(query!(
+            r#"
+            SELECT COUNT(DISTINCT ip) as "count!: i64"
+            FROM greylist_clearance
+            WHERE datetime(cleared_at) >= datetime(?1) AND datetime(cleared_at) < datetime(?2)
+            "#,
+            w.from,
+            w.to
+        )
+        .fetch_one(executor)
+        .await?
+        .count)
+    }
 }
 
 #[cfg(test)]
@@ -341,6 +383,26 @@ mod tests {
         assert_eq!(recent[1].ip, "2.2.2.2");
         assert_eq!(recent[1].solve_ms, Some(850));
         assert_eq!(recent[1].user_agent.as_deref(), Some("Mozilla/5.0"));
+        Ok(())
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn clearance_counts_over_the_window(pool: SqlitePool) -> Result<()> {
+        GreylistDao::record_clearance(&pool, "1.1.1.1", Some(500), None, None).await?;
+        GreylistDao::record_clearance(&pool, "1.1.1.1", None, None, None).await?; // same IP, twice
+        GreylistDao::record_clearance(&pool, "2.2.2.2", None, None, None).await?;
+
+        let all = Window::custom(None, None);
+        assert_eq!(
+            GreylistDao::count_clearances_since(&pool, &all).await?,
+            3,
+            "all solves counted (the solve-rate numerator, request-based)"
+        );
+        assert_eq!(
+            GreylistDao::distinct_cleared_ips_since(&pool, &all).await?,
+            2,
+            "distinct solving IPs (the IP-based solve rate)"
+        );
         Ok(())
     }
 }

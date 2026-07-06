@@ -264,3 +264,34 @@ async fn candidate_signatures_surface_novel_dead_paths() {
         "a novel dead path probed by a greylisted IP surfaces as a candidate signature"
     );
 }
+
+#[tokio::test]
+async fn challenge_ceremony_is_excluded_from_the_request_log() {
+    let s = spawn_test_server().await.unwrap();
+    // The toll's own endpoint (excluded) + a sentinel content path (logged).
+    reqwest::get(format!("{}/challenge/new", s.base_url)).await.unwrap();
+    reqwest::get(format!("{}/sentinel-not-a-page", s.base_url)).await.unwrap();
+
+    // Poll for the sentinel — proves the fire-and-forget writer processed requests AFTER the
+    // /challenge one, so if the ceremony WERE logged it would be present by now.
+    let mut sentinel = 0i64;
+    for _ in 0..100 {
+        sentinel =
+            sqlx::query_scalar("SELECT COUNT(*) FROM request_log WHERE path = '/sentinel-not-a-page'")
+                .fetch_one(&s.pool)
+                .await
+                .unwrap();
+        if sentinel > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(sentinel >= 1, "the sentinel request was logged");
+
+    let ceremony: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM request_log WHERE path LIKE '/challenge%'")
+            .fetch_one(&s.pool)
+            .await
+            .unwrap();
+    assert_eq!(ceremony, 0, "the /challenge ceremony is excluded from the access log");
+}

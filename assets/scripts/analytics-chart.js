@@ -31,6 +31,12 @@
       { name: "Total views", values: data.total, color: "#14213d" },
       { name: "Unique visitors", values: data.unique, color: "#e8833a" },
     ];
+    // Greylist tolls/day overlay (CY.2) — always challenged=1, independent of the audience
+    // filter. Drawn ONLY when the window actually walled someone, so a quiet site keeps the
+    // clean two-line chart instead of a flat-zero third line.
+    if (data.challenged && data.challenged.some(function (v) { return v > 0; })) {
+      series.push({ name: "Tolls served", values: data.challenged, color: "#b91c1c" });
+    }
 
     var width = Math.max(container.clientWidth || 720, 320);
     var height = 240;

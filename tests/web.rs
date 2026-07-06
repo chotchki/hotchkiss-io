@@ -195,6 +195,79 @@ async fn analytics_audience_toggle_renders_and_tolerates_garbage() {
 }
 
 #[tokio::test]
+async fn analytics_surfaces_the_greylist_challenged_dimension() {
+    // CY.2/CY.3/CY.7/CY.8: a tolled request (challenged=1, 429) + its clearance must surface as
+    // the Challenged filter chip, the Greylist-toll stat block (tolls served + solve rate), and
+    // the split-out 429 status bucket — and ?audience=challenged scopes without 500-ing.
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    // The wall (429 + challenged + is_bot) and its solve — the hard-vs-soft data.
+    sqlx::query(
+        "INSERT INTO request_log (method, path, status, ip, challenged, is_bot) \
+         VALUES ('GET', '/wp-login.php', 429, '203.0.113.50', 1, 1)",
+    )
+    .execute(&server.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO greylist_clearance (ip, solve_ms, digest_version) \
+         VALUES ('203.0.113.50', 640, 1)",
+    )
+    .execute(&server.pool)
+    .await
+    .unwrap();
+
+    // Default (All) view: the toll block + the 429 bucket appear once something's been walled.
+    let body = admin
+        .get(server.url("/admin/analytics?since=90"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        body.contains("Greylist toll"),
+        "the toll stat block renders once something's been walled"
+    );
+    assert!(body.contains("tolls served"), "tolls-served stat present");
+    assert!(
+        body.contains("solve rate"),
+        "the hard-vs-soft solve-rate stat present"
+    );
+    assert!(
+        body.contains("Challenged 1"),
+        "the Challenged filter chip shows the toll count"
+    );
+    assert!(
+        body.contains("429 1"),
+        "429 is split out of the generic 4xx bucket"
+    );
+
+    // The Challenged filter scopes like every other audience — never a 500.
+    let resp = admin
+        .get(server.url("/admin/analytics?audience=challenged&since=90"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "?audience=challenged scopes without erroring"
+    );
+    assert!(
+        resp.text().await.unwrap().contains("challenged views"),
+        "the headline reflects the challenged scope"
+    );
+}
+
+#[tokio::test]
 async fn ip_detail_admin_gated_and_validates() {
     // CQ.4: /admin/analytics/ip/{ip} is admin-gated; a valid-but-empty IP renders a
     // 200 empty-state; a garbage segment is a clean 400 (never a 500 / DB probe).

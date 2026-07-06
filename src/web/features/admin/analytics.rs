@@ -23,6 +23,8 @@ use crate::{
     },
 };
 
+use crate::db::dao::greylist::GreylistDao;
+
 #[derive(Deserialize)]
 pub struct AnalyticsQuery {
     pub since: Option<i64>,
@@ -65,14 +67,17 @@ fn encode_qs(s: &str) -> String {
         .collect()
 }
 
-/// Two aligned daily series (CQ.7) for the d3 line chart, serialized into the page as
-/// a JSON island. NUMERIC only — `days` are DB `substr(ts,1,10)` date strings, never
-/// attacker-controlled — so the island can't carry a `</script>` breakout.
+/// Aligned daily series (CQ.7) for the d3 line chart, serialized into the page as a JSON
+/// island. NUMERIC only — `days` are DB `substr(ts,1,10)` date strings, never
+/// attacker-controlled — so the island can't carry a `</script>` breakout. `challenged`
+/// is the greylist-tolls/day overlay (CY.2), always challenged=1 and independent of the
+/// audience filter; the renderer only draws it when it carries a nonzero day.
 #[derive(Serialize, Debug, Default)]
 pub struct TimeSeries {
     pub days: Vec<String>,
     pub total: Vec<i64>,
     pub unique: Vec<i64>,
+    pub challenged: Vec<i64>,
     pub empty: bool,
 }
 
@@ -121,6 +126,14 @@ pub struct AnalyticsTemplate {
     pub latency_p95: i64,
     pub slow_routes: Vec<RouteLatency>,
     pub slow_requests: Vec<RequestLogDao>,
+    /// Greylist toll activity over the window (CY.2/CY.8), shown regardless of the selected
+    /// audience: tolls served (challenged requests), solves (clearances), the distinct IP counts,
+    /// and the IP-based solve rate (`None` until something's been tolled → renders "—").
+    pub tolls_served: i64,
+    pub clearances: i64,
+    pub challenged_ips: i64,
+    pub cleared_ips: i64,
+    pub solve_rate_pct: Option<i64>,
 }
 
 /// `GET /admin/analytics` — gated by the `require_admin` layer on the `admin`
@@ -194,6 +207,7 @@ pub async fn show_analytics(
         audience_counts,
         total_by_day,
         unique_by_day,
+        challenged_by_day,
         by_path,
         status_buckets,
         noisy_ips,
@@ -204,6 +218,10 @@ pub async fn show_analytics(
         latency_samples,
         slow_requests,
         recent,
+        tolls_served,
+        challenged_ips,
+        clearances,
+        cleared_ips,
     ) = tokio::try_join!(
         TopBar::create(&state.pool, "admin"),
         RequestLogDao::count_since(&state.pool, &window, audience),
@@ -211,6 +229,8 @@ pub async fn show_analytics(
         RequestLogDao::audience_counts(&state.pool, &window),
         RequestLogDao::count_by_day(&state.pool, &window, audience),
         RequestLogDao::distinct_ip_by_day(&state.pool, &window, audience),
+        // Tolls/day overlay (CY.2) — always challenged=1, INDEPENDENT of the audience filter.
+        RequestLogDao::count_by_day(&state.pool, &window, Audience::Challenged),
         RequestLogDao::count_by_content_path(&state.pool, &window, audience, max_status, 25),
         RequestLogDao::count_by_status_bucket(&state.pool, &window, audience),
         RequestLogDao::noisy_ips(&state.pool, &window, 0, 25),
@@ -221,19 +241,32 @@ pub async fn show_analytics(
         RequestLogDao::latency_samples(&state.pool, &window),
         RequestLogDao::slowest_requests(&state.pool, &window, 15),
         RequestLogDao::recent(&state.pool, 50),
+        // Greylist toll activity (CY.2/CY.8) — window-scoped, INDEPENDENT of the selected
+        // audience (like `audience_counts`, these are always-shown sub-metrics).
+        RequestLogDao::count_since(&state.pool, &window, Audience::Challenged),
+        RequestLogDao::distinct_challenged_ips(&state.pool, &window),
+        GreylistDao::count_clearances_since(&state.pool, &window),
+        GreylistDao::distinct_cleared_ips_since(&state.pool, &window),
     )?;
 
     // Derived, Rust-side (cheap): the chart island (both daily series overlaid — the gap
     // is the repeat/scanner signal, `<`-escaped for the XSS boundary), the referer fold,
     // and the latency percentiles (SQLite has no percentile fn).
-    let ts_json = serde_json::to_string(&shape_timeseries(&total_by_day, &unique_by_day))
-        .unwrap_or_else(|_| r#"{"days":[],"total":[],"unique":[],"empty":true}"#.to_string())
-        .replace('<', "\\u003c");
+    let ts_json =
+        serde_json::to_string(&shape_timeseries(&total_by_day, &unique_by_day, &challenged_by_day))
+            .unwrap_or_else(|_| {
+                r#"{"days":[],"total":[],"unique":[],"challenged":[],"empty":true}"#.to_string()
+            })
+            .replace('<', "\\u003c");
     let referers = group_referers(&referer_urls, &state.site_host, direct_count);
     let has_latency = !latency_samples.is_empty();
     let latency_p95 = overall_p95(&latency_samples);
     let mut slow_routes = aggregate_by_route(&latency_samples);
     slow_routes.truncate(15);
+
+    // Hard-vs-soft (CY.8): of the DISTINCT IPs we walled, how many solved through? `None` until
+    // something's actually been tolled (fresh boot / beta-scrubbed) so the view shows "—".
+    let solve_rate_pct = (challenged_ips > 0).then(|| cleared_ips * 100 / challenged_ips);
 
     let tmpl = AnalyticsTemplate {
         top_bar,
@@ -260,6 +293,11 @@ pub async fn show_analytics(
         latency_p95,
         slow_routes,
         slow_requests,
+        tolls_served,
+        clearances,
+        challenged_ips,
+        cleared_ips,
+        solve_rate_pct,
     };
     Ok(HtmlTemplate(tmpl).into_response())
 }
@@ -319,6 +357,7 @@ pub async fn show_ip_detail(
         s3xx: 0,
         s403: 0,
         s404: 0,
+        s429: 0,
         s4xx: 0,
         s5xx: 0,
     };
@@ -336,6 +375,7 @@ pub async fn show_ip_detail(
             300..=399 => sb.s3xx += r.count,
             403 => sb.s403 += r.count,
             404 => sb.s404 += r.count,
+            429 => sb.s429 += r.count,
             400..=499 => sb.s4xx += r.count,
             500..=599 => sb.s5xx += r.count,
             _ => {}
@@ -378,13 +418,22 @@ pub async fn reclassify_bots(State(state): State<AppState>) -> Result<Response, 
 /// series align to the same day axis. Empty input → `empty: true` (the renderer draws
 /// a note). If a day string somehow won't parse, falls back to the sparse present-days
 /// (no gap-fill) rather than dropping the chart.
-fn shape_timeseries(total: &[DayCount], unique: &[DayCount]) -> TimeSeries {
+fn shape_timeseries(total: &[DayCount], unique: &[DayCount], challenged: &[DayCount]) -> TimeSeries {
     use std::collections::HashMap;
 
     let total_map: HashMap<&str, i64> = total.iter().map(|d| (d.day.as_str(), d.count)).collect();
     let unique_map: HashMap<&str, i64> = unique.iter().map(|d| (d.day.as_str(), d.count)).collect();
+    let challenged_map: HashMap<&str, i64> =
+        challenged.iter().map(|d| (d.day.as_str(), d.count)).collect();
 
-    let mut present: Vec<&str> = total_map.keys().chain(unique_map.keys()).copied().collect();
+    // A day with ONLY tolled traffic (e.g. under an audience=humans filter) still belongs on
+    // the axis, so fold challenged days into `present` too — else the toll overlay drops them.
+    let mut present: Vec<&str> = total_map
+        .keys()
+        .chain(unique_map.keys())
+        .chain(challenged_map.keys())
+        .copied()
+        .collect();
     present.sort_unstable();
     present.dedup();
     if present.is_empty() {
@@ -426,11 +475,16 @@ fn shape_timeseries(total: &[DayCount], unique: &[DayCount]) -> TimeSeries {
         .iter()
         .map(|d| *unique_map.get(d.as_str()).unwrap_or(&0))
         .collect();
+    let challenged_series = axis
+        .iter()
+        .map(|d| *challenged_map.get(d.as_str()).unwrap_or(&0))
+        .collect();
 
     TimeSeries {
         days: axis,
         total: total_series,
         unique: unique_series,
+        challenged: challenged_series,
         empty: false,
     }
 }
@@ -452,19 +506,25 @@ mod tests {
         // continuous 3-day run with interior no-traffic days as literal 0.
         let total = vec![dc("2026-06-01", 10), dc("2026-06-03", 30)];
         let unique = vec![dc("2026-06-01", 4), dc("2026-06-03", 9)];
-        let ts = shape_timeseries(&total, &unique);
+        // Tolls only on the 2nd — a day with NO total/unique — so the overlay both extends
+        // onto the shared axis and zero-fills where there were no tolls (CY.2).
+        let challenged = vec![dc("2026-06-02", 7)];
+        let ts = shape_timeseries(&total, &unique, &challenged);
         assert!(!ts.empty);
         assert_eq!(ts.days, vec!["2026-06-01", "2026-06-02", "2026-06-03"]);
         assert_eq!(ts.total, vec![10, 0, 30], "the 2nd zero-fills");
         assert_eq!(ts.unique, vec![4, 0, 9]);
+        assert_eq!(ts.challenged, vec![0, 7, 0], "the toll overlay aligns to the same axis");
         assert_eq!(ts.total.len(), ts.unique.len(), "series stay aligned");
+        assert_eq!(ts.total.len(), ts.challenged.len(), "toll series stays aligned");
     }
 
     #[test]
     fn timeseries_empty_is_flagged() {
-        let ts = shape_timeseries(&[], &[]);
+        let ts = shape_timeseries(&[], &[], &[]);
         assert!(ts.empty);
         assert!(ts.days.is_empty());
+        assert!(ts.challenged.is_empty());
     }
 
     #[test]
@@ -472,9 +532,10 @@ mod tests {
         // unique has a day total doesn't → axis still spans it, total zero-fills there.
         let total = vec![dc("2026-06-01", 5)];
         let unique = vec![dc("2026-06-01", 2), dc("2026-06-02", 1)];
-        let ts = shape_timeseries(&total, &unique);
+        let ts = shape_timeseries(&total, &unique, &[]);
         assert_eq!(ts.days, vec!["2026-06-01", "2026-06-02"]);
         assert_eq!(ts.total, vec![5, 0]);
         assert_eq!(ts.unique, vec![2, 1]);
+        assert_eq!(ts.challenged, vec![0, 0], "no tolls → a flat-zero overlay");
     }
 }

@@ -71,13 +71,37 @@
     <a class="px-2 py-1 rounded-sm {% if audience == "all" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?{{ window_qs|safe }}&paths={{ paths_mode }}&audience=all" href="/admin/analytics?{{ window_qs|safe }}&paths={{ paths_mode }}&audience=all">All {{ audience_counts.all }}</a>
     <a class="px-2 py-1 rounded-sm {% if audience == "humans" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?{{ window_qs|safe }}&paths={{ paths_mode }}&audience=humans" href="/admin/analytics?{{ window_qs|safe }}&paths={{ paths_mode }}&audience=humans">Humans {{ audience_counts.humans }}</a>
     <a class="px-2 py-1 rounded-sm {% if audience == "bots" %}bg-yellow text-navy{% else %}bg-navy text-div-grey{% endif %}" hx-get="/admin/analytics?{{ window_qs|safe }}&paths={{ paths_mode }}&audience=bots" href="/admin/analytics?{{ window_qs|safe }}&paths={{ paths_mode }}&audience=bots">Bots {{ audience_counts.bots }}</a>
+    <!-- Challenged (CY.7) is a SLICE of Bots, not a 4th partition — greylisted IPs served the
+         PoW toll (challenged=1). Styled subordinate (lighter) + separated so it reads as
+         "a subset", and filters every graph/table to tolled traffic. -->
+    <span class="text-navy/30 select-none" aria-hidden="true">&rsaquo;</span>
+    <a class="px-2 py-1 rounded-sm {% if audience == "challenged" %}bg-yellow text-navy{% else %}bg-navy/70 text-div-grey{% endif %}" title="A slice of Bots — IPs walled with the greylist PoW toll" hx-get="/admin/analytics?{{ window_qs|safe }}&paths={{ paths_mode }}&audience=challenged" href="/admin/analytics?{{ window_qs|safe }}&paths={{ paths_mode }}&audience=challenged">Challenged {{ tolls_served }}</a>
     <button class="ml-2 px-2 py-1 rounded-sm bg-navy/70 text-div-grey text-xs" hx-post="/admin/analytics/reclassify-bots" title="Re-run the bot classifier over all stored rows (after retuning the rules) — the stored is_bot is not auto-retuned on every query">&#8635; Reclassify</button>
 </div>
+<!-- CY.9 scope note: the filter reaches the stats/chart/top-pages/status — NOT the
+     diagnostics below the divider. Says so once, up front, so nobody wonders why the
+     Noisy-IPs table doesn't move when they pick Challenged. -->
+<p class="text-xs text-navy/60 -mt-2 mb-4">Scopes the stats, chart, top pages &amp; status. The diagnostics below (scanner signals, sources, performance) always show all traffic.</p>
 
 <div class="flex flex-row flex-wrap gap-x-12 gap-y-3 mb-6">
     <div><span class="text-3xl text-navy">{{ total_requests }}</span><br/><span class="text-sm">{% if audience == "all" %}total views{% else %}{{ audience }} views{% endif %}</span></div>
     <div><span class="text-3xl text-navy">{{ distinct_ips }}</span><br/><span class="text-sm">unique visitors{% if audience != "all" %} ({{ audience }}){% endif %}</span></div>
 </div>
+
+<!-- Greylist toll (CY.2/CY.8) — shown only once the toll has fired (dark on a fresh boot /
+     scrubbed beta, so no zero-noise). Tolls served vs solves = the hard-vs-soft-block read:
+     a LOW solve rate means scrapers bounce off the PoW; HIGH means they're solving through
+     (or a false positive walling a human). IP-based rate so one persistent solver can't skew it. -->
+{% if tolls_served > 0 || clearances > 0 %}
+<h3 class="font-display text-navy uppercase mt-6 mb-1">Greylist toll</h3>
+<p class="text-xs text-navy/60 mb-2">Window-scoped, independent of the audience filter. <a class="underline hover:text-navy" href="/admin/greylist">Manage &rarr;</a></p>
+<div class="flex flex-row flex-wrap gap-x-10 gap-y-3 mb-6">
+    <div><span class="text-3xl text-navy">{{ tolls_served }}</span><br/><span class="text-sm">tolls served</span></div>
+    <div><span class="text-3xl text-navy">{{ challenged_ips }}</span><br/><span class="text-sm">IPs walled</span></div>
+    <div><span class="text-3xl text-navy">{{ clearances }}</span><br/><span class="text-sm">solves ({{ cleared_ips }} IPs)</span></div>
+    <div><span class="text-3xl text-navy">{% if let Some(pct) = solve_rate_pct %}{{ pct }}%{% else %}&mdash;{% endif %}</span><br/><span class="text-sm">solve rate{% if let Some(pct) = solve_rate_pct %} {% if *pct < 34 %}<span class="text-navy/60">(hard block)</span>{% else %}<span class="text-navy/60">(soft)</span>{% endif %}{% endif %}</span></div>
+</div>
+{% endif %}
 
 <h3 class="font-display text-navy uppercase mt-6 mb-2">Traffic per day</h3>
 <p class="text-xs text-navy/60 mb-1">Total views vs unique visitors — the gap is the repeat/scanner signal.</p>
@@ -106,15 +130,22 @@
 </div>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Status breakdown</h3>
-<p class="text-xs text-navy/60 mb-1">Factual — every response by status class (403 &amp; 404 split out: blocked vs probes).</p>
+<p class="text-xs text-navy/60 mb-1">Factual — every response by status class (403 &amp; 404 split out: blocked vs probes; <strong>429 = greylist tolls</strong>, the bot challenge working, not errors).</p>
 <div class="flex flex-row flex-wrap items-center gap-2 mb-2 text-sm">
     <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">2xx {{ status_buckets.s2xx }}</span>
     <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">3xx {{ status_buckets.s3xx }}</span>
     <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">403 {{ status_buckets.s403 }}</span>
     <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">404 {{ status_buckets.s404 }}</span>
+    <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey" title="Greylist PoW tolls — the bot challenge working, not errors">429 {{ status_buckets.s429 }}</span>
     <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">4xx {{ status_buckets.s4xx }}</span>
     <span class="px-2 py-0.5 rounded-sm bg-navy text-div-grey">5xx {{ status_buckets.s5xx }}</span>
 </div>
+
+<!-- CY.9 hierarchy break: everything above responds to the audience filter (the "traffic
+     story"); everything below is unfiltered scanner/source/performance diagnostics. The
+     divider makes that boundary visible instead of 13 flat headings running together. -->
+<hr class="mt-8 mb-3 border-navy/20">
+<p class="font-display text-navy uppercase text-sm tracking-wide mb-4">Diagnostics <span class="normal-case text-xs text-navy/50 font-sans">— all traffic, unaffected by the filter</span></p>
 
 <h3 class="font-display text-navy uppercase mt-6 mb-1">Noisy IPs</h3>
 <p class="text-xs text-navy/60 mb-1">By request volume. The <span class="uppercase font-bold">Scanner</span> badge is INFERRED (an IP hitting many distinct dead paths) — click an IP to drill down.</p>

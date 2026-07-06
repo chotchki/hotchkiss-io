@@ -46,7 +46,7 @@
             </tr>
             {% for e in entries %}
             <tr class="border-b border-navy/10">
-                <td class="py-2 pr-4 font-mono text-navy break-all">{{ e.ip }}</td>
+                <td class="py-2 pr-4 font-mono text-navy whitespace-nowrap">{{ e.ip }}</td>
                 <td class="py-2 pr-4">
                     {{ e.reason }}
                     {% if e.manual %}<span
@@ -84,7 +84,7 @@
             </tr>
             {% for c in candidates %}
             <tr class="border-b border-navy/10">
-                <td class="py-2 pr-4 font-mono text-navy break-all">{{ c.path }}</td>
+                <td class="py-2 pr-4 font-mono text-navy whitespace-nowrap">{{ c.path }}</td>
                 <td class="py-2 pr-4 text-right text-navy/70">{{ c.hits }}</td>
                 <td class="py-2 pr-4 text-right text-navy/70">{{ c.ips }}</td>
             </tr>
@@ -109,7 +109,7 @@
             </tr>
             {% for c in clearances %}
             <tr class="border-b border-navy/10">
-                <td class="py-2 pr-4 font-mono text-navy break-all">{{ c.ip }}</td>
+                <td class="py-2 pr-4 font-mono text-navy whitespace-nowrap">{{ c.ip }}</td>
                 <td class="py-2 pr-4 text-navy/70 whitespace-nowrap">{{ c.cleared_at }}</td>
                 <td class="py-2 pr-4 text-navy/70 whitespace-nowrap">{{ c.solve }}</td>
                 <td class="py-2 text-navy/70 break-all">{{ c.user_agent }}</td>

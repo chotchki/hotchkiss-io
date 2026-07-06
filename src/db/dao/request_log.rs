@@ -85,6 +85,9 @@ pub enum Audience {
     All,
     Humans,
     Bots,
+    /// A slice of Bots — requests that got the greylist toll (CY.7). NOT part of the
+    /// All/Humans/Bots partition; it filters on `challenged`, not `is_bot`.
+    Challenged,
 }
 
 impl Audience {
@@ -96,6 +99,17 @@ impl Audience {
             Audience::All => None,
             Audience::Humans => Some(0),
             Audience::Bots => Some(1),
+            Audience::Challenged => None,
+        }
+    }
+
+    /// The bound `challenged` filter (CY.7): `Some(1)` for Challenged (scope to tolled traffic),
+    /// `None` otherwise (the `?M IS NULL OR challenged = ?M` predicate then matches every row).
+    /// Applied ALONGSIDE `as_bot_filter` in every audience-aware query.
+    pub fn as_challenged_filter(self) -> Option<i64> {
+        match self {
+            Audience::Challenged => Some(1),
+            _ => None,
         }
     }
 
@@ -105,6 +119,7 @@ impl Audience {
             Audience::All => "all",
             Audience::Humans => "humans",
             Audience::Bots => "bots",
+            Audience::Challenged => "challenged",
         }
     }
 
@@ -114,6 +129,7 @@ impl Audience {
         match raw {
             Some("humans") => Audience::Humans,
             Some("bots") => Audience::Bots,
+            Some("challenged") => Audience::Challenged,
             _ => Audience::All,
         }
     }
@@ -160,7 +176,10 @@ pub struct StatusBucketCounts {
     pub s3xx: i64,
     pub s403: i64,
     pub s404: i64,
-    /// 4xx OTHER than 403/404.
+    /// 429 Too Many Requests — the greylist toll (CY.3), split out so a 4xx rise reads as the
+    /// greylist working, not mystery errors.
+    pub s429: i64,
+    /// 4xx OTHER than 403/404/429.
     pub s4xx: i64,
     pub s5xx: i64,
 }
@@ -323,15 +342,17 @@ impl RequestLogDao {
         audience: Audience,
     ) -> Result<i64> {
         let bot = audience.as_bot_filter();
+        let ch = audience.as_challenged_filter();
         Ok(query!(
             r#"
             SELECT COUNT(*) as "count!: i64"
             FROM request_log
-            WHERE ts >= ?1 AND ts < ?2 AND (?3 IS NULL OR is_bot = ?3)
+            WHERE ts >= ?1 AND ts < ?2 AND (?3 IS NULL OR is_bot = ?3) AND (?4 IS NULL OR challenged = ?4)
             "#,
             w.from,
             w.to,
-            bot
+            bot,
+            ch
         )
         .fetch_one(executor)
         .await?
@@ -344,15 +365,17 @@ impl RequestLogDao {
         audience: Audience,
     ) -> Result<i64> {
         let bot = audience.as_bot_filter();
+        let ch = audience.as_challenged_filter();
         Ok(query!(
             r#"
             SELECT COUNT(DISTINCT ip) as "count!: i64"
             FROM request_log
-            WHERE ts >= ?1 AND ts < ?2 AND ip IS NOT NULL AND (?3 IS NULL OR is_bot = ?3)
+            WHERE ts >= ?1 AND ts < ?2 AND ip IS NOT NULL AND (?3 IS NULL OR is_bot = ?3) AND (?4 IS NULL OR challenged = ?4)
             "#,
             w.from,
             w.to,
-            bot
+            bot,
+            ch
         )
         .fetch_one(executor)
         .await?
@@ -382,6 +405,26 @@ impl RequestLogDao {
         )
         .fetch_one(executor)
         .await?)
+    }
+
+    /// Distinct IPs that got the greylist toll over the window (CY.8) — the denominator for the
+    /// hard-vs-soft solve rate (how many WALLED IPs then solved through).
+    pub async fn distinct_challenged_ips(
+        executor: impl SqliteExecutor<'_>,
+        w: &Window,
+    ) -> Result<i64> {
+        Ok(query!(
+            r#"
+            SELECT COUNT(DISTINCT ip) as "count!: i64"
+            FROM request_log
+            WHERE ts >= ?1 AND ts < ?2 AND challenged = 1 AND ip IS NOT NULL
+            "#,
+            w.from,
+            w.to
+        )
+        .fetch_one(executor)
+        .await?
+        .count)
     }
 
     pub async fn count_by_user_agent(
@@ -457,18 +500,20 @@ impl RequestLogDao {
         audience: Audience,
     ) -> Result<Vec<DayCount>> {
         let bot = audience.as_bot_filter();
+        let ch = audience.as_challenged_filter();
         Ok(query_as!(
             DayCount,
             r#"
             SELECT substr(ts, 1, 10) as "day!: String", COUNT(*) as "count!: i64"
             FROM request_log
-            WHERE ts >= ?1 AND ts < ?2 AND (?3 IS NULL OR is_bot = ?3)
+            WHERE ts >= ?1 AND ts < ?2 AND (?3 IS NULL OR is_bot = ?3) AND (?4 IS NULL OR challenged = ?4)
             GROUP BY substr(ts, 1, 10)
             ORDER BY substr(ts, 1, 10) ASC
             "#,
             w.from,
             w.to,
-            bot
+            bot,
+            ch
         )
         .fetch_all(executor)
         .await?)
@@ -482,18 +527,20 @@ impl RequestLogDao {
         audience: Audience,
     ) -> Result<Vec<DayCount>> {
         let bot = audience.as_bot_filter();
+        let ch = audience.as_challenged_filter();
         Ok(query_as!(
             DayCount,
             r#"
             SELECT substr(ts, 1, 10) as "day!: String", COUNT(DISTINCT ip) as "count!: i64"
             FROM request_log
-            WHERE ts >= ?1 AND ts < ?2 AND ip IS NOT NULL AND (?3 IS NULL OR is_bot = ?3)
+            WHERE ts >= ?1 AND ts < ?2 AND ip IS NOT NULL AND (?3 IS NULL OR is_bot = ?3) AND (?4 IS NULL OR challenged = ?4)
             GROUP BY substr(ts, 1, 10)
             ORDER BY substr(ts, 1, 10) ASC
             "#,
             w.from,
             w.to,
-            bot
+            bot,
+            ch
         )
         .fetch_all(executor)
         .await?)
@@ -512,6 +559,7 @@ impl RequestLogDao {
         limit: i64,
     ) -> Result<Vec<PathCount>> {
         let bot = audience.as_bot_filter();
+        let ch = audience.as_challenged_filter();
         Ok(query_as!(
             PathCount,
             r#"
@@ -520,6 +568,7 @@ impl RequestLogDao {
             WHERE ts >= ?1 AND ts < ?2
               AND status < ?3
               AND (?4 IS NULL OR is_bot = ?4)
+              AND (?6 IS NULL OR challenged = ?6)
               AND path NOT LIKE '/styles%'
               AND path NOT LIKE '/vendor%'
               AND path NOT LIKE '/scripts%'
@@ -535,7 +584,8 @@ impl RequestLogDao {
             w.to,
             max_status,
             bot,
-            limit
+            limit,
+            ch
         )
         .fetch_all(executor)
         .await?)
@@ -550,6 +600,7 @@ impl RequestLogDao {
         audience: Audience,
     ) -> Result<StatusBucketCounts> {
         let bot = audience.as_bot_filter();
+        let ch = audience.as_challenged_filter();
         Ok(query_as!(
             StatusBucketCounts,
             r#"
@@ -558,14 +609,16 @@ impl RequestLogDao {
                 COUNT(CASE WHEN status BETWEEN 300 AND 399 THEN 1 END) as "s3xx!: i64",
                 COUNT(CASE WHEN status = 403 THEN 1 END) as "s403!: i64",
                 COUNT(CASE WHEN status = 404 THEN 1 END) as "s404!: i64",
-                COUNT(CASE WHEN status BETWEEN 400 AND 499 AND status NOT IN (403, 404) THEN 1 END) as "s4xx!: i64",
+                COUNT(CASE WHEN status = 429 THEN 1 END) as "s429!: i64",
+                COUNT(CASE WHEN status BETWEEN 400 AND 499 AND status NOT IN (403, 404, 429) THEN 1 END) as "s4xx!: i64",
                 COUNT(CASE WHEN status BETWEEN 500 AND 599 THEN 1 END) as "s5xx!: i64"
             FROM request_log
-            WHERE ts >= ?1 AND ts < ?2 AND (?3 IS NULL OR is_bot = ?3)
+            WHERE ts >= ?1 AND ts < ?2 AND (?3 IS NULL OR is_bot = ?3) AND (?4 IS NULL OR challenged = ?4)
             "#,
             w.from,
             w.to,
-            bot
+            bot,
+            ch
         )
         .fetch_one(executor)
         .await?)
@@ -959,6 +1012,30 @@ mod tests {
 
         let total_5678: i64 = rows.iter().filter(|r| r.ip == "5.6.7.8").map(|r| r.count).sum();
         assert_eq!(total_5678, 2, "5.6.7.8 has two distinct paths, one hit each");
+        Ok(())
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn challenged_audience_filter_and_429_split(pool: SqlitePool) -> Result<()> {
+        // A tolled request (429, challenged) + a normal successful one.
+        let mut tolled = entry("/", 429, Some("9.9.9.9"), None);
+        tolled.challenged = true;
+        tolled.is_bot = true;
+        RequestLogDao::insert(&pool, &tolled).await?;
+        RequestLogDao::insert(&pool, &entry("/pages/x", 200, Some("1.2.3.4"), Some("Mozilla"))).await?;
+
+        let all = Window::custom(None, None);
+        assert_eq!(RequestLogDao::count_since(&pool, &all, Audience::All).await?, 2);
+        assert_eq!(
+            RequestLogDao::count_since(&pool, &all, Audience::Challenged).await?,
+            1,
+            "the challenged filter scopes to the tolled request only"
+        );
+        assert_eq!(RequestLogDao::distinct_challenged_ips(&pool, &all).await?, 1);
+
+        let sb = RequestLogDao::count_by_status_bucket(&pool, &all, Audience::All).await?;
+        assert_eq!(sb.s429, 1, "the 429 toll is counted in its own bucket");
+        assert_eq!(sb.s4xx, 0, "the 429 is NOT double-counted in the 4xx-other bucket");
         Ok(())
     }
 
