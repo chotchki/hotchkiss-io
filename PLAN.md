@@ -74,7 +74,7 @@ Design + rationale (the decisions, the honest limits): [docs/greylist-challenge-
 - [x] CX.7 - Admin: /admin/greylist page (active entries w/ reason+evidence, challenges served, clearances, release, manual pin) + "Greylist this IP" on the IP drill-down; dashboard surfaces challenged counts
 - [x] CX.8 - Integration + e2e tests: seeded-entry challenge flow, exempt paths, clearance passes, authenticated skip, verify-endpoint abuse cases (bad nonce, replay, foreign redir); chromiumoxide e2e solves the real PoW and lands on content
 - [x] CX.9 - Refinement panel: candidate signatures = paths probed by greylisted IPs ∩ never-succeeded, promote-to-ruleset button; clearance-then-kept-scanning escalation documented as deferred
-- [ ] CX.10 - CLAUDE.md + docs (beta dark-launch caveat: request_log scrubbed → auto-detection empty on beta; deferred: escalation, batched writer, fitted model) + beta deploy + watch
+- [x] CX.10 - CLAUDE.md + docs (beta dark-launch caveat: request_log scrubbed → auto-detection empty on beta; deferred: escalation, batched writer, fitted model) + beta deploy + watch
 - [x] CX.11 - Bespoke challenge design chat — align on the canvas pixel-write + keyed-order hashing kernel (stock Anubis PoW is solver-coded in the wild; decide image pipeline, mutation model + verify kernel before building CX.4/CX.6)
 - [x] CX.12 - Beta trip-test affordance: admin "Run sweep now" button (release-safe, no debug seam) to force detection on demand; document the recipe (hit /wp-login.php ×2 → run sweep → greylisted → toll); manual pin covers instant challenge-flow test
 
