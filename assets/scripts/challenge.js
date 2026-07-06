@@ -63,7 +63,6 @@
         status("Paying the toll… " + m.pct + "%");
       } else if (m.type === "done") {
         if (progEl) progEl.value = 100;
-        status("Toll paid. Sending you through…");
         const qs =
           "inner_seed=" + encodeURIComponent(tok.inner_seed) +
           "&ts=" + encodeURIComponent(tok.ts) +
@@ -71,7 +70,22 @@
           "&answer=" + encodeURIComponent(m.answer) +
           "&ms=" + encodeURIComponent(m.ms || 0) +
           "&redir=" + encodeURIComponent(redir);
-        window.location.href = "/challenge/verify?" + qs;
+        const url = "/challenge/verify?" + qs;
+        // Enable the Continue button rather than auto-redirecting, so the visitor sees the toll
+        // was paid and clicks through themselves. (Fall back to auto-redirect if the button's gone.)
+        const btn = document.getElementById("toll-continue");
+        if (btn) {
+          status("Toll paid — click Continue.");
+          btn.disabled = false;
+          btn.addEventListener("click", () => {
+            btn.disabled = true;
+            window.location.href = url;
+          });
+          btn.focus();
+        } else {
+          status("Toll paid. Sending you through…");
+          window.location.href = url;
+        }
       }
     };
     worker.onerror = () => status("The toll solver hit an error. Reload to try again.");

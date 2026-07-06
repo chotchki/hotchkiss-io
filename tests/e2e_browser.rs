@@ -468,16 +468,40 @@ async fn greylisted_browser_pays_the_toll_and_reaches_content() {
     let page = browser.new_page("about:blank").await.expect("new page");
 
     // Greylisted → the home page serves the toll interstitial first.
-    // Greylisted → the home page serves the toll, whose worker solves the PoW, `/challenge/verify`
-    // mints the clearance cookie, and the 302 lands back on the home page. Headless Chrome solves
-    // in well under a second, so we assert the DURABLE outcome (reached the base.html nav, toll
-    // gone) rather than trying to catch the fleeting toll frame.
+    // Greylisted → the home page serves the toll. The worker solves the PoW and ENABLES the
+    // Continue button (no auto-redirect — the visitor clicks through so they can see the toll).
     page.goto(server.url("/")).await.expect("goto /");
     let deadline = Instant::now() + Duration::from_secs(45);
     loop {
         assert!(
             Instant::now() < deadline,
-            "the toll never resolved to site content — the browser didn't solve + redirect"
+            "the toll's Continue button never enabled — the browser didn't solve the PoW"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        // The button exists ONLY on the toll page, and enables only once the solve finishes.
+        let ready: bool = js(
+            &page,
+            "!!document.getElementById('toll-continue') && !document.getElementById('toll-continue').disabled",
+        )
+        .await;
+        if ready {
+            break;
+        }
+    }
+
+    // Click Continue → /challenge/verify → 302 → the home page (which renders the base.html nav).
+    page.find_element("#toll-continue")
+        .await
+        .expect("continue button")
+        .click()
+        .await
+        .expect("click continue");
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "clicking Continue never landed on site content"
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
         let html = page.content().await.unwrap_or_default();

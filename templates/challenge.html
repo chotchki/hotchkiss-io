@@ -25,9 +25,16 @@
             aria-label="Blazing Saddles desert tollbooth"></canvas>
 
         <progress id="toll-progress" class="w-full max-w-md h-3 mb-2" max="100" value="0"></progress>
-        <p id="toll-status" class="font-content text-sm text-navy/70 mb-6" aria-live="polite">
+        <p id="toll-status" class="font-content text-sm text-navy/70 mb-4" aria-live="polite">
             Paying the toll…
         </p>
+
+        <!-- Disabled until the proof-of-work passes, then enabled so the visitor clicks through
+             (the solve is near-instant on a fast machine — this gives a beat to see the toll). -->
+        <button id="toll-continue" type="button" disabled
+            class="mb-6 inline-flex items-center gap-2 rounded bg-navy px-6 py-2.5 font-display text-sm uppercase text-yellow hover:bg-navy/90 disabled:opacity-40 disabled:cursor-not-allowed">
+            Continue
+        </button>
 
         <noscript>
             <p class="font-content text-navy/80">
