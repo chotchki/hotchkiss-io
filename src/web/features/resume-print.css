@@ -14,7 +14,9 @@
 
 :root { --navy: #14213d; --gold: #ffc935; --muted: #5b6377; }
 
-@page { size: Letter; margin: 0.5in 0.6in; }
+/* 0.45in vertical: the résumé runs a hair over two pages at 0.5in, orphaning the
+   last section (Education & clearance) alone onto page 3 */
+@page { size: Letter; margin: 0.45in 0.6in; }
 
 * { box-sizing: border-box; }
 
@@ -25,11 +27,11 @@ h1.resume-name { font-family: "Oswald", "Arial Narrow", sans-serif; font-weight:
 
 /* Section headers — the résumé markdown uses ### (h3, the name h1 is injected + stripped);
    ## (h2) styled too for safety in case content ever uses it */
-h2, h3 { font-family: "Oswald", sans-serif; font-weight: 400; text-transform: uppercase; letter-spacing: 1.2px; font-size: 12pt; color: var(--navy); margin: 13pt 0 5pt; padding-bottom: 2pt; border-bottom: 1.5pt solid var(--navy); break-after: avoid; }
+h2, h3 { font-family: "Oswald", sans-serif; font-weight: 400; text-transform: uppercase; letter-spacing: 1.2px; font-size: 12pt; color: var(--navy); margin: 10pt 0 4pt; padding-bottom: 2pt; border-bottom: 1.5pt solid var(--navy); break-after: avoid; }
 
 p { margin: 3pt 0; }
-ul { margin: 2pt 0 6pt; padding-left: 14pt; }
-li { margin: 1.6pt 0; padding-left: 2pt; }
+ul { margin: 2pt 0 5pt; padding-left: 14pt; }
+li { margin: 1.4pt 0; padding-left: 2pt; }
 li::marker { color: var(--gold); }   /* gold bullets — the brand accent */
 
 a { color: var(--navy); text-decoration: none; }
