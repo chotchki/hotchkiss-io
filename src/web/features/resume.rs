@@ -85,7 +85,9 @@ pub async fn show_resume(
         page: child.clone(),
         pages_path: vec![child.clone()],
         children_pages: ContentPageDao::find_by_parent(&state.pool, Some(child.page_id)).await?,
-        rendered_markdown: cached_transform(&strip_leading_h1(&child.page_markdown))?,
+        rendered_markdown: cached_transform(&separate_role_subtitles(&strip_leading_h1(
+            &child.page_markdown,
+        )))?,
         edit: edit_q.edit.is_some(),
         prev_post: None,
         next_post: None,
@@ -140,7 +142,9 @@ fn render_resume_pdf(child: &ContentPageDao, site_host: &str) -> Result<Vec<u8>>
     {
         return Ok(hit.clone());
     }
-    let body = cached_transform(&strip_leading_h1(&child.page_markdown))?;
+    let body = cached_transform(&separate_role_subtitles(&strip_leading_h1(
+        &child.page_markdown,
+    )))?;
     let title = html_escape(&title);
     let html = resume_html(&title, &body, site_host);
     let pdf = weasyprint(&html)?;
@@ -227,6 +231,26 @@ fn weasyprint(html: &str) -> Result<Vec<u8>> {
     Ok(out.stdout)
 }
 
+/// A role header ("**Org — Title** …") and its italic subtitle sit on adjacent
+/// source lines; markdown renders that single newline as a space, merging the
+/// subtitle into the header line (only visible when the header is short enough
+/// not to wrap). Blank-line them apart so the subtitle keeps its own paragraph.
+fn separate_role_subtitles(markdown: &str) -> String {
+    let lines: Vec<&str> = markdown.lines().collect();
+    let mut out: Vec<&str> = Vec::with_capacity(lines.len());
+    for (i, line) in lines.iter().enumerate() {
+        out.push(line);
+        if line.starts_with("**")
+            && lines
+                .get(i + 1)
+                .is_some_and(|next| next.starts_with('*') && !next.starts_with("**"))
+        {
+            out.push("");
+        }
+    }
+    out.join("\n")
+}
+
 /// Content hash of the markdown: SHA-256 truncated to 128 bits, hex.
 fn content_hash(source: &str) -> String {
     let digest = sha256(source.as_bytes());
@@ -264,6 +288,23 @@ mod tests {
         assert_ne!(pdf_cache_key("T", "a"), pdf_cache_key("T", "b"));
         // Identical inputs -> same key (so the cache actually hits).
         assert_eq!(pdf_cache_key("T", md), pdf_cache_key("T", md));
+    }
+
+    #[test]
+    fn separate_role_subtitles_gives_the_subtitle_its_own_paragraph() {
+        // Adjacent lines are one markdown paragraph — the newline renders as a
+        // space and the italic subtitle merges into the header line.
+        let md = "**Org — Title** · 2016 – 2018\n*Subtitle line.*\n\n- bullet";
+        let fixed = separate_role_subtitles(md);
+        assert_eq!(
+            fixed,
+            "**Org — Title** · 2016 – 2018\n\n*Subtitle line.*\n\n- bullet"
+        );
+        // Idempotent on already-separated input...
+        assert_eq!(separate_role_subtitles(&fixed), fixed);
+        // ...and bold-followed-by-bold (the Skills block shape) is not split.
+        let skills = "**Languages:** Rust\n**Practice:** CI";
+        assert_eq!(separate_role_subtitles(skills), skills);
     }
 
     #[test]
