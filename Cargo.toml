@@ -1,7 +1,7 @@
 [package]
 name = "hotchkiss-io"
 description = "Christopher Hotchkiss's Web Home"
-version = "1.3.1"
+version = "1.3.2"
 edition = "2024"
 
 [features]
