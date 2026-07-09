@@ -21,6 +21,7 @@ use tower_http::services::ServeFile;
 use crate::db::dao::media::{MediaDao, MediaKind, MediaVariantDao};
 use crate::media::is_sha256_hex;
 use crate::web::app_state::AppState;
+use crate::web::session::SessionData;
 
 /// In-flow image height cap (matches the markdown transformer's content images).
 const MAX_IMAGE_HEIGHT_PX: u32 = 480;
@@ -40,7 +41,11 @@ pub fn media_router() -> Router<AppState> {
 /// variant (full-res) → the canonical `/media/file/<url_key>` byte route (which
 /// owns range / caching / nosniff / content-disposition). A UUIDv7 ref is
 /// unguessable, so this adds no enumeration oracle.
-async fn serve_media_by_ref(State(state): State<AppState>, Path(media_ref): Path<String>) -> Response {
+async fn serve_media_by_ref(
+    State(state): State<AppState>,
+    session_data: SessionData,
+    Path(media_ref): Path<String>,
+) -> Response {
     let media = match MediaDao::find_by_ref(&state.pool, &media_ref).await {
         Ok(Some(m)) => m,
         Ok(None) => return (StatusCode::NOT_FOUND, "Not found").into_response(),
@@ -49,6 +54,10 @@ async fn serve_media_by_ref(State(state): State<AppState>, Path(media_ref): Path
             return (StatusCode::INTERNAL_SERVER_ERROR, "media lookup failed").into_response();
         }
     };
+    // Visibility gate (DC.3): denied ≡ the unknown-ref miss above — no oracle.
+    if !media.is_visible_to(session_data.auth_state.role()) {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    }
     let variants = MediaVariantDao::find_by_media_id(&state.pool, media.media_id)
         .await
         .unwrap_or_default();
@@ -62,6 +71,7 @@ async fn serve_media_by_ref(State(state): State<AppState>, Path(media_ref): Path
 /// requests are handled by `ServeFile` (206). Content is immutable → cache hard.
 async fn serve_media_file(
     State(state): State<AppState>,
+    session_data: SessionData,
     Path(url_key): Path<String>,
     req: Request,
 ) -> Response {
@@ -71,14 +81,23 @@ async fn serve_media_file(
     if !is_sha256_hex(&url_key) {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     }
-    let variant = match MediaVariantDao::find_by_url_key(&state.pool, &url_key).await {
-        Ok(Some(v)) => v,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Not found").into_response(),
-        Err(e) => {
-            tracing::error!("media lookup by url_key failed: {e:?}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "media lookup failed").into_response();
-        }
-    };
+    // One query resolves the variant AND the strictest-wins gate rank across
+    // every item sharing this url_key (DC.2 — see the DAO doc for why the
+    // LIMIT-1 owner alone could leak on deduped bytes).
+    let (variant, required_rank) =
+        match MediaVariantDao::find_by_url_key_with_required_rank(&state.pool, &url_key).await {
+            Ok(Some(v)) => v,
+            Ok(None) => return (StatusCode::NOT_FOUND, "Not found").into_response(),
+            Err(e) => {
+                tracing::error!("media lookup by url_key failed: {e:?}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "media lookup failed").into_response();
+            }
+        };
+    // Denied ≡ the unknown-key miss above — a leaked gated URL simply stops
+    // working, with no existence oracle.
+    if (session_data.auth_state.role().rank() as i64) < required_rank {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    }
     // Resolve the on-disk path OFF the async runtime: a hint hit is one stat, a
     // NULL/stale hint scans every root, and a stat to an asleep/wedged external
     // drive can block for seconds — that must not pin a tokio worker (would
@@ -130,9 +149,17 @@ async fn serve_media_file(
         Ok(r) => {
             let mut resp = r.into_response();
             let headers = resp.headers_mut();
+            // Gated bytes cache PRIVATE (DC.4): content-addressing keeps the
+            // browser cache safe + seek-friendly, but a shared cache must never
+            // hold role-gated bytes. Public media keeps the shared-cacheable
+            // policy unchanged.
             headers.insert(
                 header::CACHE_CONTROL,
-                HeaderValue::from_static("public, max-age=31536000, immutable"),
+                if required_rank > 0 {
+                    HeaderValue::from_static("private, max-age=31536000, immutable")
+                } else {
+                    HeaderValue::from_static("public, max-age=31536000, immutable")
+                },
             );
             // Never let an uploaded file run as active content on our canonical
             // origin: the byte route is public + same-origin, and a generic
@@ -187,26 +214,50 @@ fn is_active_content_mime(mime: &str) -> bool {
 /// HTMX swap target: resolve a media ref to its rendered element.
 async fn render_media_embed(
     State(state): State<AppState>,
+    session_data: SessionData,
     Path(media_ref): Path<String>,
 ) -> Response {
     let media = match MediaDao::find_by_ref(&state.pool, &media_ref).await {
         Ok(Some(m)) => m,
         Ok(None) => {
-            return Html(error_span("media not found — the page may need a reload")).into_response()
+            // Same no-store as the denial below — a header DIFFERENCE between
+            // miss and denial would itself be the oracle.
+            return embed_response(error_span("media not found — the page may need a reload"));
         }
         Err(e) => {
             tracing::error!("media embed lookup failed: {e:?}");
-            return Html(error_span("media lookup failed")).into_response();
+            return embed_response(error_span("media lookup failed"));
         }
     };
+    // Visibility gate (DC.3): denied ≡ the bad-ref miss above, byte for byte —
+    // still HTTP 200 so the HTMX swap lands, still no oracle.
+    if !media.is_visible_to(session_data.auth_state.role()) {
+        return embed_response(error_span("media not found — the page may need a reload"));
+    }
     let variants = MediaVariantDao::find_by_media_id(&state.pool, media.media_id)
         .await
         .unwrap_or_default();
-    Html(render_embed_html(&media, &variants)).into_response()
+    embed_response(render_embed_html(&media, &variants))
+}
+
+/// Embed responses are ROLE-DEPENDENT HTML (element vs miss-span) — `no-store`
+/// so no cache, shared or local, can ever hand one viewer's embed to another
+/// (a cached Family embed would leak a gated url_key to anon: an existence
+/// oracle; a cached anon miss-span would blank a Family view). HTMX refetches
+/// per page load anyway, so nothing of value is lost.
+fn embed_response(html: String) -> Response {
+    ([(header::CACHE_CONTROL, "no-store")], Html(html)).into_response()
 }
 
 /// Build the element for a media item — the polymorphic dispatch on `kind`.
 /// `pub(crate)` so the admin library can reuse the playable `<video>`.
+///
+/// GATE INVARIANT (DC): this fn must only ever reference bytes via
+/// `/media/file/<url_key>` URLs — the byte route re-gates STRICTEST-WINS
+/// across items sharing a url_key. The embed/302 handlers gate on the item's
+/// OWN min_role (looser on deduped bytes), which is safe precisely because no
+/// bytes are inlined here. Never emit a `data:` URI or server-read content
+/// from this fn, or deduped gated bytes could leak through a public item.
 pub(crate) fn render_embed_html(media: &MediaDao, variants: &[MediaVariantDao]) -> String {
     let alt = attr_escape(media.title.as_deref().unwrap_or(&media.media_ref));
     let kind = media.kind().unwrap_or(MediaKind::File);
@@ -547,6 +598,7 @@ mod tests {
             height: Some(1116),
             duration_ms: Some(44_908),
             created_at: "now".to_string(),
+            min_role: None,
         }
     }
     fn variant(url_key: &str, mime: &str, codecs: Option<&str>) -> MediaVariantDao {

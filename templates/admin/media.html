@@ -44,6 +44,19 @@
         <p class="text-navy mt-2 font-display uppercase text-sm">Drop files here, or click to select</p>
         <p class="text-navy/60 text-xs mt-1">For a video, drop every encode (AV1 + HEVC) in one go so they group into one item.</p>
         <input id="media-file-input" type="file" multiple class="hidden" />
+        {# Default visibility for THIS upload (DC.5) — media-upload.js sends it as
+           the min_role field. Inside the drop-zone label, so stop clicks from
+           opening the file picker. #}
+        <span class="relative inline-block mt-3" onclick="event.preventDefault(); event.stopPropagation();">
+            <select id="media-upload-visibility"
+                class="appearance-none border border-navy/30 rounded px-3 py-1.5 pr-8 text-sm">
+                <option value="Public">Visibility: Public</option>
+                <option value="Registered">Visibility: Registered</option>
+                <option value="Family">Visibility: Family</option>
+                <option value="Admin">Visibility: Admin-only</option>
+            </select>
+            <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-navy/60">{% call icons::chevron_down() %}</span>
+        </span>
         <p id="media-upload-status" class="text-navy mt-2 text-sm"></p>
         <progress id="media-upload-bar" max="100" value="0" class="hidden w-full mt-2"></progress>
     </label>
@@ -84,7 +97,23 @@
                 {% endfor %}
             </div>
 
+            {% if let Some(v) = c.visibility %}
+            <p><span class="px-2 py-0.5 rounded text-xs font-semibold bg-navy text-yellow uppercase tracking-wide"
+                title="Minimum role required to fetch this item's bytes">{{ v }}</span></p>
+            {% endif %}
             <div class="flex flex-col gap-1 mt-auto">
+                {# Per-item gate control (DC.5) → POST /admin/media/{id}/visibility. #}
+                <form hx-post="/admin/media/{{ c.media_id }}/visibility" class="relative">
+                    <select name="min_role" onchange="this.form.dispatchEvent(new Event('submit', {cancelable: true, bubbles: true}))"
+                        class="w-full appearance-none border border-navy/30 rounded px-2 py-1 pr-7 text-xs"
+                        title="Who can fetch this item's bytes">
+                        <option value="Public"{% if c.visibility_rank == 0 %} selected{% endif %}>Public</option>
+                        <option value="Registered"{% if c.visibility_rank == 1 %} selected{% endif %}>Registered</option>
+                        <option value="Family"{% if c.visibility_rank == 2 %} selected{% endif %}>Family</option>
+                        <option value="Admin"{% if c.visibility_rank == 3 %} selected{% endif %}>Admin-only</option>
+                    </select>
+                    <span class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-navy/60">{% call icons::chevron_down() %}</span>
+                </form>
                 <button type="button" class="copy-ref text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
                     data-ref="{{ c.media_ref }}">Copy <code>![]()</code></button>
                 {% if let Some(key) = c.share_url_key %}

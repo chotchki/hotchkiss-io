@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result};
 use sqlx::{prelude::FromRow, query, query_as, SqliteExecutor};
 
+use super::roles::Role;
+
 /// What a media item IS — drives the render-time dispatch (image → `<img>`,
 /// video → `<video>` multi-source, stl → `<object class="stl-view">`, file → a
 /// download link). Stored as TEXT; constructed typed, read back via [`MediaDao::kind`].
@@ -45,6 +47,10 @@ pub struct MediaDao {
     pub height: Option<i64>,
     pub duration_ms: Option<i64>,
     pub created_at: String,
+    /// Minimum role that may fetch this item's bytes/302/embed (Phase DC).
+    /// `None` is the ONLY public spelling; decode via `min_role_rank` — never
+    /// branch on the raw string (same rule as `content_pages.min_role`).
+    pub min_role: Option<String>,
 }
 
 impl MediaDao {
@@ -53,6 +59,37 @@ impl MediaDao {
         MediaKind::parse(&self.kind)
     }
 
+    /// Fail-closed decode of `min_role` — the exact twin of
+    /// `ContentPageDao::min_role_rank` and the SQL CASE in
+    /// `find_by_url_key_with_required_rank`. Unknown non-NULL values rank as
+    /// TOP-of-ladder (`Role::Admin.rank()`), never public.
+    pub fn min_role_rank(&self) -> u8 {
+        match self.min_role.as_deref() {
+            None => 0,
+            Some("Registered") => 1,
+            Some("Family") => 2,
+            Some(_) => Role::Admin.rank(),
+        }
+    }
+
+    /// May `viewer` fetch this item's bytes / 302 / embed? Media has no
+    /// scheduling axis — the gate is the role clause alone.
+    pub fn is_visible_to(&self, viewer: Role) -> bool {
+        viewer.rank() >= self.min_role_rank()
+    }
+
+    /// The library badge / selector label, from the fail-closed decode (a
+    /// garbage value reads as "Admin-only", never as its own text).
+    pub fn visibility_label(&self) -> Option<&'static str> {
+        match self.min_role_rank() {
+            0 => None,
+            1 => Some("Registered"),
+            2 => Some("Family"),
+            _ => Some("Admin-only"),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         executor: impl SqliteExecutor<'_>,
         media_ref: String,
@@ -61,12 +98,13 @@ impl MediaDao {
         width: Option<i64>,
         height: Option<i64>,
         duration_ms: Option<i64>,
+        min_role: Option<String>,
     ) -> Result<MediaDao> {
         let kind_str = kind.as_str();
         let row = query!(
             r#"
-            INSERT INTO media (media_ref, kind, title, width, height, duration_ms)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO media (media_ref, kind, title, width, height, duration_ms, min_role)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             RETURNING media_id as "media_id!", created_at as "created_at!"
             "#,
             media_ref,
@@ -75,6 +113,7 @@ impl MediaDao {
             width,
             height,
             duration_ms,
+            min_role,
         )
         .fetch_one(executor)
         .await?;
@@ -88,7 +127,25 @@ impl MediaDao {
             height,
             duration_ms,
             created_at: row.created_at,
+            min_role,
         })
+    }
+
+    /// Set just the visibility gate — the library UI's per-item control
+    /// (`POST /admin/media/{id}/visibility`). `None` = public.
+    pub async fn set_min_role(
+        executor: impl SqliteExecutor<'_>,
+        media_id: i64,
+        min_role: Option<String>,
+    ) -> Result<()> {
+        query!(
+            r#"UPDATE media SET min_role = ?1 WHERE media_id = ?2"#,
+            min_role,
+            media_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
     }
 
     /// Lookup by the markdown ref — the transformer's render-time dispatch key.
@@ -100,7 +157,7 @@ impl MediaDao {
             MediaDao,
             r#"
             SELECT media_id as "media_id!", media_ref, kind, title,
-                   width, height, duration_ms, created_at
+                   width, height, duration_ms, created_at, min_role
             FROM media
             WHERE media_ref = ?1
             "#,
@@ -119,7 +176,7 @@ impl MediaDao {
             MediaDao,
             r#"
             SELECT media_id as "media_id!", media_ref, kind, title,
-                   width, height, duration_ms, created_at
+                   width, height, duration_ms, created_at, min_role
             FROM media
             ORDER BY media_id DESC
             "#
@@ -305,6 +362,58 @@ impl MediaVariantDao {
 
         Ok(variant)
     }
+
+    /// The byte route's lookup + gate in ONE query (Phase DC): the variant plus
+    /// the STRICTEST-WINS required rank across ALL media rows sharing this
+    /// `url_key`. The url_key is deterministic in the sha and its index is
+    /// deliberately NON-unique (identical bytes dedup across items), so gating
+    /// by `find_by_url_key`'s arbitrary `LIMIT 1` owner could resolve to the
+    /// LOOSEST item and leak silently. `MAX(rank)` can only over-restrict —
+    /// which breaks visibly (a public embed 404s) instead of leaking. The CASE
+    /// is the same fail-closed ladder as `min_role_rank` / the content_pages
+    /// queries: NULL 0 / Registered 1 / Family 2 / ELSE top.
+    pub async fn find_by_url_key_with_required_rank(
+        executor: impl SqliteExecutor<'_>,
+        url_key: &str,
+    ) -> Result<Option<(MediaVariantDao, i64)>> {
+        let row = query!(
+            r#"
+            SELECT v.variant_id as "variant_id!", v.media_id, v.sha256, v.url_key, v.mime,
+                   v.codecs, v.bytes, v.storage_root, v.width, v.height,
+                   (SELECT MAX(CASE WHEN m.min_role IS NULL THEN 0
+                                    WHEN m.min_role = 'Registered' THEN 1
+                                    WHEN m.min_role = 'Family' THEN 2
+                                    ELSE 3 END)
+                    FROM media_variant v2
+                    JOIN media m ON m.media_id = v2.media_id
+                    WHERE v2.url_key = v.url_key) as "required_rank!: i64"
+            FROM media_variant v
+            WHERE v.url_key = ?1
+            LIMIT 1
+            "#,
+            url_key
+        )
+        .fetch_optional(executor)
+        .await?;
+
+        Ok(row.map(|r| {
+            (
+                MediaVariantDao {
+                    variant_id: r.variant_id,
+                    media_id: r.media_id,
+                    sha256: r.sha256,
+                    url_key: r.url_key,
+                    mime: r.mime,
+                    codecs: r.codecs,
+                    bytes: r.bytes,
+                    storage_root: r.storage_root,
+                    width: r.width,
+                    height: r.height,
+                },
+                r.required_rank,
+            )
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -323,6 +432,7 @@ mod tests {
             Some(1728),
             Some(1116),
             Some(44_908),
+            None,
         )
         .await?;
         assert_eq!(media.kind()?, MediaKind::Video);
@@ -377,14 +487,80 @@ mod tests {
         Ok(())
     }
 
+    /// DC.2's core risk: two items sharing identical bytes (same sha → same
+    /// url_key, index deliberately non-unique). The gate must be the STRICTEST
+    /// owner — a public item + a Family item sharing a sha gate at Family;
+    /// loosest-wins would leak the family copy through the public one's row.
+    /// Garbage min_role on a third owner escalates to top (fail-closed).
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn shared_sha_gates_strictest_wins(pool: SqlitePool) -> Result<()> {
+        let public = MediaDao::create(
+            &pool, "pub-item".into(), MediaKind::File, None, None, None, None, None,
+        )
+        .await?;
+        let family = MediaDao::create(
+            &pool, "fam-item".into(), MediaKind::File, None, None, None, None,
+            Some("Family".to_string()),
+        )
+        .await?;
+        // Identical bytes → identical sha + url_key on both items' variants.
+        for m in [&public, &family] {
+            MediaVariantDao::create(
+                &pool, m.media_id, "sharedsha".into(), "sharedkey".into(),
+                "application/zip".into(), None, 10, None, None, None,
+            )
+            .await?;
+        }
+        let (_, rank) = MediaVariantDao::find_by_url_key_with_required_rank(&pool, "sharedkey")
+            .await?
+            .expect("variant resolves");
+        assert_eq!(rank, 2, "NULL + Family sharing a sha must gate at Family");
+
+        // A public-only key gates at 0.
+        MediaVariantDao::create(
+            &pool, public.media_id, "solosha".into(), "solokey".into(),
+            "application/zip".into(), None, 10, None, None, None,
+        )
+        .await?;
+        let (_, rank) = MediaVariantDao::find_by_url_key_with_required_rank(&pool, "solokey")
+            .await?
+            .unwrap();
+        assert_eq!(rank, 0);
+
+        // Garbage min_role on a third shared owner → top-of-ladder, never public.
+        let garbage = MediaDao::create(
+            &pool, "junk-item".into(), MediaKind::File, None, None, None, None,
+            Some("Bogus".to_string()),
+        )
+        .await?;
+        MediaVariantDao::create(
+            &pool, garbage.media_id, "sharedsha".into(), "sharedkey".into(),
+            "application/zip".into(), None, 10, None, None, None,
+        )
+        .await?;
+        let (_, rank) = MediaVariantDao::find_by_url_key_with_required_rank(&pool, "sharedkey")
+            .await?
+            .unwrap();
+        assert_eq!(rank as u8, crate::db::dao::roles::Role::Admin.rank());
+
+        // An unknown key stays a miss.
+        assert!(
+            MediaVariantDao::find_by_url_key_with_required_rank(&pool, "nokey")
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
     #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
     async fn media_ref_is_unique(pool: SqlitePool) -> Result<()> {
-        MediaDao::create(&pool, "dup".to_string(), MediaKind::Image, None, None, None, None)
+        MediaDao::create(&pool, "dup".to_string(), MediaKind::Image, None, None, None, None, None)
             .await?;
         let second = MediaDao::create(
             &pool,
             "dup".to_string(),
             MediaKind::Image,
+            None,
             None,
             None,
             None,

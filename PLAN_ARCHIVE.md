@@ -757,3 +757,21 @@ Design + rationale (the decisions, the honest limits): [docs/greylist-challenge-
 - [x] DA.6 - CLAUDE.md delta + beta validation: sqlite3-stamp min_role on a throwaway beta page, verify all four listing surfaces + direct-serve deny/allow
 
 
+---
+
+## 2026-07-09
+
+## Phase DB - Page visibility - authoring + nav surface
+
+**Summary:** the authoring surface over DA's predicate — commits `869eca7` + `e0a91ab` (select styling), beta-validated by chris same day (author→gate→deny loop through the real editor: gate via select → logged-out 404 → Public reopens). Editor **Visibility select** (5th metadata cell) rides `PutPageForm.min_role` → `update()` (stamps `page_modified_date` → feed/sitemap validators bust on a flip); the write rule mirrors the cover-typo rule — `"Public"` clears, a known role sets, ABSENT/unrecognized keeps the gate (bad input never silently LOOSENS visibility; the absent-field case protects old-client PUTs). **Inherit-on-create** stamps a child with its parent's gate at birth (top-level pages explicitly born public); no retroactive downward propagation — the ancestor scan stays the enforcement. **Visibility pills** beside every Scheduled pill (4 card templates + editor header + reader/hero), always from `visibility_label()` — the fail-closed decode, never the raw string. **Role-aware nav:** `TopBar::create(…, viewer: Role)` at 17 call sites. **Review catch that mattered:** the first nav cut used `is_visible_to(viewer)` wholesale, which rendered an admin's future-dated DRAFTS as unbadged live-looking tabs — the semantics are now the DAO's `is_nav_visible_to` (role viewer-aware, scheduling hidden-from-everyone) living beside `is_visible_to` so the two gates can't drift, pinned by `Role::iter()` tests both ways. Accepted: no retroactive gate propagation (documented), visibility pills visible to entitled non-admins (tier names only on content you can already read), garbage-gate→'Admin' normalization on resave (fail-closed, unpinned). Styling: the native `<select>` chrome needed `appearance-none` + the input border + a vendored FA `chevron-down` (new icon) — chris's beta catch.
+
+**Validation:** 359 tests green (editor-loop integration incl. garbage/absent-field keep-the-gate, inherit e2e, nav role/schedule units); clippy at baseline; beta `e0a91ab` live with chris's sign-off on the functional loop.
+
+- [x] DB.0 - Phase exit: visibility is authorable in the editor, badged everywhere Scheduled is, nav is role-aware; beta author→gate→deny loop verified
+- [x] DB.1 - Editor Visibility select (Public/Registered/Family/Admin-only) as the 5th metadata-grid cell, through PutPageForm → update() (stamps page_modified_date so feed/sitemap validators bust on a visibility flip)
+- [x] DB.2 - Visibility badge everywhere the Scheduled badge renders (4 card templates + editor header + reader) — admin-facing by construction
+- [x] DB.3 - Inherit-on-create: new child pages default min_role to the parent's (post_page_path has the parent row in hand) — belt+suspenders over the ancestor scan
+- [x] DB.4 - Role-aware TopBar::create (viewer Role param, ~15 call sites) — Family sees gated tabs, Anonymous doesn't; tests
+- [x] DB.5 - Tests + CLAUDE.md delta + beta validation: full author→gate→deny loop through the editor on beta
+
+

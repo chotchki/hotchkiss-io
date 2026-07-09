@@ -68,6 +68,10 @@ pub struct MediaCard {
     /// First variant's HMAC `url_key` → the absolute `/media/file/<key>` direct
     /// link, for "Copy link" (a private, unguessable share/download URL).
     pub share_url_key: Option<String>,
+    /// The gate badge label (DC.5), from the fail-closed decode — `None` = public.
+    pub visibility: Option<&'static str>,
+    /// The decoded rank, for the selector's selected-option logic (0..=3).
+    pub visibility_rank: u8,
 }
 
 pub struct VariantRow {
@@ -108,6 +112,8 @@ pub async fn show_media_library(
         let search = title.to_lowercase();
         // First variant's url_key → the absolute /media/file/<key> share link.
         let share_url_key = variants.first().map(|v| v.url_key.clone());
+        let visibility = m.visibility_label();
+        let visibility_rank = m.min_role_rank();
         cards.push(MediaCard {
             media_id: m.media_id,
             media_ref: m.media_ref,
@@ -118,6 +124,8 @@ pub async fn show_media_library(
             variants: variant_rows,
             search,
             share_url_key,
+            visibility,
+            visibility_rank,
         });
     }
     // Storage panel — each configured root + its free space, so multi-drive
@@ -181,6 +189,7 @@ pub async fn upload_media(
     let mut ref_input: Option<String> = None;
     let mut title: Option<String> = None;
     let mut first_filename: Option<String> = None;
+    let mut min_role: Option<String> = None;
 
     while let Some(mut field) = multipart
         .next_field()
@@ -222,6 +231,13 @@ pub async fn upload_media(
             match name.as_str() {
                 "media_ref" if !value.trim().is_empty() => ref_input = Some(value),
                 "title" if !value.trim().is_empty() => title = Some(value),
+                // Visibility default (DC.5): a file dropped on a GATED page's
+                // editor must inherit that page's gate, not mint public media —
+                // editor-support.js sends the page's current visibility here.
+                // Only the known gate roles are accepted; absent / "Public" /
+                // anything else → public (which is what `fab publish` sends:
+                // nothing).
+                "min_role" => min_role = parse_media_visibility(&value),
                 _ => {}
             }
         }
@@ -262,6 +278,7 @@ pub async fn upload_media(
         primary_probed.width,
         primary_probed.height,
         primary_probed.duration_ms,
+        min_role,
     )
     .await?;
 
@@ -397,6 +414,35 @@ pub async fn rename_media(
     axum::Form(form): axum::Form<RenameForm>,
 ) -> Result<Response, AppError> {
     MediaDao::update_title(&state.pool, media_id, &form.title).await?;
+    Ok(htmx_refresh())
+}
+
+/// Accept ONLY the known gate roles as a media visibility value; everything
+/// else — empty, "Public", garbage, absent — is public (`None`). Media has no
+/// keep-the-existing-gate write path here: upload sets it at birth, and the
+/// explicit per-item selector always submits its full choice.
+fn parse_media_visibility(value: &str) -> Option<String> {
+    match value.trim() {
+        v @ ("Registered" | "Family" | "Admin") => Some(v.to_string()),
+        _ => None,
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct VisibilityForm {
+    #[serde(default)]
+    pub min_role: String,
+}
+
+/// `POST /admin/media/{media_id}/visibility` — the library's per-item gate
+/// control (DC.5). "Public" (or anything unrecognized) clears; a known gate
+/// role sets. Refreshes so the card's badge + selector re-render.
+pub async fn set_media_visibility(
+    State(state): State<AppState>,
+    Path(media_id): Path<i64>,
+    axum::Form(form): axum::Form<VisibilityForm>,
+) -> Result<Response, AppError> {
+    MediaDao::set_min_role(&state.pool, media_id, parse_media_visibility(&form.min_role)).await?;
     Ok(htmx_refresh())
 }
 

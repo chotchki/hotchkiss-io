@@ -65,23 +65,14 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] CW.6 - Models gallery under the tab: reparent/curate the Phase-15 hand-picked models (existing STL/3MF viewer + fab-publish)
 - [ ] CW.7 - Tests (route serves bundle + COOP/COEP scoped; media CORP; models render) + CLAUDE.md + deploy
 
-## Phase DB - Page visibility - authoring + nav surface
-
-- [ ] DB.0 - Phase exit: visibility is authorable in the editor, badged everywhere Scheduled is, nav is role-aware; beta author→gate→deny loop verified
-- [x] DB.1 - Editor Visibility select (Public/Registered/Family/Admin-only) as the 5th metadata-grid cell, through PutPageForm → update() (stamps page_modified_date so feed/sitemap validators bust on a visibility flip)
-- [x] DB.2 - Visibility badge everywhere the Scheduled badge renders (4 card templates + editor header + reader) — admin-facing by construction
-- [x] DB.3 - Inherit-on-create: new child pages default min_role to the parent's (post_page_path has the parent row in hand) — belt+suspenders over the ancestor scan
-- [x] DB.4 - Role-aware TopBar::create (viewer Role param, ~15 call sites) — Family sees gated tabs, Anonymous doesn't; tests
-- [ ] DB.5 - Tests + CLAUDE.md delta + beta validation: full author→gate→deny loop through the editor on beta
-
 ## Phase DC - Media visibility - gating the bytes
 
 - [ ] DC.0 - Phase exit: media.min_role enforced on bytes/302/embed with strictest-wins dedup + private caching; authorable with safe defaults; beta-verified
-- [ ] DC.1 - Migration: media.min_role TEXT NULL (same NULL-only-public, fail-closed semantics) + DAO threading
-- [ ] DC.2 - Byte route gate: SessionData extractor + NEW scalar-aggregate strictest-wins query (MAX rank across ALL media rows sharing the url_key — find_by_url_key/MediaVariantDao untouched); shared-sha unit test (NULL + Family → Family wins); denied → 404
-- [ ] DC.3 - /media/{ref} 302 + /media/embed/{ref} gates via the media row both already load (embed denial = the existing 200 error-span miss shape)
-- [ ] DC.4 - Cache-Control on gated bytes: private, max-age=31536000, immutable (public media unchanged); header test
-- [ ] DC.5 - Authoring defaults: upload_media min_role multipart field; editor-support.js sends the current page's visibility as default (drop-on-gated-page must NOT mint public media); library UI selector + prominent badge + default control (POST /admin/media/{id}/visibility)
+- [x] DC.1 - Migration: media.min_role TEXT NULL (same NULL-only-public, fail-closed semantics) + DAO threading
+- [x] DC.2 - Byte route gate: SessionData extractor + NEW scalar-aggregate strictest-wins query (MAX rank across ALL media rows sharing the url_key — find_by_url_key/MediaVariantDao untouched); shared-sha unit test (NULL + Family → Family wins); denied → 404
+- [x] DC.3 - /media/{ref} 302 + /media/embed/{ref} gates via the media row both already load (embed denial = the existing 200 error-span miss shape)
+- [x] DC.4 - Cache-Control on gated bytes: private, max-age=31536000, immutable (public media unchanged); header test
+- [x] DC.5 - Authoring defaults: upload_media min_role multipart field; editor-support.js sends the current page's visibility as default (drop-on-gated-page must NOT mint public media); library UI selector + prominent badge + default control (POST /admin/media/{id}/visibility)
 - [ ] DC.6 - Tests + CLAUDE.md delta + beta validation: gate a beta media item — anonymous 404, Family 200, private header
 
 ## Phase DD - Audio media kind + player

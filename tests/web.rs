@@ -2709,6 +2709,141 @@ async fn gated_special_page_darkens_its_whole_section() {
     );
 }
 
+// ──────────────────── Phase DC: media byte-gating ────────────────────
+
+/// Upload a small generic file through the REAL multipart path (admin), with an
+/// optional visibility field, returning its media_ref.
+async fn upload_test_file(
+    server: &hotchkiss_io::test_support::TestServer,
+    admin: &reqwest::Client,
+    min_role: Option<&str>,
+) -> String {
+    // DISTINCT bytes per visibility: identical bytes dedup to one sha → one
+    // url_key, and the strictest-wins gate would then (correctly!) gate the
+    // "public" copy too — the shared-sha rule the DAO unit test pins.
+    let content = format!("stored bytes for {}", min_role.unwrap_or("public"));
+    let mut form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(content.into_bytes())
+            .file_name(format!("test-{}.zip", min_role.unwrap_or("public"))),
+    );
+    if let Some(r) = min_role {
+        form = form.text("min_role", r.to_string());
+    }
+    let resp = admin
+        .post(server.url("/admin/media/upload"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success(), "upload failed: {}", resp.status());
+    resp.json::<serde_json::Value>().await.unwrap()["media_ref"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+async fn url_key_for_ref(pool: &sqlx::SqlitePool, media_ref: &str) -> String {
+    sqlx::query(
+        "SELECT v.url_key FROM media_variant v JOIN media m ON m.media_id = v.media_id \
+         WHERE m.media_ref = ?1 LIMIT 1",
+    )
+    .bind(media_ref)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+    .get("url_key")
+}
+
+/// DC end-to-end: an upload carrying min_role=Family mints a GATED item — anon
+/// and Registered get miss-shaped denials on all three routes, Family gets the
+/// bytes with PRIVATE caching; a plain upload stays public with shared caching.
+#[tokio::test]
+async fn gated_media_denies_anon_allows_family_caches_private() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    let gated_ref = upload_test_file(&server, &admin, Some("Family")).await;
+    let public_ref = upload_test_file(&server, &admin, None).await;
+    let gated_key = url_key_for_ref(&server.pool, &gated_ref).await;
+    let public_key = url_key_for_ref(&server.pool, &public_ref).await;
+
+    // Anonymous + Registered: bytes and ref-download are the same 404 a bogus
+    // key/ref gets; the embed is the same 200 error-span a bogus ref gets.
+    for role in [None, Some("Registered")] {
+        let c = client();
+        if let Some(r) = role {
+            c.post(server.url(&format!("/test/login?role={r}"))).send().await.unwrap();
+        }
+        assert_eq!(
+            c.get(server.url(&format!("/media/file/{gated_key}"))).send().await.unwrap().status(),
+            StatusCode::NOT_FOUND,
+            "bytes must deny {role:?}"
+        );
+        assert_eq!(
+            c.get(server.url(&format!("/media/{gated_ref}"))).send().await.unwrap().status(),
+            StatusCode::NOT_FOUND,
+            "ref-download must deny {role:?}"
+        );
+        let denied = c
+            .get(server.url(&format!("/media/embed/{gated_ref}")))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::OK, "embed denial stays 200 (HTMX swap)");
+        let denial_cc = denied.headers()[reqwest::header::CACHE_CONTROL].to_str().unwrap().to_string();
+        assert!(denial_cc.contains("no-store"), "role-dependent embed must be no-store: {denial_cc}");
+        let denied_body = denied.text().await.unwrap();
+        let miss_body = c
+            .get(server.url("/media/embed/no-such-ref"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert_eq!(denied_body, miss_body, "embed denial ≡ bad-ref miss for {role:?}");
+    }
+
+    // Family: 302 on the ref, 200 + PRIVATE immutable caching on the bytes,
+    // a real download button in the embed.
+    let fam = client();
+    fam.post(server.url("/test/login?role=Family")).send().await.unwrap();
+    assert!(
+        fam.get(server.url(&format!("/media/{gated_ref}"))).send().await.unwrap()
+            .status()
+            .is_redirection()
+    );
+    let bytes = fam
+        .get(server.url(&format!("/media/file/{gated_key}")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bytes.status(), StatusCode::OK);
+    let cc = bytes.headers()[reqwest::header::CACHE_CONTROL].to_str().unwrap().to_string();
+    assert!(cc.contains("private") && cc.contains("immutable"), "gated bytes: {cc}");
+    let embed = fam
+        .get(server.url(&format!("/media/embed/{gated_ref}")))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(embed.contains("Download"), "family embed renders the element: {embed}");
+
+    // The public item is untouched: anonymous 200 with SHARED caching.
+    let pub_bytes = client()
+        .get(server.url(&format!("/media/file/{public_key}")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pub_bytes.status(), StatusCode::OK);
+    let cc = pub_bytes.headers()[reqwest::header::CACHE_CONTROL].to_str().unwrap().to_string();
+    assert!(cc.contains("public") && cc.contains("immutable"), "public bytes: {cc}");
+}
+
 // ──────────────────── Phase DB: visibility authoring + role-aware nav ────────────────────
 
 /// The full author→gate→deny loop through the REAL editor form: the Visibility

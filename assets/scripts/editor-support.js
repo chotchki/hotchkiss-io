@@ -59,6 +59,16 @@ function uploadMediaFiles(files) {
   const bar = document.getElementById("media-upload-bar");
   const fd = new FormData();
   for (const f of list) fd.append("file", f, f.name);
+  // A file dropped on a GATED page must not mint public media (DC.5): send the
+  // page's current Visibility select as this upload's default gate. Scoped to
+  // the EDITOR's own form — a bare name-selector would grab the first
+  // min_role select in document order if another ever coexists on the page.
+  const pageVis = document
+    .getElementById("page_markdown")
+    ?.closest("form")
+    ?.querySelector('select[name="min_role"]');
+  if (pageVis && pageVis.value !== "Public")
+    fd.append("min_role", pageVis.value);
   UploadProgress.xhrUpload(
     "/admin/media/upload",
     fd,

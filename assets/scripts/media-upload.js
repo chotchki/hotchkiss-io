@@ -49,6 +49,9 @@
     if (!files.length) return;
     const fd = new FormData();
     for (const f of files) fd.append("file", f, f.name);
+    // Default visibility for this upload (DC.5) — the drop zone's select.
+    const vis = document.getElementById("media-upload-visibility");
+    if (vis && vis.value !== "Public") fd.append("min_role", vis.value);
     if (drop) drop.classList.add("opacity-50", "pointer-events-none");
     UploadProgress.xhrUpload("/admin/media/upload", fd, showProgress)
       .then(() => location.reload())
