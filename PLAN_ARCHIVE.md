@@ -775,3 +775,22 @@ Design + rationale (the decisions, the honest limits): [docs/greylist-challenge-
 - [x] DB.5 - Tests + CLAUDE.md delta + beta validation: full author→gate→deny loop through the editor on beta
 
 
+---
+
+## 2026-07-09
+
+## Phase DC - Media visibility - gating the bytes
+
+**Summary:** media bytes now actually gate — commit `e7535cb`, live-validated on beta same day via a chris-minted API key (gated upload → anon 404 on bytes+302 with the embed denial BYTE-IDENTICAL to a bogus-ref miss, key-read 200 with `private` caching, public control unchanged, test items deleted after). `media.min_role` (migration `0026`, the pages' NULL-only-public fail-closed decode) enforced at all three routes; the byte route resolves variant + gate in ONE query (`find_by_url_key_with_required_rank`) with **strictest-wins** MAX-rank across every item sharing the url_key — content-addressed dedup makes that index deliberately non-unique, so the LIMIT-1 owner could be the loosest and leak silently; MAX only over-restricts, visibly (the e2e proved it by ACCIDENT: its fixture uploads shared bytes and the "public" one correctly gated until the fixtures were made distinct). **Review catches:** the role-dependent embed HTML had no Cache-Control → ALL embed responses now `no-store` (a cached Family embed would leak a gated url_key to anon, and a miss/denial HEADER difference would itself be an oracle — asserted in the e2e); `render_embed_html` carries a gate-invariant comment (byte-URL references ONLY, never inlined bytes — the one path that could bypass strictest-wins); the editor drop-upload's gate-inheritance selector scoped to the editor's own form. **Leak sweep verdict: zero byte-leak paths** — gated URLs can surface in public HTML (gated cover on a public page, author-pasted byte URLs baked into cached HTML/feed) but every fetch re-gates: the documented authoring rule (public page ⇒ public cover; embed gated media via `![](/media/<ref>)` only). Accepted by design: over-restriction on deduped bytes (fail-closed, visible), browser-cache retention after logout (`private,immutable` — the no-DRM family-trust model), per-card hx-post swallow (pre-existing tech-debt). Authoring defaults: upload `min_role` field (`fab publish` sends nothing → public), editor drop-uploads inherit the page's gate, library badge + per-item selector + drop-zone default.
+
+**Validation:** 361 tests green (shared-sha strictest-wins unit incl. garbage→top, the full upload→deny/allow/cache e2e, embed no-store assert); clippy at baseline; beta `e7535cb` matrix all-green live.
+
+- [x] DC.0 - Phase exit: media.min_role enforced on bytes/302/embed with strictest-wins dedup + private caching; authorable with safe defaults; beta-verified
+- [x] DC.1 - Migration: media.min_role TEXT NULL (same NULL-only-public, fail-closed semantics) + DAO threading
+- [x] DC.2 - Byte route gate: SessionData extractor + NEW scalar-aggregate strictest-wins query (MAX rank across ALL media rows sharing the url_key — find_by_url_key/MediaVariantDao untouched); shared-sha unit test (NULL + Family → Family wins); denied → 404
+- [x] DC.3 - /media/{ref} 302 + /media/embed/{ref} gates via the media row both already load (embed denial = the existing 200 error-span miss shape)
+- [x] DC.4 - Cache-Control on gated bytes: private, max-age=31536000, immutable (public media unchanged); header test
+- [x] DC.5 - Authoring defaults: upload_media min_role multipart field; editor-support.js sends the current page's visibility as default (drop-on-gated-page must NOT mint public media); library UI selector + prominent badge + default control (POST /admin/media/{id}/visibility)
+- [x] DC.6 - Tests + CLAUDE.md delta + beta validation: gate a beta media item — anonymous 404, Family 200, private header
+
+

@@ -11,6 +11,7 @@ pub enum MediaKind {
     Image,
     Video,
     Stl,
+    Audio,
     File,
 }
 
@@ -20,6 +21,7 @@ impl MediaKind {
             MediaKind::Image => "image",
             MediaKind::Video => "video",
             MediaKind::Stl => "stl",
+            MediaKind::Audio => "audio",
             MediaKind::File => "file",
         }
     }
@@ -29,6 +31,7 @@ impl MediaKind {
             "image" => Ok(MediaKind::Image),
             "video" => Ok(MediaKind::Video),
             "stl" => Ok(MediaKind::Stl),
+            "audio" => Ok(MediaKind::Audio),
             "file" => Ok(MediaKind::File),
             other => Err(anyhow!("unknown media kind {other:?}")),
         }
@@ -51,6 +54,9 @@ pub struct MediaDao {
     /// `None` is the ONLY public spelling; decode via `min_role_rank` — never
     /// branch on the raw string (same rule as `content_pages.min_role`).
     pub min_role: Option<String>,
+    /// Audiobook chapters (Phase DD): JSON `[{"start_ms": N, "title": "…"}]`,
+    /// stamped at ingest for `Audio`. `None` elsewhere / when chapterless.
+    pub chapters: Option<String>,
 }
 
 impl MediaDao {
@@ -99,12 +105,13 @@ impl MediaDao {
         height: Option<i64>,
         duration_ms: Option<i64>,
         min_role: Option<String>,
+        chapters: Option<String>,
     ) -> Result<MediaDao> {
         let kind_str = kind.as_str();
         let row = query!(
             r#"
-            INSERT INTO media (media_ref, kind, title, width, height, duration_ms, min_role)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            INSERT INTO media (media_ref, kind, title, width, height, duration_ms, min_role, chapters)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             RETURNING media_id as "media_id!", created_at as "created_at!"
             "#,
             media_ref,
@@ -114,6 +121,7 @@ impl MediaDao {
             height,
             duration_ms,
             min_role,
+            chapters,
         )
         .fetch_one(executor)
         .await?;
@@ -128,6 +136,7 @@ impl MediaDao {
             duration_ms,
             created_at: row.created_at,
             min_role,
+            chapters,
         })
     }
 
@@ -157,7 +166,7 @@ impl MediaDao {
             MediaDao,
             r#"
             SELECT media_id as "media_id!", media_ref, kind, title,
-                   width, height, duration_ms, created_at, min_role
+                   width, height, duration_ms, created_at, min_role, chapters
             FROM media
             WHERE media_ref = ?1
             "#,
@@ -176,7 +185,7 @@ impl MediaDao {
             MediaDao,
             r#"
             SELECT media_id as "media_id!", media_ref, kind, title,
-                   width, height, duration_ms, created_at, min_role
+                   width, height, duration_ms, created_at, min_role, chapters
             FROM media
             ORDER BY media_id DESC
             "#
@@ -433,6 +442,7 @@ mod tests {
             Some(1116),
             Some(44_908),
             None,
+            None,
         )
         .await?;
         assert_eq!(media.kind()?, MediaKind::Video);
@@ -495,12 +505,12 @@ mod tests {
     #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
     async fn shared_sha_gates_strictest_wins(pool: SqlitePool) -> Result<()> {
         let public = MediaDao::create(
-            &pool, "pub-item".into(), MediaKind::File, None, None, None, None, None,
+            &pool, "pub-item".into(), MediaKind::File, None, None, None, None, None, None,
         )
         .await?;
         let family = MediaDao::create(
             &pool, "fam-item".into(), MediaKind::File, None, None, None, None,
-            Some("Family".to_string()),
+            Some("Family".to_string()), None,
         )
         .await?;
         // Identical bytes → identical sha + url_key on both items' variants.
@@ -530,7 +540,7 @@ mod tests {
         // Garbage min_role on a third shared owner → top-of-ladder, never public.
         let garbage = MediaDao::create(
             &pool, "junk-item".into(), MediaKind::File, None, None, None, None,
-            Some("Bogus".to_string()),
+            Some("Bogus".to_string()), None,
         )
         .await?;
         MediaVariantDao::create(
@@ -554,12 +564,13 @@ mod tests {
 
     #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
     async fn media_ref_is_unique(pool: SqlitePool) -> Result<()> {
-        MediaDao::create(&pool, "dup".to_string(), MediaKind::Image, None, None, None, None, None)
+        MediaDao::create(&pool, "dup".to_string(), MediaKind::Image, None, None, None, None, None, None)
             .await?;
         let second = MediaDao::create(
             &pool,
             "dup".to_string(),
             MediaKind::Image,
+            None,
             None,
             None,
             None,

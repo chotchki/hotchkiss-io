@@ -134,3 +134,7 @@ The prod→beta snapshot SCRUBS `request_log` for visitor privacy, so the detect
 - **Batched request_log writer** — the sweep + stamp adds no write-path cost today (it reads on a timer), so the existing fire-and-forget insert stands. Trigger: sustained write contention (`SQLITE_BUSY`).
 - **IPv6 `/64` grouping** — moot until an AAAA record exists.... come on AT&T
 - **IP-range (/24) greylisting** — the tuning snapshot showed a `185.177.72.0/24` scanner farm (8+ IPs, thousands of distinct 404s each), greylisted one IP at a time today. Greylisting the whole /24 after N sibling hits is a cheap future win. Deferred.
+
+## Interactions decided elsewhere
+
+- **`/media/file/` is excluded from `request_log` (Phase DD).** Audio/video streaming means hundreds-to-thousands of range requests per listen, and R3 fires at 1000 req/IP/24h (calibrated on ~366-request human days) — two family listeners behind one home NAT would plausibly greylist their OWN IP, and the rows would swamp the Humans/top-paths signal. Since detection READS `request_log`, the exclusion also means byte-route traffic simply doesn't exist to R1/R2/R3 — which is correct: it's static-asset-class traffic, and every gated fetch is separately authenticated at the route. Honest cost: no byte-route analytics; listens stay visible as page/embed views.

@@ -174,6 +174,10 @@ fn dominant_kind(kinds: &[MediaKind]) -> MediaKind {
         MediaKind::Stl
     } else if kinds.contains(&MediaKind::Video) {
         MediaKind::Video
+    } else if kinds.contains(&MediaKind::Audio) {
+        // An audiobook grouped with its cover image is an AUDIO item; the
+        // image is its artwork/thumbnail (same rule as model/video vs image).
+        MediaKind::Audio
     } else if kinds.contains(&MediaKind::Image) {
         MediaKind::Image
     } else {
@@ -279,6 +283,7 @@ pub async fn upload_media(
         primary_probed.height,
         primary_probed.duration_ms,
         min_role,
+        primary_probed.chapters.clone(),
     )
     .await?;
 
@@ -306,7 +311,10 @@ pub async fn upload_media(
     }
 
     // Auto-poster for video (non-fatal — the video still plays without one).
-    if kind == MediaKind::Video {
+    // Audio rides the same path: ffmpeg's frame grab pulls the attached_pic
+    // cover art out of an m4b/mp3, which becomes the library thumbnail AND the
+    // lock-screen artwork (data-artwork on the embed). Artless audio just logs.
+    if matches!(kind, MediaKind::Video | MediaKind::Audio) {
         maybe_add_poster(&state, &hmac_key, media.media_id, primary_sha.clone()).await;
     }
 
@@ -495,8 +503,9 @@ async fn create_variant(
     Ok(())
 }
 
-/// Frame-grab a poster for a video and add it as an image variant. Best-effort:
-/// a failure is logged, not surfaced — the video plays fine without a poster.
+/// Frame-grab a poster for a video and add it as an image variant. Audio items
+/// reuse it: the same ffmpeg command extracts an attached_pic cover (Phase DD).
+/// Best-effort: a failure is logged, not surfaced — the media plays without it.
 async fn maybe_add_poster(state: &AppState, hmac_key: &[u8], media_id: i64, video_sha: String) {
     let store = state.media_store.clone();
     let result: Result<(String, i64, std::path::PathBuf)> = async {
@@ -618,6 +627,9 @@ mod tests {
         assert_eq!(dominant_kind(&[Image, Stl]), Stl);
         assert_eq!(dominant_kind(&[Stl, Image]), Stl);
         assert_eq!(dominant_kind(&[Image, Video]), Video);
+        // An audiobook + its cover art → an Audio item, order-independent.
+        assert_eq!(dominant_kind(&[Image, Audio]), Audio);
+        assert_eq!(dominant_kind(&[Audio, Image]), Audio);
         // No model/video → image wins over a generic file; all-file → File.
         assert_eq!(dominant_kind(&[File, Image]), Image);
         assert_eq!(dominant_kind(&[File]), File);

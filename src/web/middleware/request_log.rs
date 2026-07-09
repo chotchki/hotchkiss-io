@@ -47,15 +47,24 @@ pub async fn log_requests(State(pool): State<SqlitePool>, req: Request, next: Ne
     // /challenge/* is the greylist toll's OWN ceremony (new / verify / image) — excluded (CY.4)
     // so a solving client's ~5 requests don't pollute top-paths. The `challenged=1` stamp lives on
     // the ORIGINAL tolled path (e.g. `/`), not here, so the signal is untouched.
+    // /media/file/ is static-asset-class byte traffic, excluded since Phase DD: audio/video
+    // STREAMING means hundreds-to-thousands of range requests per listen — greylist R3 fires
+    // at 1000 req/IP/24h (calibrated on ~366-request human days), so two family listeners
+    // behind one home NAT would plausibly greylist their OWN IP, and the rows would swamp the
+    // Humans audience + top-paths signal (covers/responsive images already spray this path on
+    // every page view). Honest cost: no byte-route analytics. The embed/302/content routes
+    // still log, so listens are visible as page views.
     #[cfg(debug_assertions)]
     let skip = path.starts_with("/tower-livereload")
         || path.starts_with("/admin/logs")
         || path.starts_with("/admin/analytics")
-        || path.starts_with("/challenge");
+        || path.starts_with("/challenge")
+        || path.starts_with("/media/file/");
     #[cfg(not(debug_assertions))]
     let skip = path.starts_with("/admin/logs")
         || path.starts_with("/admin/analytics")
-        || path.starts_with("/challenge");
+        || path.starts_with("/challenge")
+        || path.starts_with("/media/file/");
 
     // SERVER-handler processing time — the inner stack + handler, measured at the
     // outermost log layer. NOT client page-load/LCP (no TLS/network/download), and it

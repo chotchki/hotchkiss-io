@@ -381,6 +381,50 @@ Your browser can't play this video.</video>"
                 download_button(&full.url_key, &alt, full.bytes),
             )
         }
+        MediaKind::Audio => {
+            // Playback sources = the audio/* variants (universal codecs by
+            // construction — the probe bails to MediaKind::File otherwise).
+            // An image variant is the ARTWORK (MediaSession / cards), never a
+            // source. Degrades to the bare native <audio controls> without JS;
+            // audio-player.js enhances via the data-* attributes (chapters,
+            // skips, rate, MediaSession, resume — Phase DD).
+            let audios: Vec<&MediaVariantDao> = variants
+                .iter()
+                .filter(|v| v.mime.starts_with("audio/"))
+                .collect();
+            if audios.is_empty() {
+                return error_span("audio has no stored stream");
+            }
+            let mut sources = String::new();
+            for v in &audios {
+                sources.push_str(&format!(
+                    "<source src=\"/media/file/{}\" type=\"{}\">",
+                    v.url_key, v.mime
+                ));
+            }
+            let artwork = variants
+                .iter()
+                .rev()
+                .find(|v| v.mime.starts_with("image/"))
+                .map(|v| format!(" data-artwork=\"/media/file/{}\"", v.url_key))
+                .unwrap_or_default();
+            let chapters_attr = media
+                .chapters
+                .as_deref()
+                .map(|c| format!(" data-chapters=\"{}\"", attr_escape(c)))
+                .unwrap_or_default();
+            // Download = the largest audio variant (a hand-added low-bitrate
+            // AAC would be a smaller sibling; the full-quality file downloads).
+            let full = audios.iter().copied().max_by_key(|v| v.bytes).unwrap();
+            format!(
+                "<span class=\"audio-embed flex flex-col items-center gap-2 my-4 w-full max-w-2xl mx-auto\">\
+<audio class=\"w-full\" controls preload=\"metadata\" data-ref=\"{media_ref}\" data-title=\"{alt}\"{chapters_attr}{artwork}>{sources}\
+Your browser can't play this audio.</audio>\
+{download}</span>",
+                media_ref = attr_escape(&media.media_ref),
+                download = download_button(&full.url_key, &alt, full.bytes),
+            )
+        }
         MediaKind::File => {
             let Some(v) = variants.first() else {
                 return error_span("file has no content");
@@ -599,6 +643,7 @@ mod tests {
             duration_ms: Some(44_908),
             created_at: "now".to_string(),
             min_role: None,
+            chapters: None,
         }
     }
     fn variant(url_key: &str, mime: &str, codecs: Option<&str>) -> MediaVariantDao {
@@ -771,6 +816,54 @@ mod tests {
             html.contains("href=\"/media/file/fullstlkey\""),
             "download offers the full-res STL: {html}"
         );
+    }
+
+    /// DD.2: the audio arm — native <audio> with universal sources, the
+    /// data-* contract the player enhances, artwork excluded from sources,
+    /// download = the largest audio variant.
+    #[test]
+    fn audio_renders_player_element_with_chapters_and_download() {
+        let mut m = media("audio");
+        m.title = Some("Test Book".to_string());
+        m.chapters = Some(r#"[{"start_ms":0,"title":"One"}]"#.to_string());
+        let mut full = variant("fullaudio", "audio/mp4", None);
+        full.bytes = 900_000;
+        let mut low = variant("lowaudio", "audio/mp4", None);
+        low.bytes = 100_000;
+        let mut art = variant("artkey", "image/avif", None);
+        art.bytes = 10_000;
+        let html = render_embed_html(&m, &[low.clone(), full, art]);
+        assert!(html.contains("<audio"), "{html}");
+        assert!(html.contains("controls preload=\"metadata\""), "{html}");
+        assert!(html.contains("data-ref=\"intro\""), "{html}");
+        assert!(html.contains("data-title=\"Test Book\""), "{html}");
+        assert!(html.contains("data-chapters="), "carries the chapter JSON: {html}");
+        assert!(html.contains("&quot;start_ms&quot;"), "chapter JSON is attr-escaped: {html}");
+        assert!(html.contains("data-artwork=\"/media/file/artkey\""), "{html}");
+        assert!(
+            html.contains("<source src=\"/media/file/fullaudio\" type=\"audio/mp4\">"),
+            "{html}"
+        );
+        assert!(
+            !html.contains("<source src=\"/media/file/artkey\""),
+            "artwork is never a playback source: {html}"
+        );
+        assert!(
+            html.contains("href=\"/media/file/fullaudio\""),
+            "download = the LARGEST audio variant: {html}"
+        );
+        assert!(html.contains("Your browser can't play this audio."), "{html}");
+    }
+
+    /// A chapterless mp3 renders the bare player contract — no data-chapters,
+    /// no artwork attr — and still downloads.
+    #[test]
+    fn chapterless_audio_omits_optional_attrs() {
+        let html = render_embed_html(&media("audio"), &[variant("mp3key", "audio/mpeg", None)]);
+        assert!(html.contains("<audio"), "{html}");
+        assert!(!html.contains("data-chapters"), "{html}");
+        assert!(!html.contains("data-artwork"), "{html}");
+        assert!(html.contains("type=\"audio/mpeg\""), "{html}");
     }
 
     #[test]

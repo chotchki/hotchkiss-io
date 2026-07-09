@@ -75,3 +75,19 @@ fn encode_avif(png: &[u8]) -> Result<Vec<u8>> {
     img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Avif)?;
     Ok(buf)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Audio reuses the poster path (Phase DD): the frame grab pulls the
+    /// attached_pic cover art out of an m4b. Real ffmpeg, like the probe KAT.
+    #[test]
+    fn m4b_cover_art_extracts_as_poster() {
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/chapters.m4b");
+        let avif = generate_poster(&fixture).expect("cover-art extraction failed");
+        // ISO-BMFF: size(4) + "ftyp" + brand "avif".
+        assert_eq!(&avif[4..12], b"ftypavif", "expected AVIF output");
+    }
+}

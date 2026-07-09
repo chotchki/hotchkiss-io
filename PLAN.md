@@ -65,25 +65,15 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] CW.6 - Models gallery under the tab: reparent/curate the Phase-15 hand-picked models (existing STL/3MF viewer + fab-publish)
 - [ ] CW.7 - Tests (route serves bundle + COOP/COEP scoped; media CORP; models render) + CLAUDE.md + deploy
 
-## Phase DC - Media visibility - gating the bytes
-
-- [ ] DC.0 - Phase exit: media.min_role enforced on bytes/302/embed with strictest-wins dedup + private caching; authorable with safe defaults; beta-verified
-- [x] DC.1 - Migration: media.min_role TEXT NULL (same NULL-only-public, fail-closed semantics) + DAO threading
-- [x] DC.2 - Byte route gate: SessionData extractor + NEW scalar-aggregate strictest-wins query (MAX rank across ALL media rows sharing the url_key — find_by_url_key/MediaVariantDao untouched); shared-sha unit test (NULL + Family → Family wins); denied → 404
-- [x] DC.3 - /media/{ref} 302 + /media/embed/{ref} gates via the media row both already load (embed denial = the existing 200 error-span miss shape)
-- [x] DC.4 - Cache-Control on gated bytes: private, max-age=31536000, immutable (public media unchanged); header test
-- [x] DC.5 - Authoring defaults: upload_media min_role multipart field; editor-support.js sends the current page's visibility as default (drop-on-gated-page must NOT mint public media); library UI selector + prominent badge + default control (POST /admin/media/{id}/visibility)
-- [ ] DC.6 - Tests + CLAUDE.md delta + beta validation: gate a beta media item — anonymous 404, Family 200, private header
-
 ## Phase DD - Audio media kind + player
 
 - [ ] DD.0 - Phase exit: an AAC m4b ingests as Audio with chapters and renders a family-grade player, verified on a real iPhone; /media/file excluded from request_log
-- [ ] DD.1 - Probe: audio-stream classification (attached_pic cover-art guard so an m4b with embedded art isn't misread as video), -show_chapters, media.chapters column migration, UNIVERSAL-only codec map (aac/mp3/flac; opus/vorbis/alac stay MediaKind::File)
-- [ ] DD.2 - Audio embed arm in render_embed_html (STL-arm shape): <audio controls preload=metadata> + audio/* sources + largest-variant download button + data-chapters/data-ref; degrades to bare element without JS
-- [ ] DD.3 - Player JS (first-party, vendored-only): chapter list/seek, ±30s skips, playback rate, MediaSession (+ gated-artwork credentialed-fetch→blob fallback), localStorage resume applied at loadedmetadata AND re-asserted on first play; never autoplay
-- [ ] DD.4 - Exclude /media/file/ from request_log (streaming range-requests would self-greylist a listening household via R3 + swamp the Humans/top-paths signal); note the decision in docs/greylist-challenge-design.md deferred-levers
+- [x] DD.1 - Probe: audio-stream classification (attached_pic cover-art guard so an m4b with embedded art isn't misread as video), -show_chapters, media.chapters column migration, UNIVERSAL-only codec map (aac/mp3/flac; opus/vorbis/alac stay MediaKind::File)
+- [x] DD.2 - Audio embed arm in render_embed_html (STL-arm shape): <audio controls preload=metadata> + audio/* sources + largest-variant download button + data-chapters/data-ref; degrades to bare element without JS
+- [x] DD.3 - Player JS (first-party, vendored-only): chapter list/seek, ±30s skips, playback rate, MediaSession (+ gated-artwork credentialed-fetch→blob fallback), localStorage resume applied at loadedmetadata AND re-asserted on first play; never autoplay
+- [x] DD.4 - Exclude /media/file/ from request_log (streaming range-requests would self-greylist a listening household via R3 + swamp the Humans/top-paths signal); note the decision in docs/greylist-challenge-design.md deferred-levers
 - [ ] DD.5 - On-phone checklist (needs beta gated test page + Family beta user): Safari tab AND installed PWA (separate cookie jar — pick + write down the supported mode), screen-off playback, lock-screen controls/artwork, cold-load resume survives first play, range seeking
-- [ ] DD.6 - Tests (probe KAT for an m4b fixture, embed arm, chapters JSON) + CLAUDE.md delta
+- [x] DD.6 - Tests (probe KAT for an m4b fixture, embed arm, chapters JSON) + CLAUDE.md delta
 
 ## Phase DE - The family Library section
 

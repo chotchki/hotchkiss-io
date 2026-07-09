@@ -24,6 +24,9 @@ pub struct Probed {
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub duration_ms: Option<i64>,
+    /// Audio chapters as JSON `[{"start_ms": N, "title": "…"}]` (Phase DD) —
+    /// only set for `MediaKind::Audio` with at least one chapter.
+    pub chapters: Option<String>,
 }
 
 /// Resolve ffprobe once: `$FFPROBE_BIN`, then brew, then PATH (the mini's
@@ -69,6 +72,7 @@ pub fn probe(path: &Path, original_name: &str) -> Result<Probed> {
             width: None,
             height: None,
             duration_ms: None,
+            chapters: None,
         });
     }
     // `.3mf` is a VIEWABLE model (same kind as STL), with a `model/3mf` mime so the
@@ -85,13 +89,14 @@ pub fn probe(path: &Path, original_name: &str) -> Result<Probed> {
             width: None,
             height: None,
             duration_ms: None,
+            chapters: None,
         });
     }
     let bin = FFPROBE_BIN
         .as_deref()
         .ok_or_else(|| anyhow!("ffprobe not found — `brew install ffmpeg` (looked at $FFPROBE_BIN, /opt/homebrew/bin, /usr/local/bin, PATH)"))?;
     let out = Command::new(bin)
-        .args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"])
+        .args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams", "-show_chapters"])
         .arg(path)
         .output()
         .map_err(|e| anyhow!("failed to spawn ffprobe ({bin}): {e}"))?;
@@ -123,6 +128,7 @@ fn generic_file(original_name: &str) -> Probed {
         width: None,
         height: None,
         duration_ms: None,
+        chapters: None,
     }
 }
 
@@ -132,6 +138,8 @@ struct FfOut {
     streams: Vec<FfStream>,
     #[serde(default)]
     format: FfFormat,
+    #[serde(default)]
+    chapters: Vec<FfChapter>,
 }
 #[derive(Deserialize)]
 struct FfStream {
@@ -141,6 +149,24 @@ struct FfStream {
     pix_fmt: Option<String>,
     width: Option<i64>,
     height: Option<i64>,
+    #[serde(default)]
+    disposition: Option<FfDisposition>,
+}
+/// The stream disposition flags — `attached_pic: 1` marks embedded COVER ART
+/// (an m4b/mp3's art ships as an mjpeg/png "video" stream), the guard that
+/// keeps an audiobook from misreading as a video.
+#[derive(Deserialize)]
+struct FfDisposition {
+    attached_pic: Option<i64>,
+}
+#[derive(Deserialize)]
+struct FfChapter {
+    start_time: Option<String>, // seconds, as a string like format.duration
+    tags: Option<FfChapterTags>,
+}
+#[derive(Deserialize)]
+struct FfChapterTags {
+    title: Option<String>,
 }
 #[derive(Deserialize, Default)]
 struct FfFormat {
@@ -150,20 +176,30 @@ struct FfFormat {
 /// Pure parser over ffprobe's JSON — the testable core.
 fn parse_ffprobe(json: &str) -> Result<Probed> {
     let out: FfOut = serde_json::from_str(json).map_err(|e| anyhow!("ffprobe json parse: {e}"))?;
-    let v = out
-        .streams
-        .iter()
-        .find(|s| s.codec_type.as_deref() == Some("video"))
-        .ok_or_else(|| anyhow!("no video/image stream in ffprobe output"))?;
-    let codec = v.codec_name.as_deref().unwrap_or("");
 
-    // A real (>0) duration means it's a video timeline; absent → a still image.
+    // A real (>0) duration means a playable timeline; absent → a still image.
     let duration_secs = out
         .format
         .duration
         .as_deref()
         .and_then(|d| d.parse::<f64>().ok())
         .filter(|d| *d > 0.0);
+
+    // A REAL video stream — embedded cover art (an m4b/mp3's mjpeg/png art
+    // ships as a "video" stream flagged attached_pic) does NOT count, or every
+    // audiobook with art would misread as an unsupported video (Phase DD).
+    let real_video = out.streams.iter().find(|s| {
+        s.codec_type.as_deref() == Some("video")
+            && s.disposition
+                .as_ref()
+                .is_none_or(|d| d.attached_pic != Some(1))
+    });
+
+    // No real video → an AUDIO stream classifies the file (Phase DD).
+    let Some(v) = real_video else {
+        return parse_audio(&out, duration_secs);
+    };
+    let codec = v.codec_name.as_deref().unwrap_or("");
 
     let (kind, mime, codecs) = if duration_secs.is_some() {
         match codec {
@@ -193,7 +229,62 @@ fn parse_ffprobe(json: &str) -> Result<Probed> {
         width: v.width,
         height: v.height,
         duration_ms: duration_secs.map(|s| (s * 1000.0) as i64),
+        chapters: None,
     })
+}
+
+/// The audio arm (Phase DD): UNIVERSAL-codec map ONLY — aac/mp3/flac play on
+/// every device in the stated mixed-Apple/other family audience. Opus/Vorbis
+/// (never in Safari) and ALAC (only in Safari) bail → the caller degrades the
+/// upload to a downloadable `MediaKind::File` rather than minting a player
+/// that errors for half the household. AAC m4b is the canonical format.
+fn parse_audio(out: &FfOut, duration_secs: Option<f64>) -> Result<Probed> {
+    let a = out
+        .streams
+        .iter()
+        .find(|s| s.codec_type.as_deref() == Some("audio"))
+        .ok_or_else(|| anyhow!("no video or audio stream in ffprobe output"))?;
+    let mime = match a.codec_name.as_deref().unwrap_or("") {
+        "aac" => "audio/mp4",
+        "mp3" => "audio/mpeg",
+        "flac" => "audio/flac",
+        other => bail!("non-universal audio codec {other:?}"),
+    };
+    Ok(Probed {
+        kind: MediaKind::Audio,
+        mime: mime.to_string(),
+        codecs: None,
+        width: None,
+        height: None,
+        duration_ms: duration_secs.map(|s| (s * 1000.0) as i64),
+        chapters: chapters_json(&out.chapters),
+    })
+}
+
+/// ffprobe chapters → the stored JSON `[{"start_ms": N, "title": "…"}]`.
+/// `None` when there are no chapters (a chapterless mp3 needs no list UI).
+fn chapters_json(chapters: &[FfChapter]) -> Option<String> {
+    if chapters.is_empty() {
+        return None;
+    }
+    let entries: Vec<serde_json::Value> = chapters
+        .iter()
+        .map(|c| {
+            let start_ms = c
+                .start_time
+                .as_deref()
+                .and_then(|t| t.parse::<f64>().ok())
+                .map(|s| (s * 1000.0) as i64)
+                .unwrap_or(0);
+            let title = c
+                .tags
+                .as_ref()
+                .and_then(|t| t.title.clone())
+                .unwrap_or_default();
+            serde_json::json!({"start_ms": start_ms, "title": title})
+        })
+        .collect();
+    serde_json::to_string(&entries).ok()
 }
 
 /// `av01.<profile>.<seq_level_idx:02><tier>.<depth>` — profile Main=0, tier Main=M
@@ -282,6 +373,72 @@ mod tests {
         let unknown = generic_file("mystery.zzz");
         assert_eq!(unknown.kind, MediaKind::File);
         assert_eq!(unknown.mime, "application/octet-stream");
+    }
+
+    /// DD.1 KAT against the REAL fixture (aac + attached_pic mjpeg cover + two
+    /// chapters, generated by ffmpeg — the exact shape of a real m4b). Runs the
+    /// actual ffprobe, which is a hard project dependency like d2/weasyprint.
+    #[test]
+    fn m4b_fixture_probes_as_audio_with_chapters() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/chapters.m4b");
+        let p = probe(&path, "chapters.m4b").unwrap();
+        assert_eq!(p.kind, MediaKind::Audio, "cover art must not misread as video");
+        assert_eq!(p.mime, "audio/mp4");
+        assert_eq!(p.codecs, None);
+        assert_eq!(p.duration_ms, Some(2_000));
+        let chapters: serde_json::Value =
+            serde_json::from_str(p.chapters.as_deref().expect("chapters stamped")).unwrap();
+        let ch = chapters.as_array().unwrap();
+        assert_eq!(ch.len(), 2);
+        assert_eq!(ch[0]["start_ms"], 0);
+        assert_eq!(ch[0]["title"], "Chapter One");
+        assert_eq!(ch[1]["start_ms"], 1000);
+        assert_eq!(ch[1]["title"], "Chapter Two");
+    }
+
+    /// The attached_pic guard, pure-JSON: an audio file whose cover art ships
+    /// as a "video" stream must classify by the AUDIO stream.
+    #[test]
+    fn attached_pic_cover_does_not_misread_as_video() {
+        let json = r#"{"streams":[
+            {"codec_type":"audio","codec_name":"aac"},
+            {"codec_type":"video","codec_name":"mjpeg","width":64,"height":64,"disposition":{"attached_pic":1}}
+        ],"format":{"duration":"2.000000"},"chapters":[]}"#;
+        let p = parse_ffprobe(json).unwrap();
+        assert_eq!(p.kind, MediaKind::Audio);
+        assert_eq!(p.mime, "audio/mp4");
+        assert_eq!((p.width, p.height), (None, None), "cover dims are not the item's dims");
+        assert_eq!(p.chapters, None, "no chapters → no list");
+    }
+
+    /// UNIVERSAL-only codec map: mp3/flac in; opus (never Safari) and alac
+    /// (only Safari) bail → the caller degrades to a downloadable File instead
+    /// of a player that errors for half the family.
+    #[test]
+    fn audio_codec_map_is_universal_only() {
+        let probe_codec = |codec: &str| {
+            parse_ffprobe(&format!(
+                r#"{{"streams":[{{"codec_type":"audio","codec_name":"{codec}"}}],"format":{{"duration":"3.0"}}}}"#
+            ))
+        };
+        assert_eq!(probe_codec("mp3").unwrap().mime, "audio/mpeg");
+        assert_eq!(probe_codec("flac").unwrap().mime, "audio/flac");
+        assert!(probe_codec("opus").is_err());
+        assert!(probe_codec("vorbis").is_err());
+        assert!(probe_codec("alac").is_err());
+    }
+
+    /// A REAL video with an audio track stays a video — the guard only skips
+    /// attached_pic streams, not genuine video.
+    #[test]
+    fn real_video_with_audio_track_stays_video() {
+        let json = r#"{"streams":[
+            {"codec_type":"audio","codec_name":"aac"},
+            {"codec_type":"video","codec_name":"hevc","level":150,"pix_fmt":"yuv420p","width":1920,"height":1080,"disposition":{"attached_pic":0}}
+        ],"format":{"duration":"10.0"}}"#;
+        let p = parse_ffprobe(json).unwrap();
+        assert_eq!(p.kind, MediaKind::Video);
+        assert_eq!(p.codecs.as_deref(), Some("hvc1"));
     }
 
     #[test]

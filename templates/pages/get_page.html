@@ -20,6 +20,9 @@
 <link rel="stylesheet" href="/vendor/highlightjs/github.min.css?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" />
 <script defer src="/vendor/highlightjs/highlight.min.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 <script defer src="/scripts/code-highlight.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+{# Audiobook player (Phase DD): enhances audio embeds — chapters, skips, rate,
+   MediaSession, resume. First-party, degrades to native controls without it. #}
+<script defer src="/scripts/audio-player.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 {% if auth_state.is_admin() && edit %}
 <script src="/scripts/upload-progress.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 <script src="/scripts/editor-support.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
