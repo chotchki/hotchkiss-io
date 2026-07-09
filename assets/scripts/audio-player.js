@@ -15,6 +15,14 @@
  *     nexttrack/prevtrack skip between volumes from the lock screen, and
  *     starting one player pauses the others. A single-embed page is a
  *     playlist of one — none of this fires.
+ *   - LOCKED-screen advance (DG.1 plan B, phone-proven necessary): iOS mutes
+ *     a backgrounded element that never had a user gesture — `next.play()`
+ *     advanced SILENTLY until unlock. So when `ended` fires with the page
+ *     hidden, the JUST-FINISHED element (which owns the live audio session)
+ *     ADOPTS the next track: swaps its src, saves under the next book's
+ *     resume key, presents the next book's lock-screen metadata. On
+ *     visibilitychange→visible it hands position back to the real per-book
+ *     player (one tap to resume if iOS blocks the gestureless play there).
  *
  * Embeds arrive via an HTMX swap, so we scan on load AND after settles,
  * guarded per-element by data-enhanced. Degrades to the bare native controls
@@ -72,6 +80,10 @@
     const posKey = POS_PREFIX + ref;
     const savedPos = parseFloat(localStorage.getItem(posKey) || "0");
     let resumed = false;
+    // Locked-screen adoption state: when set, THIS element is playing the
+    // NEXT book's stream on behalf of {ref, title, artwork, el} — saves and
+    // lock-screen metadata follow the adopted track, not this element's own.
+    let adopted = null;
     // Distinguish OUR seeks from the user's: a user who scrubs the timeline
     // before pressing play (e.g. deliberately back to 0:00 to restart) must
     // never be yanked back by the first-play re-assert below.
@@ -89,6 +101,7 @@
       userSeeked = true;
     });
     const applyResume = () => {
+      if (adopted) return; // adopted stream seeks via its own one-shot below
       if (resumed || !(savedPos > 3)) return; // near-zero → just start over
       if (audio.duration && savedPos > audio.duration - 5) return; // finished
       seekTo(savedPos);
@@ -108,7 +121,9 @@
     let lastSave = 0;
     const save = () => {
       try {
-        localStorage.setItem(posKey, String(audio.currentTime));
+        // Under adoption the position belongs to the ADOPTED book.
+        const key = adopted ? POS_PREFIX + adopted.ref : posKey;
+        localStorage.setItem(key, String(audio.currentTime));
       } catch {
         /* storage full/blocked — resume just won't persist */
       }
@@ -132,18 +147,89 @@
           if (other !== audio && !other.paused) other.pause();
         });
     });
-    // Auto-advance: chain the next volume from an ENDED playback — the same
-    // active audio session, which is what lets iOS allow it (a page-load
-    // autoplay would be blocked, and we never do that). The next player's own
-    // first-play hooks apply its saved position + the global rate. If iOS
-    // still blocks with the screen locked, the src-swap-on-one-element
-    // fallback is the DG.1 plan B — validate on the real phone first.
-    audio.addEventListener("ended", () => {
-      const next = neighborAudio(audio, 1);
-      if (!next) return;
-      next.play().catch(() => {
-        /* blocked — the listener taps play; no worse than pre-DG */
+    // Adoption (locked-screen advance): swap THIS element's stream to the
+    // next book. `src` overrides the <source> children, and the hand-back
+    // reverts it (removeAttribute + load re-selects the children). Play
+    // starts immediately to keep the audio session hot; the resume seek +
+    // rate re-assert ride a one-shot loadedmetadata (guarded against a
+    // second adoption racing in before it fires).
+    const adoptTrack = (next) => {
+      const srcEl = next.querySelector("source");
+      const src = next.currentSrc || (srcEl ? srcEl.src : "");
+      if (!src) return;
+      // Park the OUTGOING book's position under its own key before the
+      // adopted ref takes over save() — the periodic save is up to 5s stale.
+      save();
+      adopted = {
+        ref: next.dataset.ref,
+        title: next.dataset.title || "Audio",
+        artwork: next.dataset.artwork || "",
+        el: next,
+      };
+      const t = adopted;
+      audio.src = src;
+      audio.load();
+      audio.addEventListener(
+        "loadedmetadata",
+        () => {
+          if (adopted !== t) return;
+          audio.playbackRate = RATES[rateIdx];
+          const pos = parseFloat(
+            localStorage.getItem(POS_PREFIX + t.ref) || "0",
+          );
+          if (pos > 3 && !(audio.duration && pos > audio.duration - 5))
+            seekTo(pos);
+        },
+        { once: true },
+      );
+      audio.play().catch(() => {
+        /* even the blessed element got blocked — one tap resumes */
       });
+    };
+    // Auto-advance: with the page VISIBLE, chain the real next element (its
+    // own hooks apply resume + rate — phone-proven). With the page HIDDEN
+    // (locked phone / backgrounded PWA), iOS keeps a gesture-less element
+    // MUTED until unlock — phone-proven too — so the finished element,
+    // which owns the live audio session, adopts the next stream instead.
+    audio.addEventListener("ended", () => {
+      const base = adopted ? adopted.el : audio;
+      const next = neighborAudio(base, 1);
+      if (!next) return;
+      if (document.hidden) {
+        adoptTrack(next);
+      } else {
+        next.play().catch(() => {
+          /* blocked — the listener taps play; no worse than pre-DG */
+        });
+      }
+    });
+    // Hand-back: the moment the page is visible again, move playback to the
+    // real per-book player at the carried position so the UI (chapters,
+    // highlight, its own controls) matches what's playing. If iOS blocks the
+    // gesture-less play here, the player sits paused at the RIGHT spot.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible" || !adopted) return;
+      const t = adopted;
+      const pos = audio.currentTime;
+      const wasPlaying = !audio.paused;
+      // Pause FIRST: the pause-triggered save must file under the adopted
+      // book's key; clearing `adopted` before it would corrupt the host
+      // book's resume position with the adopted book's time.
+      audio.pause();
+      adopted = null;
+      audio.removeAttribute("src");
+      audio.load();
+      try {
+        localStorage.setItem(POS_PREFIX + t.ref, String(pos));
+      } catch {
+        /* resume falls to the element's own saves */
+      }
+      t.el.currentTime = pos;
+      if (wasPlaying) {
+        t.el.play().catch(() => {
+          /* one tap resumes — position is already right */
+        });
+      }
     });
 
     const skip = (delta) => {
@@ -227,6 +313,7 @@
       });
       controls.insertAdjacentElement("afterend", list);
       audio.addEventListener("timeupdate", () => {
+        if (adopted) return; // another book's times — highlight would lie
         let current = -1;
         for (let i = 0; i < rows.length; i++) {
           if (audio.currentTime >= rows[i].startS) current = i;
@@ -245,35 +332,40 @@
     // gated covers doesn't fetch N images, and the blob URL is cached
     // per-element (created once, never rebuilt → nothing accumulates).
     if ("mediaSession" in navigator) {
-      let artworkUrl = null;
-      let artworkTried = false;
+      // Blob URLs cached per RESOLVED track ref (own or adopted) — created
+      // once each, never rebuilt, so a long locked-screen series marathon
+      // accumulates one small blob per book, not per claim.
+      const artCache = {};
       const claimSession = () => {
         const ms = navigator.mediaSession;
+        // Under adoption the lock screen presents the ADOPTED book.
+        const track = adopted
+          ? { ref: adopted.ref, title: adopted.title, art: adopted.artwork }
+          : { ref, title, art: audio.dataset.artwork };
         const setMeta = () => {
           try {
-            const meta = { title, artist: "hotchkiss.io" };
-            if (artworkUrl)
-              meta.artwork = [{ src: artworkUrl, sizes: "512x512" }];
+            const meta = { title: track.title, artist: "hotchkiss.io" };
+            if (artCache[track.ref])
+              meta.artwork = [{ src: artCache[track.ref], sizes: "512x512" }];
             ms.metadata = new MediaMetadata(meta);
           } catch {
             /* MediaMetadata unsupported — controls still work */
           }
         };
         setMeta();
-        const art = audio.dataset.artwork;
-        if (art && !artworkTried) {
-          artworkTried = true;
+        if (track.art && !(track.ref in artCache)) {
+          artCache[track.ref] = null; // fetch once even if it fails
           // Credentialed in-page fetch → blob URL: the lock screen's own
           // fetch of a GATED cover may go out cookieless and 404; a blob is
           // local and needs no credentials.
-          fetch(art, { credentials: "same-origin" })
+          fetch(track.art, { credentials: "same-origin" })
             .then((r) =>
               r.ok
                 ? r.blob()
                 : Promise.reject(new Error("artwork " + r.status)),
             )
             .then((b) => {
-              artworkUrl = URL.createObjectURL(b);
+              artCache[track.ref] = URL.createObjectURL(b);
               setMeta();
             })
             .catch(() => {
@@ -303,14 +395,24 @@
         // the ends hides the button — a single-book page shows no next/prev.
         // Re-resolved on every claim (each `play`), so late-settling embeds
         // are picked up by the time anyone can press the button.
+        // Neighbors resolve from the ADOPTED element under adoption, so a
+        // lock-screen "next" during book N+1 goes to N+2, not back to N+1.
         const jump = (delta) => () => {
-          const target = neighborAudio(audio, delta);
+          const base = adopted ? adopted.el : audio;
+          const target = neighborAudio(base, delta);
           if (!target) return;
+          if (document.hidden) {
+            // Locked: a fresh element would play muted (the phone-proven
+            // iOS behavior) — adopt in EITHER direction instead.
+            adoptTrack(target);
+            return;
+          }
           audio.pause();
           target.play().catch(() => {});
         };
-        setHandler("nexttrack", neighborAudio(audio, 1) ? jump(1) : null);
-        setHandler("previoustrack", neighborAudio(audio, -1) ? jump(-1) : null);
+        const base = adopted ? adopted.el : audio;
+        setHandler("nexttrack", neighborAudio(base, 1) ? jump(1) : null);
+        setHandler("previoustrack", neighborAudio(base, -1) ? jump(-1) : null);
       };
       audio.addEventListener("play", claimSession);
     }
