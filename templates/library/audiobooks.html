@@ -7,7 +7,13 @@
 
 {% block content %}
 <div class="max-w-5xl mx-auto">
-<h1 class="text-2xl font-display text-navy mb-4">AudioBooks</h1>
+<div class="flex flex-row items-baseline justify-between mb-4">
+    <h1 class="text-2xl font-display text-navy">AudioBooks</h1>
+    {% if auth_state.is_admin() && section_exists %}
+    <a href="/pages/library/audiobooks?edit"
+        class="inline-flex items-center gap-1 text-sm text-navy underline">{% call icons::pen() %} Edit section</a>
+    {% endif %}
+</div>
 
 {% if !section_exists %}
 <p class="text-navy italic">No audiobooks yet.</p>

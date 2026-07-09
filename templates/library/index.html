@@ -37,6 +37,13 @@
                 <span class="text-div-grey/80 text-sm">{{ door.excerpt }}</span>
                 {% endif %}
             </a>
+            {% if auth_state.is_admin() %}
+            {# Sibling of the door <a>, never nested (invalid HTML). The
+               section's content page is otherwise unreachable — /library
+               routes shadow it. #}
+            <a href="/pages/library/{{ door.page_name }}?edit"
+                class="inline-flex items-center gap-1 mt-1 text-sm text-navy underline">{% call icons::pen() %} Edit section</a>
+            {% endif %}
         </li>
         {% endfor %}
     </ul>

@@ -3516,6 +3516,11 @@ async fn library_gate_states_and_family_entry() {
         listing.contains("/pages/library/audiobooks/first-book"),
         "the card links into the content tree"
     );
+    // The admin edit-section affordance (DE.7) never renders for Family.
+    assert!(
+        !doors.contains("Edit section") && !listing.contains("Edit section"),
+        "edit-section links are admin-only"
+    );
     let book = fam
         .get(server.url("/pages/library/audiobooks/first-book"))
         .send()
@@ -3645,6 +3650,24 @@ async fn library_admin_authoring_loop_creates_gated_pages() {
     assert!(
         listing.contains("hx-post=\"/pages/library/audiobooks\""),
         "New-book form renders once the section exists"
+    );
+    // Edit-section affordance (DE.7): the section's content page is shadowed
+    // by the /library routes, so the indexes must link its editor.
+    assert!(
+        listing.contains("/pages/library/audiobooks?edit"),
+        "the section index links the section editor for admin"
+    );
+    let doors = admin
+        .get(server.url("/library"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        doors.contains("/pages/library/audiobooks?edit"),
+        "the door carries an admin edit link"
     );
     admin
         .post(server.url("/pages/library/audiobooks"))
