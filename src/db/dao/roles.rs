@@ -77,4 +77,18 @@ mod tests {
         ranks.dedup();
         assert_eq!(ranks.len(), Role::iter().count());
     }
+
+    /// Admin is THE TOP of the ladder — the fail-closed catch-alls (the
+    /// `min_role` decode's `Role::Admin.rank()` arm and the SQL CASE's
+    /// `else 3`) mean "maximum restriction". If a variant ever outranked
+    /// Admin, "unknown value" would silently decode to a MIDDLE tier — a
+    /// leak. Renumbering the ladder means revisiting every catch-all first.
+    #[test]
+    fn admin_is_the_top_rank() {
+        assert_eq!(
+            Role::Admin.rank(),
+            Role::iter().map(Role::rank).max().unwrap(),
+            "Admin must outrank every variant — see the fail-closed catch-alls"
+        );
+    }
 }

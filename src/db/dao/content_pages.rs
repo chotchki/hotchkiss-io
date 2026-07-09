@@ -6,6 +6,8 @@ use sqlx::{
     SqliteExecutor,
 };
 
+use super::roles::Role;
+
 #[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct ContentPageDao {
     pub page_id: i64,
@@ -19,6 +21,9 @@ pub struct ContentPageDao {
     pub page_creation_date: chrono::DateTime<Utc>,
     pub page_modified_date: chrono::DateTime<Utc>,
     pub special_page: bool,
+    /// Minimum role that may READ this page (Phase DA). `None` is the ONLY
+    /// public spelling; see `min_role_rank` for the fail-closed decode.
+    pub min_role: Option<String>,
 }
 
 impl ContentPageDao {
@@ -72,6 +77,7 @@ impl ContentPageDao {
             page_creation_date: result.page_creation_date,
             page_modified_date: result.page_modified_date,
             special_page: result.special_page,
+            min_role: None,
         })
     }
 
@@ -103,9 +109,10 @@ impl ContentPageDao {
             page_cover_attachment_id = ?6,
             page_order = ?7,
             page_creation_date = ?8,
+            min_role = ?9,
             page_modified_date = datetime('now', 'utc')
         WHERE
-            page_id = ?9
+            page_id = ?10
         RETURNING
             page_modified_date as "page_modified_date: DateTime<Utc>"
         "#,
@@ -117,6 +124,7 @@ impl ContentPageDao {
             self.page_cover_attachment_id,
             self.page_order,
             self.page_creation_date,
+            self.min_role,
             self.page_id
         )
         .fetch_one(executor)
@@ -226,7 +234,8 @@ impl ContentPageDao {
                     page_order,
                     page_creation_date as "page_creation_date: DateTime<Utc>",
                     page_modified_date as "page_modified_date: DateTime<Utc>",
-                    special_page
+                    special_page,
+                    min_role
                 from
                     content_pages
                 where
@@ -259,7 +268,8 @@ impl ContentPageDao {
                     page_order,
                     page_creation_date as "page_creation_date: DateTime<Utc>",
                     page_modified_date as "page_modified_date: DateTime<Utc>",
-                    special_page
+                    special_page,
+                    min_role
                 from
                     content_pages
                 where
@@ -293,7 +303,8 @@ impl ContentPageDao {
                     page_order,
                     page_creation_date as "page_creation_date: DateTime<Utc>",
                     page_modified_date as "page_modified_date: DateTime<Utc>",
-                    special_page
+                    special_page,
+                    min_role
                 from
                     content_pages
                 where
@@ -330,7 +341,8 @@ impl ContentPageDao {
                     page_order,
                     page_creation_date as "page_creation_date: DateTime<Utc>",
                     page_modified_date as "page_modified_date: DateTime<Utc>",
-                    special_page
+                    special_page,
+                    min_role
                 from
                     content_pages
                 where
@@ -350,16 +362,20 @@ impl ContentPageDao {
     /// Count children of `parent_page_id`, optionally filtered by `search`
     /// (matched case-insensitively against title / markdown / slug; an empty
     /// string disables the filter). Shared by the paginated `/blog` + `/projects`
-    /// listings (see `web/features/listing.rs`). For a non-admin viewer
-    /// (`viewer_is_admin = false`) it counts ONLY published pages — the SQL-side
-    /// `datetime()`-normalized publish gate, special pages exempt — so the count
-    /// matches the filtered fetch and the pager stays consistent (Phase CU).
+    /// listings (see `web/features/listing.rs`). Applies BOTH viewer gates
+    /// SQL-side so the count matches the filtered fetch and the pager stays
+    /// consistent: the `datetime()`-normalized publish gate (Phase CU — non-admin
+    /// sees only published, special pages exempt) and the `min_role` rank CASE
+    /// (Phase DA — fail-closed, special pages NOT exempt; the CASE must stay
+    /// byte-identical across the trio AND in lockstep with `min_role_rank`).
     pub async fn count_children(
         executor: impl SqliteExecutor<'_>,
         parent_page_id: Option<i64>,
         search: &str,
-        viewer_is_admin: bool,
+        viewer: Role,
     ) -> Result<i64> {
+        let viewer_is_admin = viewer == Role::Admin;
+        let viewer_rank = viewer.rank() as i64;
         let row = query!(
             r#"
                 select count(*) as "count!: i64"
@@ -372,10 +388,15 @@ impl ContentPageDao {
                   and (?3
                        or special_page = 1
                        or datetime(page_creation_date) <= datetime('now'))
+                  and (case when min_role is null then 0
+                            when min_role = 'Registered' then 1
+                            when min_role = 'Family' then 2
+                            else 3 end) <= ?4
             "#,
             parent_page_id,
             search,
-            viewer_is_admin
+            viewer_is_admin,
+            viewer_rank
         )
         .fetch_one(executor)
         .await?;
@@ -383,17 +404,20 @@ impl ContentPageDao {
     }
 
     /// One page of children newest-first (the `/blog` ordering), with optional
-    /// `search` + LIMIT/OFFSET. Empty `search` disables the filter. Non-admins see
-    /// only published rows (the same `datetime()`-normalized gate as
-    /// `count_children`) so the window matches the count (Phase CU).
+    /// `search` + LIMIT/OFFSET. Empty `search` disables the filter. Applies the
+    /// same publish gate (Phase CU) + `min_role` rank CASE (Phase DA) as
+    /// `count_children` — the predicates MUST stay identical or the pager
+    /// desyncs from the rows shown.
     pub async fn find_children_newest_paged(
         executor: impl SqliteExecutor<'_>,
         parent_page_id: Option<i64>,
         search: &str,
         limit: i64,
         offset: i64,
-        viewer_is_admin: bool,
+        viewer: Role,
     ) -> Result<Vec<ContentPageDao>> {
+        let viewer_is_admin = viewer == Role::Admin;
+        let viewer_rank = viewer.rank() as i64;
         let content_pages: Vec<ContentPageDao> = query_as!(
             ContentPageDao,
             r#"
@@ -408,7 +432,8 @@ impl ContentPageDao {
                     page_order,
                     page_creation_date as "page_creation_date: DateTime<Utc>",
                     page_modified_date as "page_modified_date: DateTime<Utc>",
-                    special_page
+                    special_page,
+                    min_role
                 from content_pages
                 where parent_page_id IS ?1
                   and (?2 = ''
@@ -418,6 +443,10 @@ impl ContentPageDao {
                   and (?5
                        or special_page = 1
                        or datetime(page_creation_date) <= datetime('now'))
+                  and (case when min_role is null then 0
+                            when min_role = 'Registered' then 1
+                            when min_role = 'Family' then 2
+                            else 3 end) <= ?6
                 order by page_creation_date DESC, page_id DESC
                 limit ?3 offset ?4
             "#,
@@ -425,7 +454,8 @@ impl ContentPageDao {
             search,
             limit,
             offset,
-            viewer_is_admin
+            viewer_is_admin,
+            viewer_rank
         )
         .fetch_all(executor)
         .await?;
@@ -433,17 +463,19 @@ impl ContentPageDao {
     }
 
     /// One page of children by manual `page_order` (the `/projects` ordering),
-    /// with optional `search` + LIMIT/OFFSET. Non-admins see only published rows
-    /// (the same `datetime()`-normalized gate as `count_children`) so the window
-    /// matches the count (Phase CU).
+    /// with optional `search` + LIMIT/OFFSET. Same paired gates as
+    /// `count_children` (publish + `min_role` CASE) — predicates identical by
+    /// construction, see the parity tests.
     pub async fn find_children_ordered_paged(
         executor: impl SqliteExecutor<'_>,
         parent_page_id: Option<i64>,
         search: &str,
         limit: i64,
         offset: i64,
-        viewer_is_admin: bool,
+        viewer: Role,
     ) -> Result<Vec<ContentPageDao>> {
+        let viewer_is_admin = viewer == Role::Admin;
+        let viewer_rank = viewer.rank() as i64;
         let content_pages: Vec<ContentPageDao> = query_as!(
             ContentPageDao,
             r#"
@@ -458,7 +490,8 @@ impl ContentPageDao {
                     page_order,
                     page_creation_date as "page_creation_date: DateTime<Utc>",
                     page_modified_date as "page_modified_date: DateTime<Utc>",
-                    special_page
+                    special_page,
+                    min_role
                 from content_pages
                 where parent_page_id IS ?1
                   and (?2 = ''
@@ -468,6 +501,10 @@ impl ContentPageDao {
                   and (?5
                        or special_page = 1
                        or datetime(page_creation_date) <= datetime('now'))
+                  and (case when min_role is null then 0
+                            when min_role = 'Registered' then 1
+                            when min_role = 'Family' then 2
+                            else 3 end) <= ?6
                 order by page_order, page_id
                 limit ?3 offset ?4
             "#,
@@ -475,7 +512,8 @@ impl ContentPageDao {
             search,
             limit,
             offset,
-            viewer_is_admin
+            viewer_is_admin,
+            viewer_rank
         )
         .fetch_all(executor)
         .await?;
@@ -532,14 +570,45 @@ impl ContentPageDao {
         self.page_creation_date > Utc::now()
     }
 
-    /// The visibility gate every public read path applies (Phase CU). A page is
-    /// visible to a viewer if it's a `special_page` (routing redirect, exempt), OR
-    /// the viewer is an admin (admins see scheduled/draft pages to preview + edit),
-    /// OR its publish instant has passed. Comparing the decoded `DateTime<Utc>`
-    /// here sidesteps the column's mixed TEXT date formats — the paginated queries
-    /// need the SQL-side `datetime()`-normalized equivalent instead (CU.4).
-    pub fn is_visible_to(&self, is_admin: bool) -> bool {
-        self.special_page || is_admin || !self.is_scheduled()
+    /// The visibility gate every public read path applies — two independent
+    /// clauses, and BOTH must pass:
+    ///
+    /// 1. **Publish** (Phase CU): `special_page` (routing redirect, exempt), OR
+    ///    the viewer is an admin (previews scheduled drafts), OR the publish
+    ///    instant has passed. Comparing the decoded `DateTime<Utc>` here
+    ///    sidesteps the column's mixed TEXT date formats — the paginated
+    ///    queries need the SQL-side `datetime()`-normalized equivalent (CU.4).
+    /// 2. **Role** (Phase DA): `viewer.rank() >= min_role_rank()`. Special
+    ///    pages are DELIBERATELY NOT exempt from this clause — the `library`
+    ///    special page's own `min_role` is what gates its nav tab + redirect.
+    pub fn is_visible_to(&self, viewer: Role) -> bool {
+        let published = self.special_page || viewer == Role::Admin || !self.is_scheduled();
+        published && viewer.rank() >= self.min_role_rank()
+    }
+
+    /// Fail-closed decode of `min_role`, the exact Rust twin of the SQL CASE in
+    /// `count_children` / both paged fetches (the parity test pins them
+    /// together — including the catch-all, via the garbage-spelling row).
+    /// `None` is the ONLY public spelling; a recognized gate role maps to its
+    /// rank; EVERYTHING else — unknown values from a manual DB edit or a future
+    /// role after a rollback, `"Admin"`, and the unsanctioned `"Anonymous"`
+    /// spelling — ranks as TOP-of-ladder (Admin-only). Hiding content on a
+    /// value we don't understand is recoverable; leaking it is not. The
+    /// catch-all is `Role::Admin.rank()`, NOT a literal 3, so it stays the top
+    /// even if the ladder is renumbered (`admin_is_the_top_rank` in roles.rs
+    /// pins that invariant; the SQL CASE's `else 3` can't reference it — the
+    /// parity test is what keeps the two catch-alls in lockstep).
+    ///
+    /// NEVER branch on the raw `min_role` string outside this fn — the DB
+    /// badge / DC inheritance consumers must go through the decode, or a
+    /// garbage value renders as public while gating as Admin-only.
+    pub fn min_role_rank(&self) -> u8 {
+        match self.min_role.as_deref() {
+            None => 0,
+            Some("Registered") => 1,
+            Some("Family") => 2,
+            Some(_) => Role::Admin.rank(),
+        }
     }
 
     /// The post date formatted for an `<input type="datetime-local" step="1">` —
@@ -870,6 +939,7 @@ mod tests {
             page_creation_date: creation,
             page_modified_date: creation,
             special_page,
+            min_role: None,
         }
     }
 
@@ -888,12 +958,51 @@ mod tests {
         assert!(future_pg.is_scheduled());
 
         // Non-admin: past page visible, future page hidden.
-        assert!(past_pg.is_visible_to(false));
-        assert!(!future_pg.is_visible_to(false));
+        assert!(past_pg.is_visible_to(Role::Anonymous));
+        assert!(!future_pg.is_visible_to(Role::Anonymous));
 
-        // Admin sees the scheduled page; special pages are exempt from the gate.
-        assert!(future_pg.is_visible_to(true));
-        assert!(future_special.is_visible_to(false));
+        // Admin sees the scheduled page; special pages are exempt from the
+        // SCHEDULING clause.
+        assert!(future_pg.is_visible_to(Role::Admin));
+        assert!(future_special.is_visible_to(Role::Anonymous));
+    }
+
+    /// DA.2: the role clause. NULL is public; each gate role admits its rank and
+    /// above; special pages are NOT exempt from the role clause (the `library`
+    /// special page's own min_role gates its nav tab); unknown values and the
+    /// unsanctioned "Anonymous" spelling fail CLOSED to Admin-only.
+    #[test]
+    fn min_role_gate_is_fail_closed() {
+        let past: DateTime<Utc> = "2000-01-01T00:00:00Z".parse().unwrap();
+        let with_min = |min_role: Option<&str>, special| {
+            let mut p = page_dated(past, special);
+            p.min_role = min_role.map(str::to_string);
+            p
+        };
+
+        // NULL = public.
+        assert!(with_min(None, false).is_visible_to(Role::Anonymous));
+
+        // Family-gated: Family + Admin in, Anonymous + Registered out.
+        let fam = with_min(Some("Family"), false);
+        assert!(!fam.is_visible_to(Role::Anonymous));
+        assert!(!fam.is_visible_to(Role::Registered));
+        assert!(fam.is_visible_to(Role::Family));
+        assert!(fam.is_visible_to(Role::Admin));
+
+        // A gated SPECIAL page is still gated — the exemption covers scheduling only.
+        let gated_special = with_min(Some("Family"), true);
+        assert!(!gated_special.is_visible_to(Role::Anonymous));
+        assert!(gated_special.is_visible_to(Role::Family));
+
+        // Fail-closed: garbage and the unsanctioned "Anonymous" spelling are
+        // Admin-only, never public.
+        for bad in ["Garbage", "Anonymous", "family", ""] {
+            let p = with_min(Some(bad), false);
+            assert!(!p.is_visible_to(Role::Family), "{bad:?} must fail closed");
+            assert!(p.is_visible_to(Role::Admin));
+            assert_eq!(p.min_role_rank(), 3);
+        }
     }
 
     #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
@@ -934,6 +1043,110 @@ mod tests {
         Ok(())
     }
 
+    /// DA.3: the SQL CASE (count + both paged fetches) and the Rust
+    /// `min_role_rank()`/`rank()` pair MUST agree for NULL, every Role variant
+    /// name, and garbage — driven by `Role::iter()` so a future variant fails
+    /// here until BOTH ladders learn it. Also pins count↔fetch parity per viewer.
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn min_role_sql_case_matches_rust_rank(pool: SqlitePool) -> Result<()> {
+        use strum::IntoEnumIterator;
+        use crate::db::dao::roles::Role;
+
+        let parent =
+            ContentPageDao::create(&pool, None, "parent".to_string(), None, "".to_string(), None)
+                .await?;
+        let mut spellings: Vec<Option<String>> = vec![None, Some("Garbage".to_string())];
+        spellings.extend(Role::iter().map(|r| Some(r.to_string())));
+        for (i, s) in spellings.iter().enumerate() {
+            let pg = ContentPageDao::create(
+                &pool,
+                Some(parent.page_id),
+                format!("c{i}"),
+                None,
+                "".to_string(),
+                None,
+            )
+            .await?;
+            sqlx::query("UPDATE content_pages SET min_role = ?1 WHERE page_id = ?2")
+                .bind(s)
+                .bind(pg.page_id)
+                .execute(&pool)
+                .await?;
+        }
+
+        let pid = Some(parent.page_id);
+        let all = ContentPageDao::find_by_parent(&pool, pid).await?;
+        assert_eq!(all.len(), spellings.len());
+
+        for viewer in Role::iter() {
+            // Compare row SETS, not cardinalities — a CASE drift between the
+            // count query and a paged fetch that happened to preserve counts
+            // would otherwise slip through.
+            let mut rust_ids: Vec<i64> = all
+                .iter()
+                .filter(|p| p.is_visible_to(viewer))
+                .map(|p| p.page_id)
+                .collect();
+            rust_ids.sort_unstable();
+            let sql_count = ContentPageDao::count_children(&pool, pid, "", viewer).await?;
+            assert_eq!(
+                sql_count,
+                rust_ids.len() as i64,
+                "SQL CASE vs Rust rank drifted for viewer {viewer}"
+            );
+            let mut newest_ids: Vec<i64> =
+                ContentPageDao::find_children_newest_paged(&pool, pid, "", 100, 0, viewer)
+                    .await?
+                    .iter()
+                    .map(|p| p.page_id)
+                    .collect();
+            newest_ids.sort_unstable();
+            assert_eq!(newest_ids, rust_ids, "newest fetch set drifted for {viewer}");
+            let mut ordered_ids: Vec<i64> =
+                ContentPageDao::find_children_ordered_paged(&pool, pid, "", 100, 0, viewer)
+                    .await?
+                    .iter()
+                    .map(|p| p.page_id)
+                    .collect();
+            ordered_ids.sort_unstable();
+            assert_eq!(ordered_ids, rust_ids, "ordered fetch set drifted for {viewer}");
+        }
+
+        // Pin the ABSOLUTE ladder too, not just cross-parity: NULL only /
+        // +Registered / +Family / Admin sees all six ('Admin', the unsanctioned
+        // 'Anonymous' spelling, and 'Garbage' all rank as Admin-only).
+        assert_eq!(1, ContentPageDao::count_children(&pool, pid, "", Role::Anonymous).await?);
+        assert_eq!(2, ContentPageDao::count_children(&pool, pid, "", Role::Registered).await?);
+        assert_eq!(3, ContentPageDao::count_children(&pool, pid, "", Role::Family).await?);
+        assert_eq!(6, ContentPageDao::count_children(&pool, pid, "", Role::Admin).await?);
+
+        // POSITIVE per-variant pin — the teeth for a FUTURE variant. The
+        // cross-parity loop above cannot catch an unlearned role: both ladders
+        // fail closed to Admin-only and still agree. But a row gated at exactly
+        // R must be VISIBLE to viewer R (in Rust AND in the SQL fetch) — an
+        // unlearned variant fails this until both the CASE and min_role_rank()
+        // are taught its true rank. (Anonymous is exempt: its spelling is
+        // unsanctioned and deliberately Admin-only.)
+        for r in Role::iter().filter(|r| *r != Role::Anonymous) {
+            let spelling = r.to_string();
+            let row = all
+                .iter()
+                .find(|p| p.min_role.as_deref() == Some(spelling.as_str()))
+                .expect("one child per role spelling was seeded");
+            assert!(
+                row.is_visible_to(r),
+                "a row gated at exactly {r} must admit viewer {r} (Rust)"
+            );
+            let fetched =
+                ContentPageDao::find_children_newest_paged(&pool, pid, "", 100, 0, r).await?;
+            assert!(
+                fetched.iter().any(|p| p.page_id == row.page_id),
+                "a row gated at exactly {r} must admit viewer {r} (SQL CASE)"
+            );
+        }
+        Ok(())
+    }
+
     /// CU.4 core risk: the count and the paged fetch MUST apply the same publish
     /// gate, or the pager (total_pages/offset) desyncs from the rows shown.
     #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
@@ -966,30 +1179,30 @@ mod tests {
 
         let pid = Some(parent.page_id);
         // Non-admin: count AND both paged fetches exclude the future child (parity).
-        assert_eq!(2, ContentPageDao::count_children(&pool, pid, "", false).await?);
+        assert_eq!(2, ContentPageDao::count_children(&pool, pid, "", Role::Anonymous).await?);
         assert_eq!(
             2,
-            ContentPageDao::find_children_newest_paged(&pool, pid, "", 10, 0, false)
+            ContentPageDao::find_children_newest_paged(&pool, pid, "", 10, 0, Role::Anonymous)
                 .await?
                 .len()
         );
         assert_eq!(
             2,
-            ContentPageDao::find_children_ordered_paged(&pool, pid, "", 10, 0, false)
+            ContentPageDao::find_children_ordered_paged(&pool, pid, "", 10, 0, Role::Anonymous)
                 .await?
                 .len()
         );
         // Admin: sees all three, count + rows agree.
-        assert_eq!(3, ContentPageDao::count_children(&pool, pid, "", true).await?);
+        assert_eq!(3, ContentPageDao::count_children(&pool, pid, "", Role::Admin).await?);
         assert_eq!(
             3,
-            ContentPageDao::find_children_newest_paged(&pool, pid, "", 10, 0, true)
+            ContentPageDao::find_children_newest_paged(&pool, pid, "", 10, 0, Role::Admin)
                 .await?
                 .len()
         );
         assert_eq!(
             3,
-            ContentPageDao::find_children_ordered_paged(&pool, pid, "", 10, 0, true)
+            ContentPageDao::find_children_ordered_paged(&pool, pid, "", 10, 0, Role::Admin)
                 .await?
                 .len()
         );

@@ -54,7 +54,10 @@ pub async fn redirect_to_first_page(State(state): State<AppState>) -> Result<Res
     // the nav-tab hide closes. Unconditional (like the nav): admins reach a scheduled
     // top-level page by direct URL / Manage Pages, not this convenience redirect
     // (Phase CU, caught in review).
-    if let Some(f) = titles.iter().find(|p| p.is_visible_to(false)) {
+    if let Some(f) = titles
+        .iter()
+        .find(|p| p.is_visible_to(crate::db::dao::roles::Role::Anonymous))
+    {
         Ok(Redirect::temporary(&format!("/pages/{}", f.page_name)).into_response())
     } else {
         Ok((
@@ -136,11 +139,12 @@ pub async fn get_page_path(
             // Scheduled/timed publishing gate (Phase CU): hide a future-dated page
             // — and the WHOLE subtree under a future-dated non-special ancestor,
             // since a leaf-only gate would still leak the hidden parent's title in
-            // the breadcrumb — behind the SAME cat-404 a genuine miss returns (so a
-            // non-admin can't tell "scheduled" from "doesn't exist"). is_admin is
-            // computed before auth_state is moved into the template below.
-            let is_admin = session_data.auth_state.is_admin();
-            if !pages_path.iter().all(|n| n.is_visible_to(is_admin)) {
+            // the breadcrumb — behind the SAME cat-404 a genuine miss returns (so an
+            // insufficient viewer can't tell "scheduled"/"role-gated" from "doesn't
+            // exist"). The viewer role is computed before auth_state is moved into
+            // the template below.
+            let viewer = session_data.auth_state.role();
+            if !pages_path.iter().all(|n| n.is_visible_to(viewer)) {
                 return Ok(not_found::render_not_found(&state.pool, session_data.auth_state).await);
             }
 

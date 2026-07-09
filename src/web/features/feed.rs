@@ -177,6 +177,12 @@ async fn collect_entries(state: &AppState) -> Result<Vec<FeedEntry>, AppError> {
     let mut entries: Vec<FeedEntry> = Vec::new();
     for section in ["blog", "projects"] {
         if let Some(parent) = ContentPageDao::find_by_name(&state.pool, None, section).await? {
+            // Section gate (DA): a min_role on the section's special row drops
+            // its ENTIRE section from the feed — the per-child filter below is
+            // child-row-only and would miss an ancestor gate.
+            if !parent.is_visible_to(crate::db::dao::roles::Role::Anonymous) {
+                continue;
+            }
             // The feed is crawler-facing (no session) → ALWAYS hide future-dated
             // (scheduled) pages. Fetch unbounded and filter to published BEFORE the
             // per-section cap, so a batch of scheduled posts can't push published
@@ -190,7 +196,7 @@ async fn collect_entries(state: &AppState) -> Result<Vec<FeedEntry>, AppError> {
             .await?;
             for page in children
                 .into_iter()
-                .filter(|p| p.is_visible_to(false))
+                .filter(|p| p.is_visible_to(crate::db::dao::roles::Role::Anonymous))
                 .take(PER_SECTION_LIMIT as usize)
             {
                 entries.push(FeedEntry { section, page });

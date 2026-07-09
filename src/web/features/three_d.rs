@@ -90,11 +90,22 @@ pub async fn show_3d_index(
         return Err(anyhow!("Server misconfiguration, could not find the `3d` special page").into());
     };
 
+    // Section gate (DA): a min_role on the `3d` special row darkens the code
+    // route too — same cat-404 as a genuine miss (see blog::show_index).
+    let viewer = session_data.auth_state.role();
+    if !three_d.is_visible_to(viewer) {
+        return Ok(crate::web::features::not_found::render_not_found(
+            &state.pool,
+            session_data.auth_state,
+        )
+        .await);
+    }
+
     // Children in manual page_order (drag-reorder like /projects).
     let mut rows = ContentPageDao::find_by_parent(&state.pool, Some(three_d.page_id)).await?;
-    // Scheduled/timed publishing gate (CU): hide future-dated models from non-admins.
-    let is_admin = session_data.auth_state.is_admin();
-    rows.retain(|p| p.is_visible_to(is_admin));
+    // Visibility gate (CU scheduling + DA min_role): hide future-dated or
+    // role-gated models from insufficient viewers.
+    rows.retain(|p| p.is_visible_to(viewer));
 
     // Pinned → Featured (page_order-sorted, recency-tiebroken like the landing);
     // the rest below. Reuses the exact Pin/`featured` mechanism, scoped to 3D.

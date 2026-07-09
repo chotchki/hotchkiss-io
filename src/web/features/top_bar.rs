@@ -1,4 +1,5 @@
 use crate::db::dao::content_pages::ContentPageDao;
+use crate::db::dao::roles::Role;
 use anyhow::Result;
 use sqlx::SqliteExecutor;
 
@@ -16,12 +17,14 @@ impl TopBar {
         let tabs = ContentPageDao::find_by_parent(executor, None)
             .await?
             .into_iter()
-            // Hide future-dated (scheduled/draft) top-level pages from the global
-            // nav — they'd otherwise show as a live tab site-wide before their
-            // publish instant (Phase CU). Special pages (blog/projects/resume/login)
-            // are exempt via is_visible_to; admin reaches a scheduled top-level page
-            // through its direct URL or the admin Manage Pages list, not the nav.
-            .filter(|cpd| cpd.is_visible_to(false))
+            // Hide future-dated (scheduled/draft) AND role-gated top-level pages
+            // from the global nav (Phases CU + DA). Special pages
+            // (blog/projects/resume/login) are exempt from the SCHEDULING clause
+            // only — a special page carrying a min_role (the future `library`
+            // row) is hidden here until Phase DB makes the nav viewer-aware.
+            // Admin reaches a hidden top-level page through its direct URL or
+            // the admin Manage Pages list, not the nav.
+            .filter(|cpd| cpd.is_visible_to(Role::Anonymous))
             .map(|cpd| cpd.page_name)
             .map(|name| {
                 let m = name == active_page;

@@ -92,10 +92,10 @@ pub async fn refresh_session_role(
                 let now = time::OffsetDateTime::now_utc().unix_timestamp();
                 let touched_at: Option<i64> =
                     session.get(TOUCHED_AT_KEY).await.unwrap_or_default();
-                if touched_at.is_none_or(|t| now - t >= SESSION_TOUCH_INTERVAL_SECS) {
-                    if let Err(e) = session.insert(TOUCHED_AT_KEY, now).await {
-                        tracing::warn!("session touch failed (expiry not extended): {e}");
-                    }
+                if touched_at.is_none_or(|t| now - t >= SESSION_TOUCH_INTERVAL_SECS)
+                    && let Err(e) = session.insert(TOUCHED_AT_KEY, now).await
+                {
+                    tracing::warn!("session touch failed (expiry not extended): {e}");
                 }
                 // Refresh the role (and display name) from the DB.
                 req.extensions_mut().insert(refreshed);

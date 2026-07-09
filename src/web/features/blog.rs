@@ -66,14 +66,20 @@ pub async fn show_index(
         );
     };
 
-    let is_admin = session_data.auth_state.is_admin();
+    let viewer = session_data.auth_state.role();
+    // Section gate (DA): the `blog` special row's own min_role darkens the CODE
+    // route too, not just the nav tab + /pages redirect — a tab-hidden-but-
+    // route-served split would itself be an oracle. Same cat-404 as a miss.
+    if !blog_page.is_visible_to(viewer) {
+        return Ok(not_found::render_not_found(&state.pool, session_data.auth_state).await);
+    }
     let (raw_posts, pagination) = paginate(
         &state.pool,
         Some(blog_page.page_id),
         &query,
         ListOrder::Newest,
         "/blog",
-        is_admin,
+        viewer,
     )
     .await?;
 
@@ -116,15 +122,16 @@ pub async fn show_post(
 ) -> Result<Response, AppError> {
     let pages_path = ContentPageDao::find_by_path(&state.pool, &["blog", &slug]).await?;
 
-    // Scheduled/timed publishing gate (Phase CU): a future-dated post 404s for
-    // non-admins through the SAME cat-404 a genuine miss returns, so a non-admin
-    // can't tell "scheduled" from "nonexistent". is_admin is computed before
-    // auth_state moves into the template.
-    let is_admin = session_data.auth_state.is_admin();
+    // Visibility gate (Phase CU scheduling + Phase DA min_role): a future-dated
+    // or role-gated post 404s for an INSUFFICIENT viewer through the SAME
+    // cat-404 a genuine miss returns, so they can't tell "scheduled"/"gated"
+    // from "nonexistent". The viewer role is computed before auth_state moves
+    // into the template.
+    let viewer = session_data.auth_state.role();
     let Some(lp) = pages_path.last() else {
         return Ok(not_found::render_not_found(&state.pool, session_data.auth_state).await);
     };
-    if !pages_path.iter().all(|n| n.is_visible_to(is_admin)) {
+    if !pages_path.iter().all(|n| n.is_visible_to(viewer)) {
         return Ok(not_found::render_not_found(&state.pool, session_data.auth_state).await);
     }
 
@@ -135,7 +142,7 @@ pub async fn show_post(
     // up). A side is None at the ends, so the oldest/newest post shows only one card.
     let mut siblings =
         ContentPageDao::find_by_parent_newest_first(&state.pool, lp.parent_page_id, None).await?;
-    siblings.retain(|p| p.is_visible_to(is_admin));
+    siblings.retain(|p| p.is_visible_to(viewer));
     let (prev_post, next_post) = match siblings.iter().position(|p| p.page_id == lp.page_id) {
         Some(i) => (
             siblings.get(i + 1).map(nav_card),

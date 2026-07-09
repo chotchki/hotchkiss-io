@@ -24,6 +24,7 @@ use std::process::{Command, Stdio};
 use std::sync::{LazyLock, Mutex};
 
 use crate::db::dao::content_pages::ContentPageDao;
+use crate::db::dao::roles::Role;
 use crate::web::app_error::AppError;
 use crate::web::app_state::AppState;
 use crate::web::features::pages::{EditQuery, GetPageTemplate};
@@ -50,13 +51,18 @@ pub fn resume_routes() -> Router<AppState> {
 /// get the newest PUBLISHED child; a scheduled/draft résumé sitting in front of a
 /// published one is skipped — dropping the old `LIMIT 1`, since a naive gate on the
 /// single newest row would 404 all of `/resume` whenever a future draft exists.
-async fn newest_resume_child(pool: &SqlitePool, is_admin: bool) -> Result<Option<ContentPageDao>> {
+async fn newest_resume_child(pool: &SqlitePool, viewer: Role) -> Result<Option<ContentPageDao>> {
     let resume = ContentPageDao::find_by_name(pool, None, "resume")
         .await?
         .ok_or_else(|| anyhow!("Server misconfiguration: `resume` special page missing"))?;
+    // Section gate (DA): a min_role on the `resume` special row darkens /resume
+    // AND /resume.pdf — `None` is the same 404 as "no résumé published yet".
+    if !resume.is_visible_to(viewer) {
+        return Ok(None);
+    }
     let children =
         ContentPageDao::find_by_parent_newest_first(pool, Some(resume.page_id), None).await?;
-    Ok(children.into_iter().find(|c| c.is_visible_to(is_admin)))
+    Ok(children.into_iter().find(|c| c.is_visible_to(viewer)))
 }
 
 pub async fn show_resume(
@@ -64,8 +70,8 @@ pub async fn show_resume(
     session_data: SessionData,
     Query(edit_q): Query<EditQuery>,
 ) -> Result<Response, AppError> {
-    let is_admin = session_data.auth_state.is_admin();
-    let Some(child) = newest_resume_child(&state.pool, is_admin).await? else {
+    let Some(child) = newest_resume_child(&state.pool, session_data.auth_state.role()).await?
+    else {
         return Ok((StatusCode::NOT_FOUND, "Résumé not published yet").into_response());
     };
 
@@ -106,7 +112,7 @@ pub async fn show_resume_pdf(
     State(state): State<AppState>,
     session_data: SessionData,
 ) -> Result<Response, AppError> {
-    let Some(child) = newest_resume_child(&state.pool, session_data.auth_state.is_admin()).await?
+    let Some(child) = newest_resume_child(&state.pool, session_data.auth_state.role()).await?
     else {
         return Ok((StatusCode::NOT_FOUND, "Résumé not published yet").into_response());
     };

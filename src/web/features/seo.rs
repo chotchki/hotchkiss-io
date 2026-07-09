@@ -117,6 +117,13 @@ pub async fn sitemap_xml(
     let mut projects_id = None;
     for p in &top {
         if p.special_page {
+            // A special row carrying a min_role is a gated SECTION — skip it
+            // like any other hidden page (DA; also drops its children below,
+            // since blog_id/projects_id stay None), else the sessionless
+            // sitemap would leak the gated section's URL to every crawler.
+            if !p.is_visible_to(crate::db::dao::roles::Role::Anonymous) {
+                continue;
+            }
             // Special pages are routing redirects, not `/pages/<slug>` content —
             // map the known ones to their real routes; skip `login` + unknowns.
             match p.page_name.as_str() {
@@ -131,7 +138,7 @@ pub async fn sitemap_xml(
                 "resume" => urls.push((format!("{base}/resume"), Some(p.page_modified_date))),
                 _ => {}
             }
-        } else if p.is_visible_to(false) {
+        } else if p.is_visible_to(crate::db::dao::roles::Role::Anonymous) {
             // Skip future-dated (scheduled) pages — never leak an unpublished URL
             // to crawlers (the sitemap is unconditional, no session). Phase CU.
             urls.push((
@@ -142,7 +149,7 @@ pub async fn sitemap_xml(
     }
     if let Some(id) = blog_id {
         for c in ContentPageDao::find_by_parent_newest_first(&state.pool, Some(id), None).await? {
-            if c.is_visible_to(false) {
+            if c.is_visible_to(crate::db::dao::roles::Role::Anonymous) {
                 urls.push((
                     format!("{base}/blog/{}", c.page_name),
                     Some(c.page_modified_date),
@@ -154,7 +161,7 @@ pub async fn sitemap_xml(
         // Project DETAIL pages are content-tree pages at `/pages/projects/<slug>`
         // (the `/projects` route is the index only) — NOT `/projects/<slug>`.
         for c in ContentPageDao::find_by_parent(&state.pool, Some(id)).await? {
-            if c.is_visible_to(false) {
+            if c.is_visible_to(crate::db::dao::roles::Role::Anonymous) {
                 urls.push((
                     format!("{base}/pages/projects/{}", c.page_name),
                     Some(c.page_modified_date),

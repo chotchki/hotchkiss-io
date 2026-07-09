@@ -65,24 +65,14 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] CW.6 - Models gallery under the tab: reparent/curate the Phase-15 hand-picked models (existing STL/3MF viewer + fab-publish)
 - [ ] CW.7 - Tests (route serves bundle + COOP/COEP scoped; media CORP; models render) + CLAUDE.md + deploy
 
-## Phase CZ - Family role + honest sessions (Library/Home foundation)
-
-- [ ] CZ.0 - Phase exit: Role::Family exists end-to-end (rank ladder, admin UI, test seam), sessions actually refresh on activity, role-scoped mutation allowlist shipped EMPTY; tests + CLAUDE.md; inert on prod. Design: docs/library-design.md
-- [x] CZ.1 - Role::Family + explicit rank() (Anonymous 0 < Registered 1 < Family 2 < Admin 3), Role::iter()-pinned test + doc comment forbidding derive(Ord) (variants are alphabetical — Admin would rank below Anonymous)
-- [x] CZ.2 - AuthenticationState::role() -> Role helper beside is_admin()/is_authenticated(); all new viewer-role derivations go through it
-- [x] CZ.3 - Session-touch fix: refresh_session_role re-saves authenticated sessions so OnInactivity(1 day) means inactivity — today the session is only written at login and dies 24h later regardless of activity (likely explains the Phase-10 "not logged in on the phone" dogfood finding)
-- [x] CZ.4 - /admin/users rework: UserRow carries the real role (not is_admin bool), three-way promote control, reject role=Anonymous as a target; tests
-- [x] CZ.5 - require_admin_for_mutations: role-scoped exact-match allowlist table (Method, path, min Role) checked by rank() — shipped EMPTY; conventions: ids in request body, per-resource checks in handlers; unit tests
-- [ ] CZ.6 - Integration gate tests via /test/login?role=Family + CLAUDE.md delta + beta validation (promote a beta user to Family; session survives >24h of activity)
-
 ## Phase DA - Page visibility - the min_role predicate
 
 - [ ] DA.0 - Phase exit: content_pages.min_role gates every read path oracle-safely and fail-closed; parity tests green; inert (no rows gated); CLAUDE.md updated
-- [ ] DA.1 - Migration: content_pages.min_role TEXT NULL (NULL = the only public spelling); thread the column through ~8 query_as! sites + struct + test constructors (cargo clean for sqlx re-validation)
-- [ ] DA.2 - is_visible_to(viewer: Role): special-page exemption narrowed to scheduling only (role clause applies to special pages); fail-closed parse (unknown non-NULL min_role → Admin-only)
-- [ ] DA.3 - Fail-closed SQL CASE (WHEN NULL 0 / Registered 1 / Family 2 / ELSE 3) in count_children + both paged fetches; parity tests: count/fetch predicates identical + CASE↔rank() via Role::iter()
-- [ ] DA.4 - Thread the ~12 read paths: get_page_path ancestor scan, show_post + sibling retain, home bands, resume, /3d, paginate (viewer_is_admin bool → Role); feed/sitemap/redirect_to_first_page stay unconditionally Anonymous
-- [ ] DA.5 - Oracle tests: gated content page returns the byte-identical cat-404 for Anonymous AND Registered; Family/Admin get 200; rollback caveat documented (pre-gate binary serves gated rows publicly)
+- [x] DA.1 - Migration: content_pages.min_role TEXT NULL (NULL = the only public spelling); thread the column through ~8 query_as! sites + struct + test constructors (cargo clean for sqlx re-validation)
+- [x] DA.2 - is_visible_to(viewer: Role): special-page exemption narrowed to scheduling only (role clause applies to special pages); fail-closed parse (unknown non-NULL min_role → Admin-only)
+- [x] DA.3 - Fail-closed SQL CASE (WHEN NULL 0 / Registered 1 / Family 2 / ELSE 3) in count_children + both paged fetches; parity tests: count/fetch predicates identical + CASE↔rank() via Role::iter()
+- [x] DA.4 - Thread the ~12 read paths: get_page_path ancestor scan, show_post + sibling retain, home bands, resume, /3d, paginate (viewer_is_admin bool → Role); feed/sitemap/redirect_to_first_page stay unconditionally Anonymous
+- [x] DA.5 - Oracle tests: gated content page returns the byte-identical cat-404 for Anonymous AND Registered; Family/Admin get 200; rollback caveat documented (pre-gate binary serves gated rows publicly)
 - [ ] DA.6 - CLAUDE.md delta + beta validation: sqlite3-stamp min_role on a throwaway beta page, verify all four listing surfaces + direct-serve deny/allow
 
 ## Phase DB - Page visibility - authoring + nav surface

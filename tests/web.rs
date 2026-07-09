@@ -2509,6 +2509,198 @@ async fn authenticated_activity_extends_session_expiry() {
     assert_eq!(rows_before, rows_after, "anonymous traffic must not mint sessions");
 }
 
+// ───────────────────────── Phase DA: min_role page visibility ─────────────────────────
+
+/// Stamp `min_role` on a seeded page directly — the editor control arrives in
+/// Phase DB; DA gates the read paths.
+async fn stamp_min_role(pool: &sqlx::SqlitePool, page_name: &str, min_role: &str) {
+    let n = sqlx::query("UPDATE content_pages SET min_role = ?1 WHERE page_name = ?2")
+        .bind(min_role)
+        .bind(page_name)
+        .execute(pool)
+        .await
+        .unwrap()
+        .rows_affected();
+    assert_eq!(n, 1, "stamp must hit exactly one page ({page_name})");
+}
+
+/// The oracle rule (DA.5): an insufficient viewer gets the SAME cat-404 for a
+/// role-gated page as for a page that does not exist — byte-identical body,
+/// compared within the same session so nav login-state can't differ. Family and
+/// Admin read the content.
+#[tokio::test]
+async fn gated_page_is_byte_identical_to_a_genuine_miss() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("SecretPage", "# family secrets inside")
+        .await
+        .expect("seed");
+    stamp_min_role(&server.pool, "SecretPage", "Family").await;
+
+    // Anonymous and Registered: gated page ≡ genuine miss, byte for byte.
+    for role in [None, Some("Registered")] {
+        let c = client();
+        if let Some(r) = role {
+            c.post(server.url(&format!("/test/login?role={r}"))).send().await.unwrap();
+        }
+        let gated = c.get(server.url("/pages/SecretPage")).send().await.unwrap();
+        assert_eq!(gated.status(), StatusCode::NOT_FOUND, "viewer {role:?}");
+        let gated_body = gated.text().await.unwrap();
+        assert!(
+            !gated_body.contains("family secrets"),
+            "the 404 must not leak content ({role:?})"
+        );
+
+        let miss = c.get(server.url("/pages/NoSuchPage")).send().await.unwrap();
+        assert_eq!(miss.status(), StatusCode::NOT_FOUND);
+        let miss_body = miss.text().await.unwrap();
+        assert_eq!(
+            gated_body, miss_body,
+            "gated page must be indistinguishable from a genuine miss for {role:?}"
+        );
+    }
+
+    // Family and Admin: 200 with the content.
+    for r in ["Family", "Admin"] {
+        let c = client();
+        c.post(server.url(&format!("/test/login?role={r}"))).send().await.unwrap();
+        let resp = c.get(server.url("/pages/SecretPage")).send().await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "viewer {r}");
+        assert!(resp.text().await.unwrap().contains("family secrets inside"));
+    }
+}
+
+/// A gated ANCESTOR hides its whole subtree — a public child under a Family
+/// parent is a cat-404 to an insufficient viewer (a leaf-only gate would leak
+/// the parent's title in the breadcrumb).
+#[tokio::test]
+async fn gated_ancestor_hides_the_subtree() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("GatedParent", "# parent")
+        .await
+        .expect("seed");
+    sqlx::query(
+        "INSERT INTO content_pages (parent_page_id, page_name, page_markdown) \
+         SELECT page_id, 'PublicChild', '# child body' FROM content_pages WHERE page_name = 'GatedParent'",
+    )
+    .execute(&server.pool)
+    .await
+    .unwrap();
+    stamp_min_role(&server.pool, "GatedParent", "Family").await;
+
+    let resp = client()
+        .get(server.url("/pages/GatedParent/PublicChild"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND, "subtree must inherit the gate");
+
+    let fam = client();
+    fam.post(server.url("/test/login?role=Family")).send().await.unwrap();
+    let resp = fam
+        .get(server.url("/pages/GatedParent/PublicChild"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(resp.text().await.unwrap().contains("child body"));
+}
+
+/// Listing + crawler surfaces: a gated blog post is absent from /blog for an
+/// insufficient viewer (and its direct URL is the cat-404), present for Family;
+/// the feed and sitemap NEVER carry it — they are unconditionally Anonymous,
+/// even when fetched with a Family session cookie (a per-viewer feed would also
+/// break its 304 validator).
+#[tokio::test]
+async fn gated_post_hidden_from_listings_feed_and_sitemap() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_blog_post("open-post", "# Open Post\n\npublic words")
+        .await
+        .expect("seed");
+    server
+        .seed_blog_post("family-post", "# Family Post\n\nkin-only words")
+        .await
+        .expect("seed");
+    stamp_min_role(&server.pool, "family-post", "Family").await;
+
+    // Anonymous: index omits it, direct URL is a 404.
+    let index = reqwest::get(server.url("/blog")).await.unwrap().text().await.unwrap();
+    assert!(index.contains("Open Post"));
+    assert!(!index.contains("Family Post"), "gated post must not list for anon");
+    assert_eq!(
+        reqwest::get(server.url("/blog/family-post")).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+
+    // Family: listed + readable.
+    let fam = client();
+    fam.post(server.url("/test/login?role=Family")).send().await.unwrap();
+    let index = fam.get(server.url("/blog")).send().await.unwrap().text().await.unwrap();
+    assert!(index.contains("Family Post"), "family must see the gated post listed");
+    let post = fam.get(server.url("/blog/family-post")).send().await.unwrap();
+    assert_eq!(post.status(), StatusCode::OK);
+
+    // Crawler surfaces stay anonymous even WITH the Family cookie.
+    for path in ["/feed.xml", "/sitemap.xml"] {
+        let body = fam.get(server.url(path)).send().await.unwrap().text().await.unwrap();
+        assert!(
+            !body.contains("family-post") && !body.contains("Family Post"),
+            "{path} must never carry gated content, session or not"
+        );
+        assert!(body.contains("open-post"), "{path} still carries public content");
+    }
+}
+
+/// The narrowed special-page exemption, end to end: a min_role on a SPECIAL row
+/// darkens its ENTIRE section — the code route, the /pages redirect, the nav
+/// tab, home's Latest band, the sitemap and the feed — for insufficient
+/// viewers (its PUBLIC children included: ancestor gate), while Family still
+/// enters everywhere. This is the seam the DE `library` row will stand on.
+#[tokio::test]
+async fn gated_special_page_darkens_its_whole_section() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_blog_post("kin-post", "# Kin Post\n\npublic child of a gated section")
+        .await
+        .expect("seed");
+    stamp_min_role(&server.pool, "blog", "Family").await;
+
+    // Anonymous: every surface is dark.
+    let anon = client();
+    for path in ["/blog", "/pages/blog", "/blog/kin-post"] {
+        let resp = anon.get(server.url(path)).send().await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "anon {path} must be dark");
+    }
+    let home = anon.get(server.url("/")).send().await.unwrap().text().await.unwrap();
+    assert!(!home.contains("/pages/blog"), "nav must drop the gated section's tab");
+    assert!(!home.contains("Kin Post"), "home bands must drop the gated section's children");
+    for path in ["/sitemap.xml", "/feed.xml"] {
+        let body = anon.get(server.url(path)).send().await.unwrap().text().await.unwrap();
+        assert!(
+            !body.contains("/blog") && !body.contains("kin-post"),
+            "{path} must not leak the gated section"
+        );
+    }
+
+    // Family: the section opens — code route lists the post, the /pages leaf
+    // redirects onward, the post itself serves.
+    let fam = client();
+    fam.post(server.url("/test/login?role=Family")).send().await.unwrap();
+    let index = fam.get(server.url("/blog")).send().await.unwrap();
+    assert_eq!(index.status(), StatusCode::OK);
+    assert!(index.text().await.unwrap().contains("Kin Post"));
+    let redirect = fam.get(server.url("/pages/blog")).send().await.unwrap();
+    assert!(
+        redirect.status().is_redirection(),
+        "the special-leaf redirect must pass for a sufficient viewer: {}",
+        redirect.status()
+    );
+    let post = fam.get(server.url("/blog/kin-post")).send().await.unwrap();
+    assert_eq!(post.status(), StatusCode::OK);
+}
+
 // ───────────────────────── Phase CE: editable post date (backdating) ─────────────────────────
 
 #[tokio::test]

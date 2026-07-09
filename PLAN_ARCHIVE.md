@@ -718,3 +718,23 @@ Design + rationale (the decisions, the honest limits): [docs/greylist-challenge-
 - [x] CY.7 - Challenged FILTER: add `Audience::Challenged` (→ challenged=1 predicate) threaded through all ~15 windowed count/GROUP-BY queries + the chart JSON island + the chip row, reusing the CQ.7 hx-get control model, so every graph/table scopes to tolled traffic; a bad value degrades to All (never 500)
 - [x] CY.8 - Toll outcome / block-hardness: challenged (walls hit) vs greylist_clearance (got through) over the window → a solve-rate stat (LOW = hard block, scrapers bounce; HIGH = soft, solving-through or a false positive) + per-IP challenged-vs-cleared so a repeatedly-solving IP is visible. No new schema — data's already recorded.
 - [x] CY.9 - Whole-page design review of /admin/analytics at end of CY: has it gotten too confusing/cluttered with all the dimensions (audience + challenged filter, status buckets w/ 429, tolls/solve-rate, top-pages, noisy IPs, referrers, latency, chart)? Assess info hierarchy, propose + apply simplification
+
+---
+
+## 2026-07-09
+
+## Phase CZ - Family role + honest sessions (Library/Home foundation)
+
+**Summary:** the role ladder the Library phases (DA–DF) build on, shipped INERT (no migration, no anonymous/registered behavior change) — commit `ecf6eff`, beta-validated on `1f97616` same day. `Role::Family` + explicit `rank()` (a `Role::iter()`-pinned test guards the ladder; `derive(Ord)` forbidden — alphabetical variants would rank Admin below Anonymous); `AuthenticationState::role()` with `is_admin()` delegating; the `/admin/users` three-way control validating targets against a POSITIVE `ASSIGNABLE_ROLES` allowlist (itself iter-pinned; `Anonymous` → 400); the role-scoped mutation allowlist in `require_admin_for_mutations` shipped EMPTY with a pinned test (DF adds `POST /library/progress`). **The session-touch fix took two rounds:** a re-`insert` of the same `SessionData` silently never saves (tower-sessions dedups unchanged values — the integration test caught the no-op), and the review then caught that an UNCONDITIONAL touch writes `tower_sessions` per static-asset/media-range GET (a save tripping the 5s `busy_timeout` 500s the response — tower-sessions replaces it) → final form is a `touched_at` stamp throttled to one write/session/hour, with the throttle-skip pinned in the test. Accepted residuals, documented in code: the last-write-wins logout race inherent to activity-refresh sessions (bounded by the throttle; deleted/demoted users re-derive per request), and admin HTMX forms swallowing non-2xx (pre-existing → Tech debt). Rode along: the Biome swap (npm/Prettier REMOVED after a whole-tree-reformat + markdown-corruption incident; first `biome check` caught 4 un-interpolated `${…}` bugs in htmx-webauthn.js error logs), commit `1f97616`.
+
+**Validation:** cargo test 348 green (unit + integration + browser-e2e passkey ceremonies through the changed webauthn JS); `biome check` clean; beta deploy verified live (/, 403 on /admin/users anon, login renders) and chris signed off on the three-way UI. The >24h-session check continues passively on chris's phone (mechanics pinned by `authenticated_activity_extends_session_expiry`).
+
+- [x] CZ.0 - Phase exit: Role::Family exists end-to-end (rank ladder, admin UI, test seam), sessions actually refresh on activity, role-scoped mutation allowlist shipped EMPTY; tests + CLAUDE.md; inert on prod. Design: docs/library-design.md
+- [x] CZ.1 - Role::Family + explicit rank() (Anonymous 0 < Registered 1 < Family 2 < Admin 3), Role::iter()-pinned test + doc comment forbidding derive(Ord) (variants are alphabetical — Admin would rank below Anonymous)
+- [x] CZ.2 - AuthenticationState::role() -> Role helper beside is_admin()/is_authenticated(); all new viewer-role derivations go through it
+- [x] CZ.3 - Session-touch fix: refresh_session_role re-saves authenticated sessions so OnInactivity(1 day) means inactivity — today the session is only written at login and dies 24h later regardless of activity (likely explains the Phase-10 "not logged in on the phone" dogfood finding)
+- [x] CZ.4 - /admin/users rework: UserRow carries the real role (not is_admin bool), three-way promote control, reject role=Anonymous as a target; tests
+- [x] CZ.5 - require_admin_for_mutations: role-scoped exact-match allowlist table (Method, path, min Role) checked by rank() — shipped EMPTY; conventions: ids in request body, per-resource checks in handlers; unit tests
+- [x] CZ.6 - Integration gate tests via /test/login?role=Family + CLAUDE.md delta + beta validation (promote a beta user to Family; session survives >24h of activity)
+
+

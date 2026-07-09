@@ -83,8 +83,15 @@ pub async fn show_home(
     // Newest across both content sections, merged. Mirrors the unified feed's
     // sort (creation date DESC, page_id DESC tiebreak) so ordering agrees.
     let mut rows: Vec<(&'static str, ContentPageDao)> = Vec::new();
+    let viewer = session_data.auth_state.role();
     for section in ["blog", "projects"] {
         if let Some(parent) = ContentPageDao::find_by_name(&state.pool, None, section).await? {
+            // Section gate (DA): a min_role on the section's special row drops
+            // the WHOLE section from the home bands — the per-row retain below
+            // checks child rows only and would miss an ancestor gate.
+            if !parent.is_visible_to(viewer) {
+                continue;
+            }
             let children = ContentPageDao::find_by_parent_newest_first(
                 &state.pool,
                 Some(parent.page_id),
@@ -102,12 +109,12 @@ pub async fn show_home(
             .then(b.1.page_id.cmp(&a.1.page_id))
     });
 
-    // Scheduled/timed publishing gate (Phase CU): drop future-dated pages before
-    // the Featured/Latest split so a scheduled post — even a pinned one — never
-    // surfaces on the front door to anon; admin sees them inline (badged) to
-    // preview placement, and the LATEST_TOTAL cap then counts only published items.
-    let is_admin = session_data.auth_state.is_admin();
-    rows.retain(|(_, p)| p.is_visible_to(is_admin));
+    // Visibility gate (Phase CU scheduling + Phase DA min_role): drop hidden pages
+    // before the Featured/Latest split so a scheduled OR role-gated post — even a
+    // pinned one — never surfaces on the front door to an insufficient viewer;
+    // admin sees scheduled ones inline (badged) to preview placement, and the
+    // LATEST_TOTAL cap then counts only visible items.
+    rows.retain(|(_, p)| p.is_visible_to(viewer));
 
     // Split pinned → Featured, the rest → Latest. `rows` is newest-first, so Latest
     // (the auto tail) keeps that order. Featured is HAND-CURATED, so re-sort it by

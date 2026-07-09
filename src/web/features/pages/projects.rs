@@ -58,14 +58,23 @@ pub async fn show_all_projects(
         );
     };
 
-    let is_admin = session_data.auth_state.is_admin();
+    let viewer = session_data.auth_state.role();
+    // Section gate (DA): a min_role on the `projects` special row darkens the
+    // code route too — same cat-404 as a genuine miss (see blog::show_index).
+    if !project_page.is_visible_to(viewer) {
+        return Ok(crate::web::features::not_found::render_not_found(
+            &state.pool,
+            session_data.auth_state,
+        )
+        .await);
+    }
     let (raw_projects, pagination) = paginate(
         &state.pool,
         Some(project_page.page_id),
         &query,
         ListOrder::Ordered,
         "/projects",
-        is_admin,
+        viewer,
     )
     .await?;
     let mut projects: Vec<ProjectCard> = Vec::with_capacity(raw_projects.len());

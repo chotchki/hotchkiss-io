@@ -11,6 +11,7 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 
 use crate::db::dao::content_pages::ContentPageDao;
+use crate::db::dao::roles::Role;
 
 /// Items per page.
 pub const PAGE_SIZE: i64 = 10;
@@ -102,20 +103,20 @@ fn urlencode(s: &str) -> String {
 /// Fetch one page of `parent`'s children (ordered per `order`, filtered by the
 /// trimmed query) plus the `Pagination` describing the window. `page` is clamped
 /// into `[1, total_pages]`; an empty/whitespace query disables the search filter.
-/// `viewer_is_admin` gates unpublished (future-dated) children — non-admins never
-/// see OR count them, so the window and the count stay consistent (Phase CU).
+/// `viewer` gates BOTH unpublished (future-dated, Phase CU) and role-gated
+/// (`min_role`, Phase DA) children — an insufficient viewer never sees OR counts
+/// them, so the window and the count stay consistent.
 pub async fn paginate(
     pool: &SqlitePool,
     parent_page_id: Option<i64>,
     query: &ListingQuery,
     order: ListOrder,
     base_path: &str,
-    viewer_is_admin: bool,
+    viewer: Role,
 ) -> Result<(Vec<ContentPageDao>, Pagination)> {
     let search = query.q.as_deref().unwrap_or("").trim().to_string();
 
-    let total =
-        ContentPageDao::count_children(pool, parent_page_id, &search, viewer_is_admin).await?;
+    let total = ContentPageDao::count_children(pool, parent_page_id, &search, viewer).await?;
     let total_pages = ((total + PAGE_SIZE - 1) / PAGE_SIZE).max(1);
     let current_page = query.page.unwrap_or(1).clamp(1, total_pages);
     let offset = (current_page - 1) * PAGE_SIZE;
@@ -128,7 +129,7 @@ pub async fn paginate(
                 &search,
                 PAGE_SIZE,
                 offset,
-                viewer_is_admin,
+                viewer,
             )
             .await?
         }
@@ -139,7 +140,7 @@ pub async fn paginate(
                 &search,
                 PAGE_SIZE,
                 offset,
-                viewer_is_admin,
+                viewer,
             )
             .await?
         }
