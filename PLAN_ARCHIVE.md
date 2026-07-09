@@ -95,6 +95,7 @@ Per-task detail (all `[x]`): 4.1 version determined (0.4.1, manifest edit requir
 **Goal (achieved):** replaced the tag-triggered `release.yml` (Developer ID signing + notarization on a hosted `macos-14` runner) → `install.yml` (download `.pkg`, `installer -target /` on a self-hosted runner) flow with a single `git push origin main` to a bare repo on the Mac mini, whose `post-receive` hook does `cargo build` → ad-hoc `codesign` → atomic `.app` swap into `/Applications` → `launchctl kickstart -k`. This eliminated Apple notarization, the Developer ID cert, the temp-keychain dance, the `.pkg` machinery, the hosted runner, the self-hosted runner, and both workflow files.
 
 **Key decisions (kept for the record):**
+
 - Tray icon stays — `tray-wrapper` is the up/down visual signal; running as a LaunchAgent in the user GUI session preserves it.
 - **Sandbox dropped** (`com.apple.security.app-sandbox` removed). Eliminates `~/Library/Containers/.../Data/...` path translation; files now land in standard macOS locations. Defense-in-depth loss is marginal — the secrets worth stealing (Cloudflare token, ACME key, session-signing key) all live where the app must read them anyway, so the sandbox didn't compartmentalize them.
 - Notarization unnecessary — the binary never leaves machines we control; ad-hoc signing is enough. (`spctl --add` wasn't even needed: launchd execs the binary directly via `ProgramArguments`, which doesn't trigger Gatekeeper.)
@@ -103,6 +104,7 @@ Per-task detail (all `[x]`): 4.1 version determined (0.4.1, manifest edit requir
 - `github` is a mirror remote; `origin` is the mini. `test_and_coverage.yml` keeps running on push for CI signal — informational, doesn't gate deploy.
 
 **What shipped:**
+
 - `build/macos/build.sh` trimmed from ~77 lines to ~30 — dropped `pkgbuild`/`productbuild`/`productsign`/`notarytool`/`stapler` and the four required Apple env vars; now ad-hoc-signs and prints `BUILT_APP=<abs path>`. Honors `CARGO_TARGET_DIR`.
 - `build/macos/post-receive` — the deploy hook. Filters `refs/heads/main`, `git archive`s the pushed tree into `~/.cache/hotchkiss-io-build/src` (wiped per run), builds with `CARGO_TARGET_DIR=~/.cache/hotchkiss-io-build/target` (so incremental artifacts persist: cold ≈ 1m53s → warm ≈ 17–20s), atomic-ish swaps the `.app` (`mv` current → `.prev`, `mv` new in, `launchctl kickstart -k`, drop `.prev`), and bails before touching `/Applications` if the build fails. Sets `PATH` explicitly because sshd hands hooks a stripped env.
 - `build/macos/io.hotchkiss.web.plist` — LaunchAgent: `Label=io.hotchkiss.web`, `ProgramArguments=[/Applications/Hotchkiss-IO.app/Contents/MacOS/hotchkiss-io]`, `RunAtLoad`, `KeepAlive`, `ThrottleInterval=10`, logs under `~/Library/Logs/io.hotchkiss.web/`. No `RootDirectory`.
@@ -137,7 +139,6 @@ Per-task detail (all `[x]`): 4.1 version determined (0.4.1, manifest edit requir
 - [x] 1.6 - Manual e2e: confirm the next real ACME renewal in prod succeeds — `clean_proof` deletes any leftover `_acme-challenge` TXT records before `create_proof` recreates them. **Confirmed 2026-06-22**: cert rolled over in prod, renewal succeeded. (Phase 2 added unit coverage for the URL-construction class of bug; an automated ACME-path e2e is still a gap — tracked in Phase 6.)
 - [x] 1.7 - Docs: no CLAUDE.md changes needed (behavior fix, no architectural shift). **Confirmed 2026-06-22** — none needed.
 
-
 ---
 
 ## 2026-06-23
@@ -161,12 +162,12 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 - [x] 12.10 - Manual e2e on the iPhone (done 2026-06-23: PWA installed over beta's LE cert, no profile; prod passkey authenticated on beta; tag→prod round-trip exercised by 12.8): push a `main` commit → beta rebuilds with snapshotted prod data → install PWA from `https://beta.hotchkiss.io:8443/` (real LE prod cert, natively trusted — no profile) → existing chris passkey authenticates → edit a blog post on beta → tag-push the change to `v0.x.y+1` → prod deploys, post lands in prod's DB on next push-main → snapshot. Phase exit.
 - [x] 12.11 - Retire Phase 11.3, 11.8, 11.9 (content absorbed into 12.6, 12.7, 12.9, 12.10). Update PLAN.md. (Phase 11 folded 2026-06-22; this box stays as the marker that the absorbed content actually lands in 12.6/12.9/12.10.)
 
-
 ---
 
 ## 2026-06-24
 
 ## Phase A - Diagram rendering (D2, source-in-HTML + HTMX swap)
+
 - [x] A.0 - Phase exit: pages+blog embed ```d2; served HTML carries source (LLM/no-JS), HTMX swaps in the D2-rendered SVG; degrades gracefully; mobile
 - [x] A.1 - Decide rendering point (RESOLVED: request-time from inline markdown fence)
 - [x] A.2 - Diagram backend: D2 via brew-installed binary (shell out)
@@ -183,6 +184,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-25
 
 ## Phase B - Database backups (rolling daily)
+
 - [x] B.0 - Phase exit: live DB backed up daily (consistent VACUUM INTO), 7-day rolling retention, into a Backblaze-synced dir; verified by tests
 - [x] B.1 - Decide mechanism + location (VACUUM INTO in-process; Settings.backup_path)
 - [x] B.2 - Daily backup task (mirror the request_log prune task)
@@ -196,6 +198,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-25
 
 ## Phase C - Analytics: views over time
+
 - [x] C.0 - Phase exit: /admin/analytics summarizes views over time (design-approved by chris, then implemented)
 - [x] C.1 - DESIGN (with chris): what to summarize
 - [x] C.2 - DESIGN: data approach (aggregate query vs rollup)
@@ -207,6 +210,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-25
 
 ## Phase D - Analytics: referrers + attack-probe visibility
+
 - [x] D.0 - Phase exit: analytics shows top external referrers + a Top-Pages Content/All toggle; live on prod
 - [x] D.1 - Implement: referrers (count_by_referer) + Top-Pages content/all status toggle + tests/docs
 
@@ -215,6 +219,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-25
 
 ## Phase E - Fail-closed authz middleware layer
+
 - [x] E.0 - Phase exit: one fail-closed authz layer (GET public; non-GET=admin by default; login/logout override); per-handler checks removed; live on prod
 - [x] E.1 - Audit every route + finalize the anonymous-mutation allowlist
 - [x] E.2 - Build the central fail-closed authz middleware (method-aware + allowlist override)
@@ -227,6 +232,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-25
 
 ## Phase F - Admin / authoring UX
+
 - [x] F.0 - Phase exit: site is pleasant + usable logged-in as admin — clean reader view, login state visible, sane authoring flow, human titles (not slugs) shown publicly
 - [x] F.1 - Title↔slug separation: add page_title, create-by-title with auto-slug, display title everywhere (fix the public hyphenated headline)
 - [x] F.2 - Logged-in reader view: default to the clean page, an Edit toggle reveals the editor
@@ -242,6 +248,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-25
 
 ## Phase G - Reliability hardening (launchd respawns, so crash-loop/correctness focus)
+
 - [x] G.0 - Phase exit: coordinator + cert/DNS path self-heal; no single transient error or panic can wedge/kill the live site; AVIF + session-unwrap correctness bugs fixed
 - [x] G.1 - Coordinator loops self-heal (ACME/DNS/session-GC: match-log-continue like backup.rs)
 - [x] G.2 - Replace the todo!() LE-authz panic with bail! + cap the unbounded order_cert loop
@@ -255,6 +262,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-25
 
 ## Phase BT - Deferred polish
+
 - [x] BT.1 - Tab redesign (chris's wife to opine on look + behavior)
 - [x] BT.2 - Dedicated /admin/pages editor + nav rework (+ icon, fold admin into hamburger, fix tab styling)
 
@@ -263,6 +271,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-26
 
 ## Phase BU - Blog image UX + relative-link rewrite (dogfooding the first image post)
+
 - [x] BU.0 - Phase exit: page/blog images render capped + click-to-zoom (diagram lightbox); site-absolute links + image srcs rewritten relative on save; live on prod
 - [x] BU.1 - rewrite_site_links(markdown, domain): Link + Image URLs matching the site host → relative (preserve path/query/fragment); unit tests
 - [x] BU.2 - Add domain to AppState (from Settings); wire the link rewrite into the page-save path (put_page_path) on save
@@ -275,6 +284,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-26
 
 ## Phase BV - Content rendering — typeset math (KaTeX) + code syntax highlighting
+
 - [x] BV.0 - Phase exit: content pages render typeset math (KaTeX) + syntax-highlighted code; TeX/code source stays in the served HTML (no-JS/LLM-readable); live on prod
 - [x] BV.1 - Typeset math: enable markdown-rs math_text/math_flow + emit TeX-carrying spans in transformer; vendor KaTeX (CSS/JS + autorender) on content+blog pages; render client-side incl HTMX-swapped; tests
 - [x] BV.2 - Code syntax highlighting: vendor highlight.js (CSS/JS), auto-highlight <pre><code class=language-*> on load + HTMX swap; site-matching theme
@@ -286,6 +296,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-26
 
 ## Phase BW - GFM tables + fix nested-element rendering (BV walk-depth regression)
+
 - [x] BW.0 - Phase exit: content pages render GFM tables + math/images/diagrams nested in lists/headings/blockquotes (BV walk-depth regression fixed); live on prod
 - [x] BW.1 - Fix transformer walk to descend into ALL containers (lists/headings/blockquotes/emphasis/links), not just Root/Paragraph — math/images/diagrams nested anywhere now convert; test
 - [x] BW.2 - GFM tables: enable gfm_table in to_mdast + the to_html re-parse so | a | b | renders as a table; test
@@ -296,6 +307,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-27
 
 ## Phase BX - Blog post next/previous navigation cards
+
 - [x] BX.0 - Phase exit: blog posts show next/previous cards to adjacent posts; omitted at the ends; absent on /pages; live on prod
 - [x] BX.1 - PostNavCard + Option prev/next on GetPageTemplate; render nav section in get_page.html (blog-only, compact, omit a side at the ends)
 - [x] BX.2 - show_post computes older/newer siblings + builds the cards; get_page_path passes None
@@ -307,6 +319,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-27
 
 ## Phase BY - Graceful deploy restart (kill the mini crash dialogs)
+
 - [x] BY.0 - Phase exit: deploys leave no "quit unexpectedly" dialogs on the mini (graceful SIGTERM restart); verified on the mini
 - [x] BY.1 - post-receive: graceful SIGTERM restart instead of kickstart -k (SIGKILL); re-copy the hook to the mini
 - [x] BY.2 - Verify on the mini; add an app SIGTERM handler if the tray app doesn't exit cleanly
@@ -316,6 +329,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-28
 
 ## Phase CA - Custom cat 404 page
+
 - [x] CA.0 - Phase exit: a 404 (unmatched route OR missing /pages/* path) renders the 3-cat "Which one is guilty?!" page; tap-to-blame quip overlay; back-home link; web-optimized AVIF; both paths tested
 - [x] CA.1 - Re-encode the 3 cat photos: resize to a uniform web size + AVIF (avifenc); drop the raw JPEGs from embedded assets
 - [x] CA.2 - templates/404.html: 3 cat cards, "Which one is guilty?!" header, per-cat quip overlay slots, back-to-/ link; mobile-first
@@ -328,6 +342,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-28
 
 ## Phase BZ - Self-hosted large-media store (disk + HTTP range)
+
 - [x] BZ.0 - Phase exit: UNIFIED media — disk content store + media/variant schema; uniform ![](/media/<ref>) authoring + render-time polymorphic dispatch (img/video/stl); range route; ffprobe-typed media library UI; existing attachments migrated off BLOBs + /attachments retired; backup-correct; beta→prod verified
 - [x] BZ.1 - MediaStore content-addressed disk primitive (sharded ab/cd/<sha>, atomic write, dedup, traversal-guarded) + Settings.media_path
 - [x] BZ.2 - Range byte route /media/file/<url_key> (206/Accept-Ranges, immutable cache, HMAC token, mime from variant)
@@ -347,6 +362,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-28
 
 ## Phase CB - Prod feedback: mobile analytics, unified feed, SEO
+
 - [x] CB.0 - Phase exit: /admin/analytics usable on a 390px phone (tables + widgets visible, no page-wide horizontal scroll); /feed.xml carries blog posts AND project pages newest-first; /sitemap.xml + a Sitemap-directive robots.txt live with per-page meta description/canonical/OpenGraph; beta de-indexed; verified on beta then prod
 - [x] CB.1 - Analytics dashboard mobile-responsive: wrap every data table in overflow-x-auto, wrap the stat + range/metric/paths chip rows (flex-wrap), break long UA/referer strings; confirm the SVG chart scales
 - [x] CB.2 - Unified /feed.xml (blog posts + project pages, newest-first, retitled to chris's name); /blog/feed.xml keeps serving it (back-compat); base.html link rel=alternate → /feed.xml; factor feed render into web/features/feed.rs
@@ -359,6 +375,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-28
 
 ## Phase CC - User management admin screen
+
 - [x] CC.0 - Phase exit: an admin can list users (role + passkey/API-key counts) at /admin/users, promote/demote Registered↔Admin, and delete a user; the last admin can never be removed/demoted; role + delete take effect IMMEDIATELY on a live cookie session (per-request recheck); tested + documented; beta→prod verified
 - [x] CC.1 - UserDao methods: list_summaries (display_name, id, role, passkey_count = json_array_length(keys), api_key_count = live api_keys), count_admins, set_role(id, role), delete(id) (DELETE the user's api_keys first then the row, in a tx — FK). Unit tests incl. delete cascade + count_admins
 - [x] CC.2 - Live enforcement: refresh_session_role middleware (from_fn_with_state, layered INNER to api_key_auth) — for a cookie session that is Authenticated and has no api-key injection, re-load the user by id and inject the refreshed SessionData (updated role), or inject Anonymous if the user was deleted. Makes demote/delete immediate. Integration test: demote/delete reflected without re-login
@@ -371,6 +388,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-28
 
 ## Phase CD - SEO regressions: HTTP/2 host + project URLs
+
 - [x] CD.0 - Phase exit: prod sitemap/robots/feed emit the REAL host over HTTP/2 (not localhost) and project entries link the working /pages/projects/<slug>; beta de-indexes under h2; verified on prod over both h1.1 + h2
 - [x] CD.1 - HTTP/2 host detection: web/util/host.rs request_host(headers, uri) = Host header ?? uri :authority ?? localhost (h2 puts the host in :authority, not a Host header) + request_scheme(); use it in feed.rs + seo.rs sitemap/robots so prod over h2 emits the real host. Unit-test the helper (Host header, :authority fallback, neither)
 - [x] CD.2 - Project detail URL fix: feed + sitemap link project entries at /pages/projects/<slug> (the real route), NOT /projects/<slug> (404); blog stays /blog/<slug>, /projects index stays. Fix the two CB tests that enshrined the wrong URL
@@ -381,6 +399,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-28
 
 ## Phase CE - Editable post date (backdating)
+
 - [x] CE.0 - Phase exit: a page's post date (page_creation_date) is editable in the editor + over the API, so a Wayback-recovered post can be backdated 10+ years and lands at its real chronological spot on /blog with its real date; modified-date stays auto; tested; beta→prod
 - [x] CE.1 - Make page_creation_date editable: ContentPageDao::update writes page_creation_date (+ creation_date_input() helper formatting it for datetime-local); PutPageForm gains optional page_creation_date (parse YYYY-MM-DDTHH:MM:SS, empty/unparseable → keep existing); put_page_path applies it before update. Integration test: a PUT backdates a page (and reorders /blog)
 - [x] CE.2 - Editor UI: a "Posted" datetime-local input (step=1) in get_page.html prefilled with the current creation date; CLAUDE.md note that post date is editable (backdating); deploy beta→prod
@@ -390,6 +409,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-28
 
 ## Phase CF - Wayback blog import
+
 - [x] CF.0 - Phase exit: 16 selected Wayback posts (technical 2,3,7,8,9,11,15,16,17 + personal 1,4,5,6,10,12,13) are live on /blog, each backdated to its REAL byline date (day precision), body converted from the archived HTML to clean markdown; chris polishes text on-site after
 - [x] CF.1 - Scrape + convert: for each selected post, fetch the Wayback raw capture (id_), extract title (h2#single-title), real date (byline "on Month Dayth, Year"), and body (between byline and post-bottom-meta) → pandoc to markdown. Save per-post {title, date, markdown}; validate the netcat sample + the title/date table before publishing
 - [x] CF.2 - Publish each post via the API: POST /pages/blog (title → slug) then PUT /pages/blog/<slug> with the markdown + page_creation_date set to the real byline date (backdated). Verify all 16 land on /blog dated correctly (oldest at the bottom)
@@ -399,6 +419,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-28
 
 ## Phase CG - Harden against content-triggered panics
+
 - [x] CG.0 - Phase exit: content can't crash a request or the feed — transform() catches panics + degrades to escaped source; the markdown table-slice is char-boundary-safe (markdown-rs offsets are CHAR offsets, not bytes); a CatchPanicLayer turns any handler panic into a 500 (not a 000 connection reset); regression tests; beta→prod
 - [x] CG.1 - transform() hardening: char-safe table slice (markdown.chars().skip(s).take(e-s), NOT byte &markdown[s..e]) + wrap transform in catch_unwind → on panic, log + return escaped-source fallback so a page/feed degrades, never crashes. Regression tests: a table after a smart-quote line + the netcat perl content → transform returns Ok
 - [x] CG.2 - CatchPanicLayer on the router (outermost) → any handler panic returns a 500 (styled if cheap) instead of a dropped connection; integration test (a debug-only panic route → 500, not a reset). CLAUDE.md note. Deploy beta→prod
@@ -408,6 +429,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-28
 
 ## Phase CH - Blog pagination + search
+
 - [x] CH.0 - Phase exit: /blog paginates (N newest per page, prev/next, no-JS, mobile) AND supports text search (?q= over title + body); the two compose (?q=…&page=N); server-rendered; tested; beta→prod
 - [x] CH.1 - Pagination: ContentPageDao gains count_children(parent) + a paged find (LIMIT/OFFSET on find_by_parent_newest_first); /blog?page=N (1-indexed, PAGE_SIZE const ~10); prev/next links at the bottom (no-JS, mobile, omitted at the ends); blog index handler + template. The Atom feed stays full (newest 50) — feed paging is out of scope
 - [x] CH.2 - Search: a GET search box on /blog (?q=) filtering posts by title + markdown. Decide mechanism — LIKE %q% is adequate at this scale (recommend); SQLite FTS5 (virtual table + sync triggers, ranked) is the noted upgrade if the corpus grows. Echo the query + a result count + a clear-search link; results render as the same cards; composes with ?page=N
@@ -418,6 +440,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-29
 
 ## Phase CL - Media review hardening
+
 - [x] CL.0 - CL.0 - Phase exit: media review hardening (M1-M3, L1) shipped beta→prod
 - [x] CL.1 - CL.1 - M2: byte route nosniff + force-download active-content mimes (XSS)
 - [x] CL.2 - CL.2 - M3: resolve_path/pick_write_root off the async runtime (spawn_blocking)
@@ -429,6 +452,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-29
 
 ## Phase CM - CM - Scrub career-private docs + rewrite history for public re-mirror
+
 - [x] CM.0 - Phase exit: docs de-personalized + history rewritten clean for public re-mirror
 - [x] CM.1 - De-personalize SPEC.md + PLAN.md (remove employment-context; keep product spec); commit
 - [x] CM.2 - Rewrite history (git-filter-repo replace-text + replace-message); verify clean + code unchanged
@@ -439,6 +463,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-30
 
 ## Phase CP - CP - Stable code signing (Developer ID) for TCC/FDA persistence
+
 - [x] CP.0 - Phase exit: prod + beta are signed with chris's Apple Developer ID (a stable identity), so the Full Disk Access (TCC) grant survives every deploy — grant FDA once, never re-grant after a push; verified across two consecutive deploys with MediaStorage4-hosted media serving throughout (no re-grant, no 25s hang). Signing-IDENTITY only — Apple notarization + .pkg stay retired
 - [x] CP.1 - build.sh: sign with the Developer ID Application cert instead of ad-hoc `codesign -s -`. Resolve the identity from $SIGN_IDENTITY (the "Developer ID Application: … (TEAMID)" string) with ad-hoc as the FALLBACK when it's unset/absent (so a cert-less dev or CI build still works). Both --profile beta + prod sign with the same cert. Minimal — no hardened runtime / notarization (not needed without public download distribution; this is for TCC identity stability only)
 - [x] CP.2 - One-time mini keychain setup (build/macos/SETUP.md): import the Developer ID Application cert + private key into the keychain the post-receive build uses, and make NON-INTERACTIVE codesign work from the ssh/post-receive context (no GUI) — unlock the keychain + `security set-key-partition-list -S apple-tool:,apple: -s -k <pw> <keychain>` so codesign signs without a prompt. The real gotcha: a `git push` build runs OUTSIDE the GUI session, so the signing key must be reachable + ACL-allowed headless
@@ -449,6 +474,7 @@ Beta is **public** (decided 2026-06-22 — chris is often off-LAN, so LAN-only w
 ## 2026-06-30
 
 ## Phase CO - CO - Admin log viewer (prod ops visibility)
+
 - [x] CO.0 - Phase exit: an admin reads recent server logs at /admin/logs (tail of Settings.log_path, level filter, manual refresh) WITHOUT the page feeding its own log (no infinite loop); the backfill-style silent no-op would now be one click to see; verified beta→prod
 - [x] CO.1 - Log tail reader: a bounded tail of the newest log file under Settings.log_path (last ~N lines / cap the bytes read — never slurp a multi-GB log), newest-first, run in spawn_blocking so a log on a slow/asleep disk can't pin a tokio worker. Handle tracing's rotation (read the current/most-recent file). Returns the lines + a level filter applied
 - [x] CO.2 - /admin/logs page: admin-gated under the /admin nest's require_admin, server-rendered <pre> of the tail + a level filter (?level=error|warn|all) + a MANUAL refresh link (no aggressive auto-poll). NO INFINITE LOOP: manual refresh is the primary defense, AND exclude /admin/logs from the request_log middleware + drop the route's own access lines from the displayed tail, so viewing the log never feeds the log. Hub link from /admin/pages
@@ -477,14 +503,15 @@ Dev-HTTPS strategy: dev runs as a debug build, which already routes ACME at LE s
 - [x] 11.8 - (Folded into 12.9.) CLAUDE.md update: document the new `http_port`/`https_port`/`static_ip` settings; note the dev-HTTPS recipe; mention the existing debug→LE-staging routing so dev never burns prod cert quota.
 - [x] 11.9 - (Folded into 12.10.) Manual e2e: bring up a phone-reachable HTTPS surface, install the PWA from a phone, edit a template, refresh phone, confirm the change is live without a deploy.
 
-
 ## Phase CA - API key authentication
+
 - [x] CA.0 - Phase exit: a user can generate/revoke API keys in /admin; an `Authorization: Bearer hio_…` key authenticates as that user (HMAC-pepper hashed) across all routes; tested + documented
 - [x] CA.1 - api_keys schema + ApiKeyDao + HMAC-pepper hashing (crypto_keys id 3) + key generation (hio_<base64url>); unit tests
 - [x] CA.2 - Auth resolution in SessionData extractor: Authorization: Bearer (axum-extra TypedHeader) → live-key lookup → Authenticated(user) + stamp last_used; session fallback; integration test
 - [x] CA.3 - Admin UI /admin/api-keys: generate (label → key shown ONCE), list (label/created/last-used), revoke; admin-gated; CLAUDE.md docs
 
 ## Phase CI - Large-file streaming upload + shareable link
+
 - [x] CI.0 - Phase exit: large-file streaming upload + shareable link
 - [x] CI.1 - MediaStore::store_stream (chunks → temp → atomic rename, incremental SHA-256)
 - [x] CI.2 - Stream the upload handlers (drop the Vec<u8> buffering)
@@ -493,6 +520,7 @@ Dev-HTTPS strategy: dev runs as a debug build, which already routes ACME at LE s
 - [x] CI.5 - Tests + docs + deploy
 
 ## Phase CJ - Multi-drive media storage
+
 - [x] CJ.0 - Phase exit: multi-drive media storage
 - [x] CJ.1 - Config: media_paths ordered list + free-space headroom
 - [x] CJ.2 - Schema: media_variant.storage_root hint column (migration 0017)
@@ -503,12 +531,14 @@ Dev-HTTPS strategy: dev runs as a debug build, which already routes ACME at LE s
 - [x] CJ.7 - Storage panel: show media roots + free space
 
 ## Phase CK - Upload progress
+
 - [x] CK.0 - Phase exit: media uploads show real progress
 - [x] CK.1 - media-upload.js: XHR upload + progress bar (drop-zone + add-encode)
 - [x] CK.2 - editor-support.js: XHR upload + progress for inline media drop
 - [x] CK.3 - CK tests + docs + deploy
 
 ## Phase CN - CN - Performance: render path + responsive images
+
 - [x] CN.0 - Phase exit: mobile LCP < 2.5s; PSI render-blocking (~1.9s) + image-delivery (~434 KiB) + font-display (~90ms) insights cleared — FontAwesome dropped for build-time-generated inline SVG, htmx deferred, @font-face font-display:swap; content images served width-stepped AVIF via srcset (existing images backfilled); versioned static assets cached a year; verified beta→prod via fresh PSI run
 - [x] CN.1 - Drop FontAwesome via build-time icon codegen: a build.rs step takes a declared list of the ~19 used icons (arrow-left/right, bars, cloud-arrow-up, cube, cubes-stacked, file, file-pdf, floppy-disk, grip-vertical, house, image, link, magnifying-glass, pen, pen-nib, photo-film, plus, trash-can) and generates inline SVG (an icon("pen") macro / fn returning <svg>), sourced from FA Free solid SVGs (vendored or pin-downloaded like the Tailwind CLI). Replace <i class="fa-…"> across the 9 templates; remove fontawesome.css + solid.css from base.html <head> and drop the FA webfonts from assets. Kills the 154.71 KiB fa-solid-900.woff2 + ~18 KiB CSS + two critical-chain hops — biggest single LCP lever. Declarative list → tool generates, no hand-copied SVG blobs
 - [x] CN.2 - defer htmx: add defer to base.html:30 script so it leaves the critical path (16.7 KiB / ~760ms). Verify nothing in {% block head %} or inline scripts calls htmx.* at parse time — the vendor inits (webauthn, katex-render, code-highlight, diagram-zoom, htmx-stl-view) are event-driven so deferring is safe; confirm load order with the other deferred scripts
@@ -529,6 +559,7 @@ Dev-HTTPS strategy: dev runs as a debug build, which already routes ACME at LE s
 ## 2026-07-01
 
 ## Phase CQ - Analytics: separating signal from noise (sources + performance)
+
 - [x] CQ.0 - Phase exit: audience (human/bot) + status/noise + per-IP + referer + latency all live on /admin/analytics behind require_admin; d3 line chart shipped; cargo test green (unit + reqwest integration + chromiumoxide e2e); CLAUDE.md updated; swept to PLAN_ARCHIVE
 - [x] CQ.1 - Shared foundation: migration 0019 duration_ms (nullable INTEGER, no index) + capture it in the fire-and-forget middleware (Instant before next.run, saturating i64 ms after); NewRequestLog/insert 6→7 cols, recent() projection gains it; fix entry()/seed() helpers; cargo clean -p hotchkiss-io for sqlx; docstring HONESTLY (server-handler time NOT client LCP, under-counts streaming bodies)
   - [x] CQ.1.1 - Fold the panic-logging fix into capture: reorder log_requests OUTER to CatchPanicLayer in router.rs so a caught handler-panic 500 is observed + recorded (it was invisible — the panic unwound past the post-next.run insert); extend handler_panic_becomes_a_500 test to assert the /test/panic 500 lands in request_log
@@ -546,6 +577,7 @@ Dev-HTTPS strategy: dev runs as a debug build, which already routes ACME at LE s
 ## 2026-07-01
 
 ## Phase CR - Analytics performance — indexes, stored is_bot, parallel queries
+
 - [x] CR.0 - Phase exit: /admin/analytics loads in well under ~0.5s at 300k+ rows (verified via the diagnostic harness); cargo test green; CLAUDE.md + SPEC updated; swept to PLAN_ARCHIVE
 - [x] CR.1 - Covering indexes (migration 0021) — the biggest win: (path,ts,status), (ip,ts), (referer,ts), (user_agent,ts) so the GROUP-BY queries go index-only (no temp b-tree); confirm via EXPLAIN QUERY PLAN they use COVERING INDEX; note the write-amplification (4 more indexes on the fire-and-forget insert — acceptable at personal-site write rates)
 - [x] CR.2 - Stored is_bot column (migration 0022) + single-source Rust classifier: port the 25 bot-UA substrings to a fn is_bot(ua)->bool used at write (NewRequestLog/insert) AND an idempotent startup backfill for existing NULL rows; switch the audience-threaded queries + audience_counts from request_log_view.ua_class to is_bot (SUM); add (ts,is_bot) or a covering index so audience_counts is index-only; DROP the now-unused request_log_view
@@ -574,6 +606,7 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 ## 2026-07-01
 
 ## Phase CS - Feed + page render caching
+
 - [x] CS.0 - Phase exit: /feed.xml served from a warm transform cache (~1.3s → sub-100ms), shared by all page renders; feed emits ETag/Last-Modified + honors conditional 304
 - [x] CS.1 - render-cache module: content-hash-keyed in-memory transform (+ excerpt) cache, coherent with the diagram REGISTRY (process lifetime); unit tests for hit/miss/determinism
 - [x] CS.2 - Wire cached transform/excerpt into feed.rs, pages/mod.rs, blog.rs, resume.rs, projects.rs index, seo.rs Meta
@@ -587,6 +620,7 @@ See SPEC.md Pillar 3. The substance and the long pole: making less-visible work 
 ## 2026-07-01
 
 ## Phase CT - Analytics custom date-range picker
+
 - [x] CT.0 - Phase exit: /admin/analytics supports a custom from/to datetime range (native datetime-local) threaded through all queries with an upper bound; presets still work; verified isolating a post-deploy window
 - [x] CT.1 - Introduce Window{from,to} (concrete UTC SQLite-datetime bounds); refactor request_log.rs queries + noisy_ips from since_days/cutoff to ts >= ?from AND ts < ?to; keep ts-index usage
 - [x] CT.2 - Handler: parse ?from=&to= (+ tz offset) in AnalyticsQuery, compute the Window (custom overrides preset; preset = now-Ndays..now); graceful fallback on bad input (never 500)
@@ -618,6 +652,7 @@ See SPEC.md "Portfolio — the three pillars". The landing page is the connectiv
 ## 2026-07-03
 
 ## Phase CU - Scheduled / timed publishing
+
 - [x] CU.0 - Phase exit: future-dated pages hidden from non-admins on every public read path; admin sees them inline + badged; Publish-now/Unpublish work; tests green; docs updated
 - [x] CU.1 - Shared visibility predicate: is_scheduled/is_published on ContentPageDao + is_visible(page, is_admin) helper
 - [x] CU.2 - Direct-serve gates (security-critical): get_page_path scans whole pages_path; show_post gates leaf + filters future prev/next siblings
@@ -637,7 +672,9 @@ See SPEC.md "Portfolio — the three pillars". The landing page is the connectiv
 ## 2026-07-03
 
 ## Phase CV - Hero images on post + project pages
+
 added 2026-07-03.
+
 - [x] CV.0 - Phase exit: any page with a cover renders a stacked hero on its detail view (largest AVIF variant + srcset); tests + docs; shipped
 - [x] CV.1 - cover_hero_for helper: largest image variant of a page's cover + srcset (contrast cover_url_for's smallest) + CoverHero struct
 - [x] CV.2 - Render stacked hero in get_page.html + wire GetPageTemplate.hero through the handlers
@@ -648,7 +685,9 @@ added 2026-07-03.
 ## 2026-07-06
 
 ## Phase CX - Greylist — behavioral bot challenge (cat toll)
+
 Design + rationale (the decisions, the honest limits): [docs/greylist-challenge-design.md](docs/greylist-challenge-design.md).
+
 - [x] CX.0 - Phase exit: abusive IPs auto-greylisted on behavior (FCrDNS-verified crawlers exempt), served a snarky 429 PoW challenge; pass mints a 7d bearer clearance (NOT IP-bound) + records the signal; challenged traffic stamped challenged+is_bot in analytics; /admin/greylist manage panel; tests + docs; shipped to beta
 - [x] CX.1 - Migration 0024 (greylist + greylist_clearance tables, request_log.challenged column) + GreylistDao with #[sqlx::test] coverage (auto-upsert/sliding-expiry, manual pin no-expiry, release, active set, record/list clearances)
 - [x] CX.2 - Detection sweep: pure ip_features + named rules (R1 signature-probe ≥400-only UA-blind, R2 distinct-404 burst, R3 flood) over request_log; periodic detached coordinator task; loopback/RFC1918 guard; pluggable score()->Verdict; unit tests at threshold edges
@@ -663,3 +702,19 @@ Design + rationale (the decisions, the honest limits): [docs/greylist-challenge-
 - [x] CX.11 - Bespoke challenge design chat — align on the canvas pixel-write + keyed-order hashing kernel (stock Anubis PoW is solver-coded in the wild; decide image pipeline, mutation model + verify kernel before building CX.4/CX.6)
 - [x] CX.12 - Beta trip-test affordance: admin "Run sweep now" button (release-safe, no debug seam) to force detection on demand; document the recipe (hit /wp-login.php ×2 → run sweep → greylisted → toll); manual pin covers instant challenge-flow test
 
+---
+
+## 2026-07-06
+
+## Phase CY - Analytics — align on the greylist/challenged dimension
+
+- [x] CY.0 - Phase exit: the analytics dashboard reports the greylist/challenged dimension — tolls-served surfaced, is_bot-vs-challenged disambiguated, 429-tolls read as "greylist working" not mystery errors, /challenge ceremony out of the noise; tested + shipped
+- [x] CY.1 - Model DECIDED (chris confirmed): challenged is a subset of is_bot=1 → a "tolls served" headline sub-metric + a `?audience=challenged` FILTER value (scopes all graphs/tables), NOT a 4th All/Humans/Bots partition chip; chip styled as "a slice of Bots"
+- [x] CY.2 - Surface the toll on the dashboard: a "challenged / tolls served" stat over the window + a challenged series on the traffic-per-day chart, so the greylist's impact is visible
+- [x] CY.3 - Status-bucket clarity: split the 429 tolls out of s4xx (like 403/404 are split) or annotate, so a 4xx rise reads as "greylist working" not mystery errors
+- [x] CY.4 - Exclude the greylist's own ceremony (/challenge/*) from request_log (mirror the /admin/analytics self-exclusion) so /challenge/new|image|verify don't pollute top-paths — the challenged=1 stamp on the ORIGINAL path is preserved
+- [x] CY.5 - Cross-check existing views under the new dimension: audience counts, top-pages Content↔All, noisy-IPs, never-succeeded, referrers — a greylisted-then-cleared IP reports correctly, no double-count/misattribution
+- [x] CY.6 - Tests (challenged-aware count queries + a challenged fixture) + CLAUDE.md/docs update + deploy beta→prod
+- [x] CY.7 - Challenged FILTER: add `Audience::Challenged` (→ challenged=1 predicate) threaded through all ~15 windowed count/GROUP-BY queries + the chart JSON island + the chip row, reusing the CQ.7 hx-get control model, so every graph/table scopes to tolled traffic; a bad value degrades to All (never 500)
+- [x] CY.8 - Toll outcome / block-hardness: challenged (walls hit) vs greylist_clearance (got through) over the window → a solve-rate stat (LOW = hard block, scrapers bounce; HIGH = soft, solving-through or a false positive) + per-IP challenged-vs-cleared so a repeatedly-solving IP is visible. No new schema — data's already recorded.
+- [x] CY.9 - Whole-page design review of /admin/analytics at end of CY: has it gotten too confusing/cluttered with all the dimensions (audience + challenged filter, status buckets w/ 429, tolls/solve-rate, top-pages, noisy IPs, referrers, latency, chart)? Assess info hierarchy, propose + apply simplification

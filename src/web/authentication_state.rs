@@ -14,9 +14,17 @@ pub enum AuthenticationState {
 
 impl AuthenticationState {
     pub fn is_admin(&self) -> bool {
+        self.role() == Role::Admin
+    }
+
+    /// The viewer's role — `Anonymous` unless fully `Authenticated` (the
+    /// ceremony states carry a user but haven't proven possession yet). Every
+    /// viewer-role derivation (visibility gates, the role-scoped mutation
+    /// allowlist) goes through this, never an inline match.
+    pub fn role(&self) -> Role {
         match self {
-            AuthenticationState::Authenticated(user) => user.role == Role::Admin,
-            _ => false,
+            AuthenticationState::Authenticated(user) => user.role,
+            _ => Role::Anonymous,
         }
     }
 
@@ -85,5 +93,24 @@ mod tests {
             role: Role::Admin,
         };
         assert!(AuthenticationState::Authenticated(admin).is_admin());
+    }
+
+    /// `role()` surfaces the authenticated user's real role and collapses every
+    /// non-authenticated state to `Anonymous`.
+    #[test]
+    fn role_derivation() {
+        assert_eq!(AuthenticationState::Anonymous.role(), Role::Anonymous);
+
+        let user = |role| UserDao {
+            display_name: format!("user-{role}"),
+            id: Uuid::new_v4(),
+            keys: sqlx::types::Json(vec![]),
+            role,
+        };
+        for role in [Role::Registered, Role::Family, Role::Admin] {
+            assert_eq!(AuthenticationState::Authenticated(user(role)).role(), role);
+        }
+        // Family is trusted but NOT admin.
+        assert!(!AuthenticationState::Authenticated(user(Role::Family)).is_admin());
     }
 }

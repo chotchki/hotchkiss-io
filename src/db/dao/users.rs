@@ -159,8 +159,9 @@ impl UserDao {
         )
     }
 
-    /// Set a user's role (Registered ↔ Admin). The last-admin guard lives in the
-    /// handler, which has the target user + admin count in hand.
+    /// Set a user's role (Registered / Family / Admin). The last-admin and
+    /// no-Anonymous guards live in the handler, which has the target user +
+    /// admin count in hand.
     pub async fn set_role(pool: &SqlitePool, id: &Uuid, role: Role) -> Result<()> {
         let id = id.to_string();
         let role = role.to_string();

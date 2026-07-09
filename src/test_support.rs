@@ -118,9 +118,9 @@ impl TestServer {
         Ok(())
     }
 
-    /// Seed a user with an explicit role ("Admin" | "Registered"), returning their
-    /// id — for the `/admin/users` management tests. Bypasses the first-user→Admin
-    /// rule so a test can stand up several users deterministically.
+    /// Seed a user with an explicit role ("Admin" | "Family" | "Registered"),
+    /// returning their id — for the `/admin/users` management tests. Bypasses the
+    /// first-user→Admin rule so a test can stand up several users deterministically.
     pub async fn seed_user(&self, display_name: &str, role: &str) -> Result<Uuid> {
         let id = Uuid::now_v7();
         let id_str = id.to_string();

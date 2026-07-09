@@ -1,4 +1,4 @@
-//! Debug-only test-login seam: `POST /test/login[?role=Admin|Registered]` mints
+//! Debug-only test-login seam: `POST /test/login[?role=Admin|Registered|Family]` mints
 //! a fresh user with that role and puts an `Authenticated` session on the
 //! request, so integration tests (and local poking) can reach role-gated routes
 //! without the WebAuthn dance. `#[cfg(debug_assertions)]` — the route and this
@@ -43,8 +43,8 @@ struct TestLoginQuery {
 }
 
 /// `POST /test/login` — no `role` ⇒ `Admin` (the useful default for poking at
-/// admin pages); `?role=Registered` for a non-admin session. (`role` is
-/// case-sensitive — the strum variant names, e.g. `Admin`, `Registered`.)
+/// admin pages); `?role=Registered` / `?role=Family` for non-admin sessions.
+/// (`role` is case-sensitive — the strum variant names, e.g. `Admin`, `Family`.)
 /// Always creates a fresh user; a test DB is fresh per `spawn_test_server`.
 async fn login_as(
     State(state): State<AppState>,

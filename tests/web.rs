@@ -2325,6 +2325,190 @@ async fn admin_can_delete_a_user() {
     assert_eq!(count, 0, "alice should be gone");
 }
 
+// ───────────────────────── Phase CZ: Family role + honest sessions ─────────────────────────
+
+/// Family is a READ tier, not a mutation tier (the role-scoped allowlist ships
+/// EMPTY): a Family session reads public content like anyone, but every
+/// mutation and every `/admin` GET stays admin-only — and the 403 comes from
+/// the layer, BEFORE any handler (a Family DELETE on a nonexistent user is
+/// still 403, never the handler's 404).
+#[tokio::test]
+async fn family_role_reads_but_cannot_mutate_or_reach_admin() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("FamilyProbe", "# hello family")
+        .await
+        .expect("seed");
+
+    let family = client();
+    let r = family
+        .post(server.url("/test/login?role=Family"))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        r.status().is_success(),
+        "the test seam must mint Family the moment the variant exists: {}",
+        r.status()
+    );
+
+    // Reads: public content is 200 like any viewer.
+    let resp = family
+        .get(server.url("/pages/FamilyProbe"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // The /admin nest gates its GETs above Family.
+    for path in ["/admin/users", "/admin/analytics"] {
+        assert_eq!(
+            family.get(server.url(path)).send().await.unwrap().status(),
+            StatusCode::FORBIDDEN,
+            "{path} must stay admin-only for Family"
+        );
+    }
+
+    // Mutations: default-DENY holds (the role-scoped table is empty in CZ).
+    let resp = family
+        .put(server.url("/pages/FamilyProbe"))
+        .form(&[
+            ("page_category", ""),
+            ("page_markdown", "# defaced by family"),
+            ("page_cover_attachment_id", ""),
+            ("page_order", "0"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN, "family must not mutate pages");
+
+    // Layer-before-handler: 403 even for a target the handler would 404.
+    let resp = family
+        .delete(server.url("/admin/users/01980000-0000-7000-8000-000000000000"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "the authz layer must reject before the handler runs"
+    );
+}
+
+/// The three-way /admin/users control: promote to Family, badge shows, and the
+/// two CZ guards hold — `Anonymous` is not an assignable target (400), and the
+/// last-admin protection also covers demote-to-Family (409).
+#[tokio::test]
+async fn admin_users_family_promotion_and_guards() {
+    let server = spawn_test_server().await.expect("spawn");
+    let alice = server.seed_user("alice", "Registered").await.unwrap();
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // Registered → Family.
+    let r = admin
+        .post(server.url(&format!("/admin/users/{alice}/role")))
+        .form(&[("role", "Family")])
+        .send()
+        .await
+        .unwrap();
+    assert!(r.status().is_success(), "promote to Family should succeed: {}", r.status());
+    let role: String = sqlx::query("SELECT app_role FROM users WHERE display_name = 'alice'")
+        .fetch_one(&server.pool).await.unwrap().get("app_role");
+    assert_eq!(role, "Family");
+
+    // The list renders the real role.
+    let body = admin
+        .get(server.url("/admin/users"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("Family"), "user list should show the Family role");
+
+    // Anonymous is a sentinel, not a target.
+    let r = admin
+        .post(server.url(&format!("/admin/users/{alice}/role")))
+        .form(&[("role", "Anonymous")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::BAD_REQUEST, "Anonymous must be rejected");
+    let role: String = sqlx::query("SELECT app_role FROM users WHERE display_name = 'alice'")
+        .fetch_one(&server.pool).await.unwrap().get("app_role");
+    assert_eq!(role, "Family", "the rejected set must not have landed");
+
+    // The last-admin guard keys on leaving Admin — a Family target is still a demotion.
+    let id = admin_user_id(&server).await;
+    let r = admin
+        .post(server.url(&format!("/admin/users/{id}/role")))
+        .form(&[("role", "Family")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CONFLICT, "can't demote the last admin to Family");
+}
+
+/// The CZ.3 session touch: activity must push the `OnInactivity(1 day)` expiry
+/// forward. Before the fix the session was written exactly once (at login), so
+/// it died 24h after login regardless of activity. Reads the tower_sessions
+/// row's expiry as epoch seconds (type-tolerant: the store binds an
+/// OffsetDateTime, SQLite may hold it as TEXT or a number).
+#[tokio::test]
+async fn authenticated_activity_extends_session_expiry() {
+    let server = spawn_test_server().await.expect("spawn");
+    let user = client();
+    user.post(server.url("/test/login?role=Family")).send().await.unwrap();
+
+    let expiry_epoch = || async {
+        sqlx::query(
+            "SELECT CASE WHEN typeof(expiry_date) = 'text' THEN unixepoch(expiry_date) \
+             ELSE CAST(expiry_date AS INTEGER) END AS e FROM tower_sessions",
+        )
+        .fetch_one(&server.pool)
+        .await
+        .unwrap()
+        .get::<i64, _>("e")
+    };
+    let at_login = expiry_epoch().await;
+
+    // Whole-second expiry resolution → sleep past a second boundary.
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+
+    let resp = user.get(server.url("/")).send().await.unwrap();
+    assert!(resp.status().is_success());
+
+    let after_activity = expiry_epoch().await;
+    assert!(
+        after_activity > at_login,
+        "an authenticated request must push the session expiry forward \
+         (login: {at_login}, after: {after_activity})"
+    );
+
+    // The touch is THROTTLED (hourly): an immediate follow-up request must NOT
+    // write again — otherwise static-asset/media-range fan-out would turn every
+    // subresource GET into a tower_sessions write.
+    let resp = user.get(server.url("/")).send().await.unwrap();
+    assert!(resp.status().is_success());
+    let after_second = expiry_epoch().await;
+    assert_eq!(
+        after_second, after_activity,
+        "a request inside the touch interval must not re-save the session"
+    );
+
+    // And the anonymous path stays write-free: a fresh client with no session
+    // must not create a session row.
+    let rows_before: i64 = sqlx::query("SELECT COUNT(*) AS c FROM tower_sessions")
+        .fetch_one(&server.pool).await.unwrap().get("c");
+    client().get(server.url("/")).send().await.unwrap();
+    let rows_after: i64 = sqlx::query("SELECT COUNT(*) AS c FROM tower_sessions")
+        .fetch_one(&server.pool).await.unwrap().get("c");
+    assert_eq!(rows_before, rows_after, "anonymous traffic must not mint sessions");
+}
+
 // ───────────────────────── Phase CE: editable post date (backdating) ─────────────────────────
 
 #[tokio::test]

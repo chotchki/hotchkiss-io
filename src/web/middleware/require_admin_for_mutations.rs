@@ -1,5 +1,6 @@
 use axum::{extract::Request, http::Method, middleware::Next, response::Response};
 
+use crate::db::dao::roles::Role;
 use crate::web::error_page::forbidden_response;
 use crate::web::session::SessionData;
 
@@ -14,9 +15,13 @@ use crate::web::session::SessionData;
 ///   verbs — so an exotic method (e.g. the `PATCH` on `/pages/preview`) is gated
 ///   without anyone enumerating it.
 /// - The ONLY exceptions are the WebAuthn login-ceremony POSTs (the caller isn't
-///   authenticated yet) + the debug-only test-login seam. Matching is EXACT
+///   authenticated yet) + the debug-only test-login seam, and the role-scoped
+///   allowlist below (Phase CZ — currently EMPTY). Matching is EXACT
 ///   `(path, method)` — never a prefix — so it can't silently widen to a future
 ///   `/login/*` sibling.
+///
+/// Decision order: safe methods pass → anonymous WebAuthn allowlist →
+/// role-scoped allowlist (rank-checked) → admin fallback → 403.
 ///
 /// `SessionData` defaults to `Anonymous` when there's no session, so an
 /// unauthenticated write gets a clean `403`, not a panic. Wired INNER to the
@@ -41,11 +46,50 @@ pub async fn require_admin_for_mutations(
         return next.run(req).await;
     }
 
+    // Role-scoped entries: a mutation a sub-admin tier may perform, gated by
+    // rank. Checked BEFORE the admin fallback (an admin outranks every entry
+    // anyway, so order only matters for non-admins).
+    if allowed_by_role_scope(
+        ROLE_SCOPED_MUTATIONS,
+        req.method(),
+        req.uri().path(),
+        session_data.auth_state.role(),
+    ) {
+        return next.run(req).await;
+    }
+
     if session_data.auth_state.is_admin() {
         next.run(req).await
     } else {
         forbidden_response(req.headers())
     }
+}
+
+/// Role-scoped mutation allowlist (Phase CZ — the seam the Library progress
+/// endpoint and the future Home tab consume): exact-match `(method, path)` →
+/// the MINIMUM `Role` whose `rank()` may pass. Two conventions keep this a
+/// table and not a router: **resource ids ride the request BODY** (so entries
+/// stay exact-match, never a path pattern), and **per-resource authorization
+/// beyond the coarse role gate lives in the handler** (e.g. a progress save
+/// re-checks the media's own `min_role`). Entries are code, reviewed like the
+/// WebAuthn ones above. Shipped EMPTY — Phase DF adds the first entry
+/// (`POST /library/progress` at `Role::Family`).
+const ROLE_SCOPED_MUTATIONS: &[(Method, &str, Role)] = &[];
+
+/// True when `(method, path)` has a role-scoped entry AND the viewer's rank
+/// meets it. Exact match only — a prefix or sibling never qualifies.
+/// Parameterized on the table so tests exercise the matching with a fixture
+/// while the shipped table stays empty.
+fn allowed_by_role_scope(
+    table: &[(Method, &str, Role)],
+    method: &Method,
+    path: &str,
+    viewer: Role,
+) -> bool {
+    table
+        .iter()
+        .find(|(m, p, _)| m == method && *p == path)
+        .is_some_and(|(_, _, min)| viewer.rank() >= min.rank())
 }
 
 /// EXACT `(path, method)` allowlist of the only non-GET endpoints reachable
@@ -103,5 +147,58 @@ mod tests {
     #[test]
     fn test_login_seam_allowlisted_in_debug() {
         assert!(is_anonymous_auth_endpoint(&Method::POST, "/test/login"));
+    }
+
+    /// The shipped table is EMPTY by design in Phase CZ — the machinery lands
+    /// inert; Phase DF adds the first entry. If an entry appears here, move it
+    /// into the fixture coverage below too.
+    #[test]
+    fn shipped_role_scope_table_is_empty() {
+        assert!(ROLE_SCOPED_MUTATIONS.is_empty());
+    }
+
+    #[test]
+    fn role_scope_matching_is_exact_and_rank_gated() {
+        const FIXTURE: &[(Method, &str, Role)] =
+            &[(Method::POST, "/library/progress", Role::Family)];
+
+        // Rank gate: Family meets a Family-min entry, Admin outranks it,
+        // Registered and Anonymous fall short.
+        for (viewer, allowed) in [
+            (Role::Anonymous, false),
+            (Role::Registered, false),
+            (Role::Family, true),
+            (Role::Admin, true),
+        ] {
+            assert_eq!(
+                allowed_by_role_scope(FIXTURE, &Method::POST, "/library/progress", viewer),
+                allowed,
+                "viewer {viewer}"
+            );
+        }
+
+        // Exact method: same path, different verb → no entry, no pass.
+        assert!(!allowed_by_role_scope(
+            FIXTURE,
+            &Method::PUT,
+            "/library/progress",
+            Role::Admin
+        ));
+
+        // Exact path: children, parents and siblings never inherit the entry.
+        for path in ["/library/progress/123", "/library", "/library/progressx"] {
+            assert!(
+                !allowed_by_role_scope(FIXTURE, &Method::POST, path, Role::Admin),
+                "path {path} must not match"
+            );
+        }
+
+        // An empty table (the shipped state) allows nothing.
+        assert!(!allowed_by_role_scope(
+            &[],
+            &Method::POST,
+            "/library/progress",
+            Role::Admin
+        ));
     }
 }

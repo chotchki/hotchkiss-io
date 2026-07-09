@@ -53,7 +53,9 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] 15.4 - Auto-generate a lower-res STL (SPEC goal) — decide build-time vs on-upload; may defer.
 - [ ] 15.5 - Author the 5 gallery entries (photos + descriptions + files).
 - [ ] 15.6 - e2e coverage for the 3D gallery; CLAUDE.md/SPEC update.
+
 ## Phase CW - Fab / 3D section — host the WASM slicer/placer editor
+
 - [ ] CW.0 - Phase exit: the Fab/3D tab hosts the live WASM slicer/placer editor (cross-origin isolated, own route, consuming the pinned fab-scad release) with models nested; tests + docs; shipped
 - [x] CW.1 - Nail the consume-contract with fab-scad (GATING, cross-repo): the GitHub-release asset shape + pinned-download mechanism + confirm SAB/threads
 - [x] CW.2 - build.rs: download the pinned fab-scad WASM release into OUT_DIR (mirror the Tailwind-CLI download) + stage for rust-embed
@@ -62,21 +64,82 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [x] CW.5 - The fab/3d special page + nav tab; models nest as its content-page children
 - [ ] CW.6 - Models gallery under the tab: reparent/curate the Phase-15 hand-picked models (existing STL/3MF viewer + fab-publish)
 - [ ] CW.7 - Tests (route serves bundle + COOP/COEP scoped; media CORP; models render) + CLAUDE.md + deploy
-## Phase CY - Analytics — align on the greylist/challenged dimension
-- [ ] CY.0 - Phase exit: the analytics dashboard reports the greylist/challenged dimension — tolls-served surfaced, is_bot-vs-challenged disambiguated, 429-tolls read as "greylist working" not mystery errors, /challenge ceremony out of the noise; tested + shipped
-- [x] CY.1 - Model DECIDED (chris confirmed): challenged is a subset of is_bot=1 → a "tolls served" headline sub-metric + a `?audience=challenged` FILTER value (scopes all graphs/tables), NOT a 4th All/Humans/Bots partition chip; chip styled as "a slice of Bots"
-- [x] CY.2 - Surface the toll on the dashboard: a "challenged / tolls served" stat over the window + a challenged series on the traffic-per-day chart, so the greylist's impact is visible
-- [x] CY.3 - Status-bucket clarity: split the 429 tolls out of s4xx (like 403/404 are split) or annotate, so a 4xx rise reads as "greylist working" not mystery errors
-- [x] CY.4 - Exclude the greylist's own ceremony (/challenge/*) from request_log (mirror the /admin/analytics self-exclusion) so /challenge/new|image|verify don't pollute top-paths — the challenged=1 stamp on the ORIGINAL path is preserved
-- [x] CY.5 - Cross-check existing views under the new dimension: audience counts, top-pages Content↔All, noisy-IPs, never-succeeded, referrers — a greylisted-then-cleared IP reports correctly, no double-count/misattribution
-- [ ] CY.6 - Tests (challenged-aware count queries + a challenged fixture) + CLAUDE.md/docs update + deploy beta→prod
-- [x] CY.7 - Challenged FILTER: add `Audience::Challenged` (→ challenged=1 predicate) threaded through all ~15 windowed count/GROUP-BY queries + the chart JSON island + the chip row, reusing the CQ.7 hx-get control model, so every graph/table scopes to tolled traffic; a bad value degrades to All (never 500)
-- [x] CY.8 - Toll outcome / block-hardness: challenged (walls hit) vs greylist_clearance (got through) over the window → a solve-rate stat (LOW = hard block, scrapers bounce; HIGH = soft, solving-through or a false positive) + per-IP challenged-vs-cleared so a repeatedly-solving IP is visible. No new schema — data's already recorded.
-- [x] CY.9 - Whole-page design review of /admin/analytics at end of CY: has it gotten too confusing/cluttered with all the dimensions (audience + challenged filter, status buckets w/ 429, tolls/solve-rate, top-pages, noisy IPs, referrers, latency, chart)? Assess info hierarchy, propose + apply simplification
+
+## Phase CZ - Family role + honest sessions (Library/Home foundation)
+
+- [ ] CZ.0 - Phase exit: Role::Family exists end-to-end (rank ladder, admin UI, test seam), sessions actually refresh on activity, role-scoped mutation allowlist shipped EMPTY; tests + CLAUDE.md; inert on prod. Design: docs/library-design.md
+- [x] CZ.1 - Role::Family + explicit rank() (Anonymous 0 < Registered 1 < Family 2 < Admin 3), Role::iter()-pinned test + doc comment forbidding derive(Ord) (variants are alphabetical — Admin would rank below Anonymous)
+- [x] CZ.2 - AuthenticationState::role() -> Role helper beside is_admin()/is_authenticated(); all new viewer-role derivations go through it
+- [x] CZ.3 - Session-touch fix: refresh_session_role re-saves authenticated sessions so OnInactivity(1 day) means inactivity — today the session is only written at login and dies 24h later regardless of activity (likely explains the Phase-10 "not logged in on the phone" dogfood finding)
+- [x] CZ.4 - /admin/users rework: UserRow carries the real role (not is_admin bool), three-way promote control, reject role=Anonymous as a target; tests
+- [x] CZ.5 - require_admin_for_mutations: role-scoped exact-match allowlist table (Method, path, min Role) checked by rank() — shipped EMPTY; conventions: ids in request body, per-resource checks in handlers; unit tests
+- [ ] CZ.6 - Integration gate tests via /test/login?role=Family + CLAUDE.md delta + beta validation (promote a beta user to Family; session survives >24h of activity)
+
+## Phase DA - Page visibility - the min_role predicate
+
+- [ ] DA.0 - Phase exit: content_pages.min_role gates every read path oracle-safely and fail-closed; parity tests green; inert (no rows gated); CLAUDE.md updated
+- [ ] DA.1 - Migration: content_pages.min_role TEXT NULL (NULL = the only public spelling); thread the column through ~8 query_as! sites + struct + test constructors (cargo clean for sqlx re-validation)
+- [ ] DA.2 - is_visible_to(viewer: Role): special-page exemption narrowed to scheduling only (role clause applies to special pages); fail-closed parse (unknown non-NULL min_role → Admin-only)
+- [ ] DA.3 - Fail-closed SQL CASE (WHEN NULL 0 / Registered 1 / Family 2 / ELSE 3) in count_children + both paged fetches; parity tests: count/fetch predicates identical + CASE↔rank() via Role::iter()
+- [ ] DA.4 - Thread the ~12 read paths: get_page_path ancestor scan, show_post + sibling retain, home bands, resume, /3d, paginate (viewer_is_admin bool → Role); feed/sitemap/redirect_to_first_page stay unconditionally Anonymous
+- [ ] DA.5 - Oracle tests: gated content page returns the byte-identical cat-404 for Anonymous AND Registered; Family/Admin get 200; rollback caveat documented (pre-gate binary serves gated rows publicly)
+- [ ] DA.6 - CLAUDE.md delta + beta validation: sqlite3-stamp min_role on a throwaway beta page, verify all four listing surfaces + direct-serve deny/allow
+
+## Phase DB - Page visibility - authoring + nav surface
+
+- [ ] DB.0 - Phase exit: visibility is authorable in the editor, badged everywhere Scheduled is, nav is role-aware; beta author→gate→deny loop verified
+- [ ] DB.1 - Editor Visibility select (Public/Registered/Family/Admin-only) as the 5th metadata-grid cell, through PutPageForm → update() (stamps page_modified_date so feed/sitemap validators bust on a visibility flip)
+- [ ] DB.2 - Visibility badge everywhere the Scheduled badge renders (4 card templates + editor header + reader) — admin-facing by construction
+- [ ] DB.3 - Inherit-on-create: new child pages default min_role to the parent's (post_page_path has the parent row in hand) — belt+suspenders over the ancestor scan
+- [ ] DB.4 - Role-aware TopBar::create (viewer Role param, ~15 call sites) — Family sees gated tabs, Anonymous doesn't; tests
+- [ ] DB.5 - Tests + CLAUDE.md delta + beta validation: full author→gate→deny loop through the editor on beta
+
+## Phase DC - Media visibility - gating the bytes
+
+- [ ] DC.0 - Phase exit: media.min_role enforced on bytes/302/embed with strictest-wins dedup + private caching; authorable with safe defaults; beta-verified
+- [ ] DC.1 - Migration: media.min_role TEXT NULL (same NULL-only-public, fail-closed semantics) + DAO threading
+- [ ] DC.2 - Byte route gate: SessionData extractor + NEW scalar-aggregate strictest-wins query (MAX rank across ALL media rows sharing the url_key — find_by_url_key/MediaVariantDao untouched); shared-sha unit test (NULL + Family → Family wins); denied → 404
+- [ ] DC.3 - /media/{ref} 302 + /media/embed/{ref} gates via the media row both already load (embed denial = the existing 200 error-span miss shape)
+- [ ] DC.4 - Cache-Control on gated bytes: private, max-age=31536000, immutable (public media unchanged); header test
+- [ ] DC.5 - Authoring defaults: upload_media min_role multipart field; editor-support.js sends the current page's visibility as default (drop-on-gated-page must NOT mint public media); library UI selector + prominent badge + default control (POST /admin/media/{id}/visibility)
+- [ ] DC.6 - Tests + CLAUDE.md delta + beta validation: gate a beta media item — anonymous 404, Family 200, private header
+
+## Phase DD - Audio media kind + player
+
+- [ ] DD.0 - Phase exit: an AAC m4b ingests as Audio with chapters and renders a family-grade player, verified on a real iPhone; /media/file excluded from request_log
+- [ ] DD.1 - Probe: audio-stream classification (attached_pic cover-art guard so an m4b with embedded art isn't misread as video), -show_chapters, media.chapters column migration, UNIVERSAL-only codec map (aac/mp3/flac; opus/vorbis/alac stay MediaKind::File)
+- [ ] DD.2 - Audio embed arm in render_embed_html (STL-arm shape): <audio controls preload=metadata> + audio/* sources + largest-variant download button + data-chapters/data-ref; degrades to bare element without JS
+- [ ] DD.3 - Player JS (first-party, vendored-only): chapter list/seek, ±30s skips, playback rate, MediaSession (+ gated-artwork credentialed-fetch→blob fallback), localStorage resume applied at loadedmetadata AND re-asserted on first play; never autoplay
+- [ ] DD.4 - Exclude /media/file/ from request_log (streaming range-requests would self-greylist a listening household via R3 + swamp the Humans/top-paths signal); note the decision in docs/greylist-challenge-design.md deferred-levers
+- [ ] DD.5 - On-phone checklist (needs beta gated test page + Family beta user): Safari tab AND installed PWA (separate cookie jar — pick + write down the supported mode), screen-off playback, lock-screen controls/artwork, cold-load resume survives first play, range seeking
+- [ ] DD.6 - Tests (probe KAT for an m4b fixture, embed arm, chapters JSON) + CLAUDE.md delta
+
+## Phase DE - The family Library section
+
+- [ ] DE.0 - Phase exit: family members use the Library tab end-to-end (first real audiobook live on prod); everyone else sees only the sign-in gate on code-defined routes
+- [ ] DE.1 - Migration: seed the library special page ('library','/library',-1,true) mirroring 0023, with min_role='Family' stamped on the row
+- [ ] DE.2 - /library route (section doors from children, /3d shape) + /library/audiobooks (paginated book cards via listing.rs paginate + search/pager partials); detail pages stay on get_page_path
+- [ ] DE.3 - Sign-in gate on ALL code-defined /library routes: logged-out copy ("sign in" + ?next link) vs authenticated-insufficient copy ("restricted", no tier names); get_page_path still redirects a special leaf whose ONLY failure is role (nav links /pages/library); oracle tests for both states + data stays miss-shaped
+- [ ] DE.4 - Login ?next: validated (leading /, second char not / or \, NO backslash anywhere — test vectors /\evil.com + //evil.com) and SESSION-stashed at login_page/get_auth_opts/start_register; finish handlers pop + redirect; htmx-webauthn.js navigates to response.url instead of hardcoded "/"
+- [ ] DE.5 - Add the /library index (exact path, not subtree) to greylist EXEMPT_PREFIXES beside /login — a greylisted logged-out family member must reach the sign-in gate, and the gate serves nothing scrapable
+- [ ] DE.6 - Author the first real audiobook end-to-end on beta (upload gated m4b → book page → family listen) then prod tag
+- [ ] DE.7 - Browser e2e (register 2nd virtual-authenticator user, promote via server.pool): Family sees Library tab + book page renders; anonymous: no tab, cat-404 book, sign-in gate on /library
+- [ ] DE.8 - CLAUDE.md major update: role ladder, min_role axes, Library section, audio kind, the new request_log exclusions
+
+## Phase DF - Listening progress sync
+
+- [ ] DF.0 - Phase exit: cross-device resume works (phone→iPad), saves survive screen-off listening, no analytics/greylist pollution. Deferrable phase.
+- [ ] DF.1 - Migration: playback_progress (PK user_id+media_id, media_id FK ON DELETE CASCADE matching media_variant; user rows wiped in delete_user's tx alongside api_keys)
+- [ ] DF.2 - POST /library/progress {media_ref, position_ms} via the role-scoped allowlist (Family) + handler re-checks the media's min_role; GET returns the session user's row with Cache-Control: no-store (cached position would defeat the phone→iPad handoff)
+- [ ] DF.3 - Player server-resume swap (localStorage stays as fallback); saves ~30s + pause + visibilitychange→hidden + pagehide beacon (throttle is the real guarantee on iOS); save rejection → "session expired, sign in" prompt, never a silent stall
+- [ ] DF.4 - Exclude /library/progress from request_log (machine telemetry, ~120 rows/listening-hour — same self-feed logic as /challenge; keeps it out of greylist R3)
+- [ ] DF.5 - Tests + CLAUDE.md delta + phone re-check: progress saves continue with the screen off
 
 ## Backlog (not yet phased)
 
 ### Tech debt
+
+- **Admin forms swallow non-2xx responses silently (HTMX).** Every admin `hx-post`/`hx-delete` form relies on `htmx_refresh()` firing on success; a defense-in-depth rejection (the 409 last-admin guard, the CZ 400 not-assignable guard, any 404) triggers `htmx:responseError` with no swap — the admin clicks, nothing visibly happens, and they assume it worked. Pre-existing pattern (the old Demote 409 had it too), surfaced in the CZ review. Fix is a small site-wide `htmx:responseError` listener that renders the response text as a toast/inline error — one snippet in base.html covers every admin form.
 - **Routing model is "too clever" (the `special_page` fallout).** `content_pages` is a self-referential tree that simultaneously (a) serves nested rendered-Markdown content, (b) carries `special_page` rows whose `page_markdown` is a *redirect target URL*, not content, and (c) is dispatched by a top-level router that special-cases the redirect rows while *also* breaking out to dedicated application routers (`/login`, `/projects`, soon `/admin`). Three concerns — content node / routing redirect / dedicated app page — conflated in one table + one dispatch path. A cleaner design separates them (content pages stay a tree; "special"/app routes become plain axum routes, not DB rows). Touches `redirect_to_first_page`, `pages/mod.rs` dispatch, `ContentPageDao::find_by_path`, the `0007` seed migration, `projects.rs`.
 - **Authorization is per-handler and inconsistent.** Two idioms in the tree: `if !session_data.auth_state.is_admin() { return FORBIDDEN }` (`preview.rs`, `attachments.rs`) and `if let AuthenticationState::Authenticated(u) = … && u.role != Role::Admin { return FORBIDDEN }` (`pages/mod.rs::delete_page_path`). No route-group enforcement anywhere. Phase 7 introduces a `require_admin` layer for the new `/admin` nest; the follow-up is to audit every existing mutating route and either move it behind a layer or a uniform `AdminUser` extractor, and converge on one idiom. (CLAUDE.md explicitly warns: audit every route first.)
 - **`SessionData::from_request_parts` has a load-bearing `.unwrap()`** (carrying a `//Unsure how to do this without an unwrap` comment) on the session-store read — a transient SQLite error there panics the request instead of degrading. Map it to `Ok(SessionData::default())` (treat a read failure as "no session") or surface it as a 500 via the rejection type.
@@ -85,6 +148,7 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - **Optional: scrub non-admin users from the beta snapshot (Phase 12 review).** Beta carries prod's full `users` table (passkey records are public keys with no network-reachable leak path; chris-as-admin on beta is intentional via shared rp_id). Pure defense-in-depth: `DELETE FROM users WHERE app_role != 'Admin'` in `snapshot_prod_db_into_beta` keeps only the admin row. Not required.
 
 ### Ideas
+
 - **Analytics expansion (d3 dashboard / status-noise / per-IP / referer-grouping / referer-breakdown / site-performance)** — all six folded into **Phase CQ** (SPEC.md "Analytics — signal vs noise"), designed 2026-06-30.
 - **Analytics → defense: dumb IP blocklist.** Derive a blocklist from `request_log` (N 404s in M minutes → drop the IP for a while), enforced by an early middleware layer. Still its own phase (blocklist storage + decay, the enforcing layer, an admin view/override, false-positive handling). **Phase CQ builds the reuse seam** — `noisy_ips(window_cutoff, …)` takes a window cutoff not a `days` int, so the "N 404s in M minutes" rate variant is a caller change, not a new fn; reconcile distinct-404-fanout (CQ's axis) vs per-minute-rate (enforcement's axis) before wiring.
 - **e2e: exercise the conditional-auth / autofill login path.** Phase 8.4's browser e2e drives the passkey *registration* ceremony cleanly, but the `webauthn-autofill` flow in `htmx-webauthn.js` (conditional `navigator.credentials.get()` on page load → `/login/get_auth_opts` → `/login/finish_authentication`) isn't tested — and per the original author that's where hidden footguns lurk. Add an e2e that, with a pre-registered virtual-authenticator credential, opens `/login` in a fresh context and verifies the autofill auth completes and lands logged-in. May surface bugs in the extension → could spin off its own phase.
@@ -94,16 +158,11 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - **Beta-only registration → prod-usable passkey (rp_id design implication).** With Phase 12's `webauthn_rp_id = hotchkiss.io` on beta, *any* passkey registered against beta is implicitly authorized for prod too (and vice versa) — they share an rp_id. For chris-as-sole-admin that's the goal (existing prod passkey works on beta). If users ever register on beta, their credentials would also work on prod after the next snapshot. Mitigations to consider before opening registration on beta: (a) disable public registration on beta (admin-only gate via config), (b) split rp_ids and accept that prod passkeys won't work on beta (need iCloud sync or re-register), (c) snapshot strips non-admin credentials on the way in.
 - **Publish `ios-inspect` as a crates.io crate.** The iOS-simulator inspection tool used by `tests/e2e_ios.rs` now lives in its own repo `github.com/chotchki/ios-inspect` (split out 2026-06-22 from `skylander-portal-controller/tools/ios-inspect`: the original sibling-repo *path* dep silently broke every non-dev-machine build incl. the mini's prod deploy, and a git-dep on the skylander repo dragged in its giant `rpcs3` submodule). It's now a clean **git** dev-dependency on the standalone repo, pinned via `Cargo.lock`. Publishing it to crates.io would make it a plain versioned registry dep (no git/branch pin) and is independently reusable — its own small project.
 
-
-
-
-
   - *Dogfood findings (Phase 10 phone testing, running list):*
     - Top nav (`templates/base.html` `<ul class="list-none flex flex-row">`) overflows the viewport on mobile — no `flex-wrap`, `px-8` per tab, ~5 tabs busts a ~390px iPhone viewport. Whole-site issue, not blog-specific. Likely fix: wrap + tighter mobile padding, possibly a hamburger at xs.
     - `post_page_path` / `post_top_level_page_path` reject non-URI-safe `page_name` (spaces, etc) with a 400 — but htmx swallows non-2xx responses, so submissions silently no-op. The blog "+ New post" form now slugifies on input as a local fix, but the top-nav admin "Create New Page" form and the editor's child-create form (`templates/pages/get_page.html`) still have the silent-fail. Whole-site fix: either slugify server-side in the handlers (any `page_name` → lowercase/hyphenated), or apply the same client-side slugify everywhere, or render an inline error message on 400.
     - Page minimum width exceeds an iPhone portrait viewport (~390px) — `templates/base.html` has the jumbotron as `flex flex-row` (image `size-40` = 160px + name/tagline text alongside) which never wraps, and the un-wrapped nav `<ul>` from the first finding contributes too. User has to rotate to landscape. Likely fix: jumbotron becomes `flex-col sm:flex-row` (or similar) so it stacks on narrow screens; nav fix from finding #1 helps here too.
     - On the phone, can't reach the editor — user reports "not logged in to the website to edit." Need to confirm symptom precisely (no editor chrome / 403 / redirect to login / save fails / something else) and whether (a) PWA cookie scope is separate from Safari, (b) session expired silently (1-day inactivity), or (c) the login passkey ceremony itself doesn't complete on iOS in some path.
-
 
 - **Add Biome for first-party JS/CSS lint (augment Prettier)** — added 2026-06-24.
 
