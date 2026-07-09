@@ -5,26 +5,26 @@
 @source "src/web/features";
 
 @theme {
-    --color-navy: #14213d;
-    --color-body-grey: #f5f5f5;
-    --color-div-grey: #e5e5e5;
-    --color-yellow: #ffc935;
-    --font-display: "Oswald", "ui-serif";
-    --font-content: "Quattrocento", "ui-serif";
+  --color-navy: #14213d;
+  --color-body-grey: #f5f5f5;
+  --color-div-grey: #e5e5e5;
+  --color-yellow: #ffc935;
+  --font-display: "Oswald", "ui-serif";
+  --font-content: "Quattrocento", "ui-serif";
 }
 
 @font-face {
-    font-family: 'Oswald';
-    src: url(/vendor/fonts/Oswald-Regular.woff2) format('woff2');
-    /* swap: paint text immediately in the fallback, swap in the webfont when it
+  font-family: "Oswald";
+  src: url(/vendor/fonts/Oswald-Regular.woff2) format("woff2");
+  /* swap: paint text immediately in the fallback, swap in the webfont when it
        loads — no FOIT (invisible-text) blocking first paint. */
-    font-display: swap;
+  font-display: swap;
 }
 
 @font-face {
-    font-family: 'Quattrocento';
-    src: url(/vendor/fonts/Quattrocento-Regular.woff2) format('woff2');
-    font-display: swap;
+  font-family: "Quattrocento";
+  src: url(/vendor/fonts/Quattrocento-Regular.woff2) format("woff2");
+  font-display: swap;
 }
 
 /* Inline SVG icons — build.rs generates templates/partials/icons.html from the
@@ -33,30 +33,30 @@
  * viewBox keeps its aspect), fill currentColor. Wrap a call in a sized/recolored
  * <span> for the few bigger icons (text-3xl/text-5xl/text-yellow). */
 .icon {
-    display: inline-block;
-    height: 1em;
-    width: auto;
-    vertical-align: -0.125em;
-    fill: currentColor;
+  display: inline-block;
+  height: 1em;
+  width: auto;
+  vertical-align: -0.125em;
+  fill: currentColor;
 }
 
 /* STL viewer loading spinner (assets/scripts/htmx-stl-view.js injects a
  * <span class="stl-spinner">). Self-contained CSS ring so it doesn't depend on
  * Tailwind scanning JS for animate-spin. */
 .stl-spinner {
-    display: inline-block;
-    width: 1em;
-    height: 1em;
-    border: 2px solid currentColor;
-    border-top-color: transparent;
-    border-radius: 50%;
-    animation: stl-spin 0.7s linear infinite;
-    vertical-align: -0.15em;
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: stl-spin 0.7s linear infinite;
+  vertical-align: -0.15em;
 }
 @keyframes stl-spin {
-    to {
-        transform: rotate(360deg);
-    }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* STL viewer fullscreen zoom: htmx-stl-view.js requests fullscreen on the
@@ -64,87 +64,87 @@
  * navy backdrop; the three.js canvas tracks the .stl-view box, resized on
  * fullscreenchange. */
 .stl-embed:fullscreen {
-    width: 100vw;
-    height: 100vh;
-    background: #14213d;
+  width: 100vw;
+  height: 100vh;
+  background: #14213d;
 }
 .stl-embed:fullscreen .stl-view {
-    width: 100vw;
-    height: 100vh;
-    border: 0;
-    border-radius: 0;
+  width: 100vw;
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
 }
 
 /* Diagram click-to-zoom lightbox (assets/scripts/diagram-zoom.js).
  * Pattern stolen from recon-gen's qs-lightbox; site navy/yellow palette. */
 .diagram-lightbox {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    display: flex;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
 }
 .diagram-lightbox[hidden] {
-    display: none;
+  display: none;
 }
 .diagram-lightbox__backdrop {
-    position: absolute;
-    inset: 0;
-    background-color: rgba(20, 33, 61, 0.88);
+  position: absolute;
+  inset: 0;
+  background-color: rgba(20, 33, 61, 0.88);
 }
 .diagram-lightbox__viewport {
-    position: relative;
-    flex: 1;
-    overflow: hidden;
-    cursor: grab;
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  cursor: grab;
 }
 .diagram-lightbox__viewport--grabbing {
-    cursor: grabbing;
+  cursor: grabbing;
 }
 .diagram-lightbox__host {
-    position: absolute;
-    inset: 0;
-    transform-origin: 0 0;
-    will-change: transform;
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  will-change: transform;
 }
 .diagram-lightbox__img {
-    display: block;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 .diagram-lightbox__controls {
-    position: absolute;
-    top: 1rem;
-    right: 1rem;
-    display: flex;
-    gap: 0.4rem;
-    background: #f5f5f5;
-    padding: 0.4rem;
-    border-radius: 4px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  display: flex;
+  gap: 0.4rem;
+  background: #f5f5f5;
+  padding: 0.4rem;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 .diagram-lightbox__btn {
-    appearance: none;
-    border: 1px solid #14213d;
-    background: #fff;
-    color: #14213d;
-    font-size: 1rem;
-    line-height: 1;
-    padding: 0.45rem 0.7rem;
-    border-radius: 3px;
-    cursor: pointer;
-    font-weight: 600;
-    min-width: 2.2rem;
+  appearance: none;
+  border: 1px solid #14213d;
+  background: #fff;
+  color: #14213d;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.45rem 0.7rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: 600;
+  min-width: 2.2rem;
 }
 .diagram-lightbox__btn:hover {
-    background: #ffc935;
+  background: #ffc935;
 }
 .diagram-lightbox__btn:focus-visible {
-    outline: 2px solid #ffc935;
-    outline-offset: 1px;
+  outline: 2px solid #ffc935;
+  outline-offset: 1px;
 }
 body.diagram-lightbox-open {
-    overflow: hidden;
+  overflow: hidden;
 }
 
 /* Analytics data tables (Phase CQ): real columns + zebra rows. Numeric cells (.num)
@@ -153,41 +153,41 @@ body.diagram-lightbox-open {
  * the full width (the misaligned-header problem). Wrap each in overflow-x-auto for
  * mobile. Navy header rule, div-grey row rules, body-grey zebra, pale-yellow hover. */
 .data-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.8125rem;
-    line-height: 1.4;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+  line-height: 1.4;
 }
 .data-table thead th {
-    text-align: left;
-    font-weight: 700;
-    color: #14213d;
-    padding: 0.3rem 0.75rem;
-    border-bottom: 2px solid #14213d;
-    white-space: nowrap;
+  text-align: left;
+  font-weight: 700;
+  color: #14213d;
+  padding: 0.3rem 0.75rem;
+  border-bottom: 2px solid #14213d;
+  white-space: nowrap;
 }
 .data-table tbody td {
-    padding: 0.3rem 0.75rem;
-    vertical-align: top;
-    border-bottom: 1px solid #e5e5e5;
+  padding: 0.3rem 0.75rem;
+  vertical-align: top;
+  border-bottom: 1px solid #e5e5e5;
 }
 .data-table tbody tr:nth-child(even) {
-    background: #f5f5f5;
+  background: #f5f5f5;
 }
 .data-table tbody tr:hover {
-    background: #fff2cf;
+  background: #fff2cf;
 }
 /* Numeric columns hug their content + right-align (header too, via higher specificity). */
 .data-table .num {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-    width: 1%;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  width: 1%;
 }
 .data-table .nowrap {
-    white-space: nowrap;
+  white-space: nowrap;
 }
 /* The one text column that soaks up the leftover width. */
 .data-table .grow {
-    width: 100%;
+  width: 100%;
 }

@@ -15,7 +15,7 @@
     var data;
     try {
       data = JSON.parse(island.textContent);
-    } catch (e) {
+    } catch {
       return;
     }
 
@@ -34,8 +34,17 @@
     // Greylist tolls/day overlay (CY.2) — always challenged=1, independent of the audience
     // filter. Drawn ONLY when the window actually walled someone, so a quiet site keeps the
     // clean two-line chart instead of a flat-zero third line.
-    if (data.challenged && data.challenged.some(function (v) { return v > 0; })) {
-      series.push({ name: "Tolls served", values: data.challenged, color: "#b91c1c" });
+    if (
+      data.challenged &&
+      data.challenged.some(function (v) {
+        return v > 0;
+      })
+    ) {
+      series.push({
+        name: "Tolls served",
+        values: data.challenged,
+        color: "#b91c1c",
+      });
     }
 
     var width = Math.max(container.clientWidth || 720, 320);
@@ -45,7 +54,10 @@
     var innerH = height - margin.top - margin.bottom;
 
     var x = d3.scalePoint().domain(days).range([0, innerW]);
-    var yMax = d3.max(series, function (s) { return d3.max(s.values); }) || 1;
+    var yMax =
+      d3.max(series, function (s) {
+        return d3.max(s.values);
+      }) || 1;
     var y = d3.scaleLinear().domain([0, yMax]).nice().range([innerH, 0]);
 
     var svg = d3
@@ -77,8 +89,12 @@
 
     var line = d3
       .line()
-      .x(function (_, i) { return x(days[i]); })
-      .y(function (v) { return y(v); });
+      .x(function (_, i) {
+        return x(days[i]);
+      })
+      .y(function (v) {
+        return y(v);
+      });
 
     series.forEach(function (s) {
       g.append("path")
@@ -94,18 +110,30 @@
         .selectAll("circle")
         .data(s.values)
         .join("circle")
-        .attr("cx", function (_, i) { return x(days[i]); })
-        .attr("cy", function (v) { return y(v); })
+        .attr("cx", function (_, i) {
+          return x(days[i]);
+        })
+        .attr("cy", function (v) {
+          return y(v);
+        })
         .attr("r", 2.5)
         .attr("fill", s.color)
         .append("title")
-        .text(function (v, i) { return days[i] + " — " + s.name + ": " + v; });
+        .text(function (v, i) {
+          return days[i] + " — " + s.name + ": " + v;
+        });
     });
 
     var legend = g.append("g").attr("font-size", "10").attr("fill", "#14213d");
     series.forEach(function (s, i) {
-      var lg = legend.append("g").attr("transform", "translate(" + i * 120 + ",-12)");
-      lg.append("rect").attr("width", 10).attr("height", 10).attr("y", -9).attr("fill", s.color);
+      var lg = legend
+        .append("g")
+        .attr("transform", "translate(" + i * 120 + ",-12)");
+      lg.append("rect")
+        .attr("width", 10)
+        .attr("height", 10)
+        .attr("y", -9)
+        .attr("fill", s.color);
       lg.append("text").attr("x", 14).text(s.name);
     });
   }

@@ -1,4 +1,5 @@
 //From https://stackoverflow.com/a/34278578/160208
+// biome-ignore lint/correctness/noUnusedVariables: called from template inline handlers
 function addLink() {
   const el = document.getElementById("page_markdown");
   const [start, end] = [el.selectionStart, el.selectionEnd];
@@ -7,6 +8,7 @@ function addLink() {
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: called from template inline handlers
 function addImage() {
   const el = document.getElementById("page_markdown");
   const [start, end] = [el.selectionStart, el.selectionEnd];
@@ -15,6 +17,7 @@ function addImage() {
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: called from template inline handlers
 function addAttachment(event) {
   event.preventDefault();
   const el = document.getElementById("page_markdown");
@@ -31,6 +34,7 @@ function addAttachment(event) {
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: called from template inline handlers
 function setAsCoverId(attachment_id) {
   document.getElementById("page_cover_attachment_id").value = attachment_id;
 }

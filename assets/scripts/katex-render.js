@@ -19,7 +19,7 @@
         throwOnError: false,
       });
       el.setAttribute("data-rendered", "true");
-    } catch (e) {
+    } catch {
       /* leave the TeX source visible on failure — never blank it out */
     }
   }

@@ -13,7 +13,9 @@
   const progEl = document.getElementById("toll-progress");
   const canvas = document.getElementById("toll-canvas");
 
-  function status(t) { if (statusEl) statusEl.textContent = t; }
+  function status(t) {
+    if (statusEl) statusEl.textContent = t;
+  }
 
   function b64urlDecode(s) {
     s = s.replace(/-/g, "+").replace(/_/g, "/");
@@ -28,7 +30,7 @@
     try {
       const r = await fetch("/challenge/new", { cache: "no-store" });
       tok = await r.json();
-    } catch (e) {
+    } catch {
       return status("Couldn't reach the toll booth. Reload to try again.");
     }
 
@@ -36,23 +38,31 @@
     try {
       const buf = await (await fetch(tok.image_url)).arrayBuffer();
       rgba = new Uint8ClampedArray(buf);
-    } catch (e) {
+    } catch {
       return status("Couldn't load the toll image. Reload to try again.");
     }
 
     // Paint the tollbooth so the human sees what they're paying for.
-    if (canvas && canvas.getContext && rgba.length === tok.width * tok.height * 4) {
+    if (
+      canvas &&
+      canvas.getContext &&
+      rgba.length === tok.width * tok.height * 4
+    ) {
       canvas.width = tok.width;
       canvas.height = tok.height;
       try {
-        canvas.getContext("2d").putImageData(new ImageData(rgba, tok.width, tok.height), 0, 0);
-      } catch (e) { /* paint is decorative; a failure doesn't block the solve */ }
+        canvas
+          .getContext("2d")
+          .putImageData(new ImageData(rgba, tok.width, tok.height), 0, 0);
+      } catch {
+        /* paint is decorative; a failure doesn't block the solve */
+      }
     }
 
     let worker;
     try {
       worker = new Worker(workerUrl);
-    } catch (e) {
+    } catch {
       return status("Your browser blocked the worker this toll needs.");
     }
 
@@ -64,12 +74,18 @@
       } else if (m.type === "done") {
         if (progEl) progEl.value = 100;
         const qs =
-          "inner_seed=" + encodeURIComponent(tok.inner_seed) +
-          "&ts=" + encodeURIComponent(tok.ts) +
-          "&version=" + encodeURIComponent(tok.version) +
-          "&answer=" + encodeURIComponent(m.answer) +
-          "&ms=" + encodeURIComponent(m.ms || 0) +
-          "&redir=" + encodeURIComponent(redir);
+          "inner_seed=" +
+          encodeURIComponent(tok.inner_seed) +
+          "&ts=" +
+          encodeURIComponent(tok.ts) +
+          "&version=" +
+          encodeURIComponent(tok.version) +
+          "&answer=" +
+          encodeURIComponent(m.answer) +
+          "&ms=" +
+          encodeURIComponent(m.ms || 0) +
+          "&redir=" +
+          encodeURIComponent(redir);
         const url = "/challenge/verify?" + qs;
         // Enable the Continue button rather than auto-redirecting, so the visitor sees the toll
         // was paid and clicks through themselves. (Fall back to auto-redirect if the button's gone.)
@@ -88,10 +104,14 @@
         }
       }
     };
-    worker.onerror = () => status("The toll solver hit an error. Reload to try again.");
+    worker.onerror = () =>
+      status("The toll solver hit an error. Reload to try again.");
 
     // Copy the buffer for the worker (structured clone); the main thread keeps its own for paint.
-    worker.postMessage({ rgba: new Uint8Array(rgba.buffer.slice(0)), seed: b64urlDecode(tok.seed) });
+    worker.postMessage({
+      rgba: new Uint8Array(rgba.buffer.slice(0)),
+      seed: b64urlDecode(tok.seed),
+    });
   }
 
   run();

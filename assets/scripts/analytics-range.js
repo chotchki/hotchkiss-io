@@ -6,15 +6,17 @@
 (function () {
   function initPickers(root) {
     if (typeof flatpickr === "undefined") return;
-    (root || document).querySelectorAll("input[data-flatpickr]").forEach(function (el) {
-      if (el._flatpickr) return; // already enhanced (idempotent across re-inits)
-      flatpickr(el, {
-        enableTime: true,
-        time_24hr: true,
-        dateFormat: "Y-m-d H:i", // matches the server's UTC parse (parse_range_dt)
-        allowInput: true, // let the field be typed/cleared, not only clicked
+    (root || document)
+      .querySelectorAll("input[data-flatpickr]")
+      .forEach(function (el) {
+        if (el._flatpickr) return; // already enhanced (idempotent across re-inits)
+        flatpickr(el, {
+          enableTime: true,
+          time_24hr: true,
+          dateFormat: "Y-m-d H:i", // matches the server's UTC parse (parse_range_dt)
+          allowInput: true, // let the field be typed/cleared, not only clicked
+        });
       });
-    });
   }
 
   if (document.readyState === "loading") {

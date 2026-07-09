@@ -45,13 +45,13 @@
     console.log("Calling webauthn_authenticate");
     const auth_opt_response = await fetch(auth_opt_url);
     if (!auth_opt_response.ok) {
-      console.error("Response from auth options: ${response.status}");
+      console.error(`Response from auth options: ${response.status}`);
       return false;
     } else {
       console.log("Got past the opt call");
     }
 
-    let auth_opt_json = await auth_opt_response.json();
+    const auth_opt_json = await auth_opt_response.json();
 
     console.log("parsing server auth");
     const server_public_key = PublicKeyCredential.parseRequestOptionsFromJSON(
@@ -79,7 +79,7 @@
 
     if (!finish_auth_response.ok) {
       console.error(
-        "Response from auth options: ${finish_auth_response.status}",
+        `Response from auth options: ${finish_auth_response.status}`,
       );
       return false;
     }
@@ -105,7 +105,7 @@
     );
     if (!register_opt_response.ok) {
       console.error(
-        "Response from start registration: ${register_opt_response.status}",
+        `Response from start registration: ${register_opt_response.status}`,
       );
       return false;
     }
@@ -131,7 +131,7 @@
 
     if (!finish_reg_response.ok) {
       console.error(
-        "Response from finish registration: ${finish_reg_response.status}",
+        `Response from finish registration: ${finish_reg_response.status}`,
       );
       return false;
     }
@@ -149,7 +149,7 @@
       }
       console.log("Fired Webauthn Autofill for node " + evt.detail.elt);
       webauthn_conditional_support()
-        .then((wcs) => {
+        .then(() => {
           console.log("Firing post conditional support check");
           return webauthn_authenticate(
             "/login/get_auth_opts",
@@ -185,7 +185,7 @@
       const username = document.getElementById("username").value;
 
       webauthn_conditional_support()
-        .then((wcs) =>
+        .then(() =>
           webauthn_register(
             "/login/start_register",
             "/login/finish_register",

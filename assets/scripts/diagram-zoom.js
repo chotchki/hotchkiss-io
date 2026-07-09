@@ -48,7 +48,9 @@
 
     const controls = document.createElement("div");
     controls.className = "diagram-lightbox__controls";
-    controls.appendChild(makeButton("−", "Zoom out", () => zoomBy(1 / ZOOM_STEP)));
+    controls.appendChild(
+      makeButton("−", "Zoom out", () => zoomBy(1 / ZOOM_STEP)),
+    );
     controls.appendChild(makeButton("Reset", "Reset zoom", fit));
     controls.appendChild(makeButton("+", "Zoom in", () => zoomBy(ZOOM_STEP)));
     controls.appendChild(makeButton("×", "Close", close));
@@ -98,7 +100,17 @@
     clone.className = "diagram-lightbox__img";
 
     host.replaceChildren(clone);
-    state = { scale: 1, tx: 0, ty: 0, dragging: false, moved: false, startX: 0, startY: 0, lastX: 0, lastY: 0 };
+    state = {
+      scale: 1,
+      tx: 0,
+      ty: 0,
+      dragging: false,
+      moved: false,
+      startX: 0,
+      startY: 0,
+      lastX: 0,
+      lastY: 0,
+    };
     overlay.hidden = false;
     document.body.classList.add("diagram-lightbox-open");
     fit();
@@ -121,7 +133,13 @@
 
   function apply() {
     host.style.transform =
-      "translate(" + state.tx + "px, " + state.ty + "px) scale(" + state.scale + ")";
+      "translate(" +
+      state.tx +
+      "px, " +
+      state.ty +
+      "px) scale(" +
+      state.scale +
+      ")";
   }
 
   function clamp(next) {
@@ -172,7 +190,10 @@
     state.ty += e.clientY - state.lastY;
     state.lastX = e.clientX;
     state.lastY = e.clientY;
-    if (Math.abs(e.clientX - state.startX) > 3 || Math.abs(e.clientY - state.startY) > 3) {
+    if (
+      Math.abs(e.clientX - state.startX) > 3 ||
+      Math.abs(e.clientY - state.startY) > 3
+    ) {
       state.moved = true;
     }
     apply();
