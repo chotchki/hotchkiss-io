@@ -13,18 +13,18 @@ pub struct TopBar {
 }
 
 impl TopBar {
-    pub async fn create(executor: impl SqliteExecutor<'_>, active_page: &str) -> Result<Self> {
+    pub async fn create(
+        executor: impl SqliteExecutor<'_>,
+        active_page: &str,
+        viewer: Role,
+    ) -> Result<Self> {
         let tabs = ContentPageDao::find_by_parent(executor, None)
             .await?
             .into_iter()
-            // Hide future-dated (scheduled/draft) AND role-gated top-level pages
-            // from the global nav (Phases CU + DA). Special pages
-            // (blog/projects/resume/login) are exempt from the SCHEDULING clause
-            // only — a special page carrying a min_role (the future `library`
-            // row) is hidden here until Phase DB makes the nav viewer-aware.
-            // Admin reaches a hidden top-level page through its direct URL or
-            // the admin Manage Pages list, not the nav.
-            .filter(|cpd| cpd.is_visible_to(Role::Anonymous))
+            // Role-aware nav (DB.4): role is viewer-aware, scheduling is
+            // hidden-from-everyone — the split semantics live in the DAO
+            // beside is_visible_to (see is_nav_visible_to's doc).
+            .filter(|cpd| cpd.is_nav_visible_to(viewer))
             .map(|cpd| cpd.page_name)
             .map(|name| {
                 let m = name == active_page;
@@ -65,7 +65,7 @@ mod tests {
         )
         .await?;
 
-        let tb = TopBar::create(&pool, "first").await?;
+        let tb = TopBar::create(&pool, "first", Role::Anonymous).await?;
         for (title, active) in &tb.tabs {
             if title == "first" {
                 assert!(*active);
@@ -75,12 +75,67 @@ mod tests {
         }
         assert!(!tb.tabs.is_empty());
 
-        let tb = TopBar::create(&pool, "not here").await?;
+        let tb = TopBar::create(&pool, "not here", Role::Anonymous).await?;
         for (_, active) in &tb.tabs {
             assert!(!*active);
         }
         assert!(!tb.tabs.is_empty());
 
+        Ok(())
+    }
+
+    /// DB.4: the nav is role-aware — a gated tab shows for viewers whose rank
+    /// admits it (Family/Admin here) and stays hidden below (Anonymous,
+    /// Registered). This is the seam the DE `library` special row rides.
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn gated_tab_is_role_aware(pool: SqlitePool) -> Result<()> {
+        ContentPageDao::create(&pool, None, "open".to_string(), None, "".to_string(), None)
+            .await?;
+        ContentPageDao::create(&pool, None, "kin".to_string(), None, "".to_string(), None)
+            .await?;
+        sqlx::query("UPDATE content_pages SET min_role = 'Family' WHERE page_name = 'kin'")
+            .execute(&pool)
+            .await?;
+
+        let has_kin = |tb: &TopBar| tb.tabs.iter().any(|(name, _)| name == "kin");
+        for (viewer, expect) in [
+            (Role::Anonymous, false),
+            (Role::Registered, false),
+            (Role::Family, true),
+            (Role::Admin, true),
+        ] {
+            let tb = TopBar::create(&pool, "open", viewer).await?;
+            assert_eq!(has_kin(&tb), expect, "viewer {viewer}");
+            assert!(has_kin(&tb) || tb.tabs.iter().any(|(n, _)| n == "open"));
+        }
+        Ok(())
+    }
+
+    /// Scheduling stays UNCONDITIONAL in the nav (the pre-DB behavior): a
+    /// future-dated draft tab is hidden from EVERYONE — Admin included, since
+    /// the nav is unbadged and a draft tab would look live. Only the ROLE
+    /// clause is viewer-aware.
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn scheduled_tab_hidden_from_everyone(pool: SqlitePool) -> Result<()> {
+        ContentPageDao::create(&pool, None, "live".to_string(), None, "".to_string(), None)
+            .await?;
+        ContentPageDao::create(&pool, None, "draft".to_string(), None, "".to_string(), None)
+            .await?;
+        sqlx::query(
+            "UPDATE content_pages SET page_creation_date = '2999-01-01 00:00:00' WHERE page_name = 'draft'",
+        )
+        .execute(&pool)
+        .await?;
+
+        use strum::IntoEnumIterator;
+        for viewer in Role::iter() {
+            let tb = TopBar::create(&pool, "live", viewer).await?;
+            assert!(
+                !tb.tabs.iter().any(|(n, _)| n == "draft"),
+                "a scheduled draft tab must be hidden from {viewer} too"
+            );
+            assert!(tb.tabs.iter().any(|(n, _)| n == "live"));
+        }
         Ok(())
     }
 }

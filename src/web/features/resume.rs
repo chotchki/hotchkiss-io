@@ -85,7 +85,7 @@ pub async fn show_resume(
     );
 
     let gpt = GetPageTemplate {
-        top_bar: TopBar::create(&state.pool, "resume").await?,
+        top_bar: TopBar::create(&state.pool, "resume", session_data.auth_state.role()).await?,
         auth_state: session_data.auth_state,
         page_path: format!("resume/{}", child.page_name),
         page: child.clone(),

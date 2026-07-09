@@ -164,7 +164,7 @@ pub async fn get_page_path(
             );
 
             let gpt = GetPageTemplate {
-                top_bar: TopBar::create(&state.pool, page_names.first().unwrap()).await?,
+                top_bar: TopBar::create(&state.pool, page_names.first().unwrap(), viewer).await?,
                 auth_state: session_data.auth_state,
                 page_path: page_path.clone(),
                 page: lp.clone(),
@@ -238,6 +238,12 @@ pub struct PutPageForm {
     /// backdated to its real chronological slot.
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub page_creation_date: Option<String>,
+    /// Visibility select (DB.1): `"Public"` → clear the gate (NULL), a known
+    /// gate role → set it. ABSENT (an old client / a test PUT without the
+    /// field) or unrecognized → keep the existing gate — bad or missing input
+    /// must never silently LOOSEN visibility (the cover-typo rule).
+    #[serde(default)]
+    pub min_role: Option<String>,
 }
 
 /// Parse a `datetime-local` form value as a UTC instant. The input carries no
@@ -290,6 +296,14 @@ pub async fn put_page_path(
             {
                 lp.page_creation_date = dt;
             }
+            // Visibility (DB.1): explicit values only; absent/unrecognized
+            // keeps the existing gate. `update()` stamps page_modified_date,
+            // so a visibility flip busts the feed/sitemap validators.
+            match put_page_form.min_role.as_deref() {
+                Some("Public") => lp.min_role = None,
+                Some(v @ ("Registered" | "Family" | "Admin")) => lp.min_role = Some(v.to_string()),
+                _ => {}
+            }
             lp.update(&state.pool).await?;
 
             // Cover lives in a separate column (`page_cover_media_id`) that
@@ -328,6 +342,10 @@ pub async fn post_top_level_page_path(
     let mut cp =
         ContentPageDao::create(&state.pool, None, slug.clone(), None, String::new(), None).await?;
     cp.page_title = Some(title);
+    // Top-level pages are born PUBLIC — no parent to inherit a gate from.
+    // Explicit (create() already returns None) so the invariant survives a
+    // future create() change.
+    cp.min_role = None;
     cp.update(&state.pool).await?;
 
     // Land the author on the new page in edit mode, not back on the list.
@@ -362,6 +380,14 @@ pub async fn post_page_path(
             )
             .await?;
             cp.page_title = Some(title);
+            // Inherit-on-create (DB.3): a new child defaults to its parent's
+            // gate. Belt AND suspenders — the ancestor scan already hides the
+            // subtree, and this stamp additionally covers children born AFTER
+            // the gate on any future listing surface that queries child rows
+            // directly. Children created BEFORE a parent was gated keep their
+            // own min_role (deliberate: the ancestor scan is the enforcement;
+            // there is no retroactive downward propagation).
+            cp.min_role = lp.min_role.clone();
             cp.update(&state.pool).await?;
 
             Ok(htmx_redirect(&format!("/pages/{page_path}/{slug}?edit=1"))?)

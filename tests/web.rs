@@ -2699,6 +2699,126 @@ async fn gated_special_page_darkens_its_whole_section() {
     );
     let post = fam.get(server.url("/blog/kin-post")).send().await.unwrap();
     assert_eq!(post.status(), StatusCode::OK);
+
+    // Role-aware nav (DB.4): the gated section's tab shows FOR Family — the
+    // other half of the tab-hide the anonymous assertions above pin.
+    let home = fam.get(server.url("/")).send().await.unwrap().text().await.unwrap();
+    assert!(
+        home.contains("/pages/blog"),
+        "the role-aware nav must show the gated tab to a sufficient viewer"
+    );
+}
+
+// ──────────────────── Phase DB: visibility authoring + role-aware nav ────────────────────
+
+/// The full author→gate→deny loop through the REAL editor form: the Visibility
+/// select gates a page, garbage or an absent field never loosens an existing
+/// gate, and Public reopens it.
+#[tokio::test]
+async fn editor_visibility_select_authors_the_gate() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("VisPage", "# visible words")
+        .await
+        .expect("seed");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    let put = |fields: Vec<(&'static str, &'static str)>| {
+        let admin = &admin;
+        let url = server.url("/pages/VisPage");
+        async move {
+            let r = admin.put(url).form(&fields).send().await.unwrap();
+            assert!(r.status().is_success(), "PUT should succeed: {}", r.status());
+        }
+    };
+    let base = vec![
+        ("page_category", ""),
+        ("page_markdown", "# visible words"),
+        ("page_order", "0"),
+    ];
+
+    // Gate it Family via the editor select.
+    let mut f = base.clone();
+    f.push(("min_role", "Family"));
+    put(f).await;
+    assert_eq!(
+        client().get(server.url("/pages/VisPage")).send().await.unwrap().status(),
+        StatusCode::NOT_FOUND,
+        "gated via the editor → anon 404"
+    );
+    let body = admin.get(server.url("/pages/VisPage")).send().await.unwrap().text().await.unwrap();
+    assert!(body.contains("Family"), "admin reader view must badge the gate");
+
+    // Garbage value → the gate is UNCHANGED (never silently loosened).
+    let mut f = base.clone();
+    f.push(("min_role", "Bogus"));
+    put(f).await;
+    assert_eq!(
+        client().get(server.url("/pages/VisPage")).send().await.unwrap().status(),
+        StatusCode::NOT_FOUND,
+        "a garbage select value must keep the existing gate"
+    );
+
+    // A PUT with NO min_role field (old client) also keeps the gate.
+    put(base.clone()).await;
+    assert_eq!(
+        client().get(server.url("/pages/VisPage")).send().await.unwrap().status(),
+        StatusCode::NOT_FOUND,
+        "an absent field must keep the existing gate"
+    );
+
+    // Public reopens it.
+    let mut f = base.clone();
+    f.push(("min_role", "Public"));
+    put(f).await;
+    assert_eq!(
+        client().get(server.url("/pages/VisPage")).send().await.unwrap().status(),
+        StatusCode::OK,
+        "Public must clear the gate"
+    );
+}
+
+/// Inherit-on-create (DB.3): a child created under a gated parent carries the
+/// parent's gate from birth — belt and suspenders over the ancestor scan.
+#[tokio::test]
+async fn new_child_inherits_the_parent_gate() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("GatedTree", "# parent")
+        .await
+        .expect("seed");
+    stamp_min_role(&server.pool, "GatedTree", "Family").await;
+
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+    let r = admin
+        .post(server.url("/pages/GatedTree"))
+        .form(&[("page_title", "Secret Child")])
+        .send()
+        .await
+        .unwrap();
+    assert!(r.status().is_success(), "child create should succeed: {}", r.status());
+
+    let child_gate: Option<String> =
+        sqlx::query("SELECT min_role FROM content_pages WHERE page_name = 'secret-child'")
+            .fetch_one(&server.pool)
+            .await
+            .unwrap()
+            .get("min_role");
+    assert_eq!(child_gate.as_deref(), Some("Family"), "child must inherit the parent's gate");
+
+    // And it behaves: anon 404, Family 200.
+    assert_eq!(
+        client().get(server.url("/pages/GatedTree/secret-child")).send().await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    let fam = client();
+    fam.post(server.url("/test/login?role=Family")).send().await.unwrap();
+    assert_eq!(
+        fam.get(server.url("/pages/GatedTree/secret-child")).send().await.unwrap().status(),
+        StatusCode::OK
+    );
 }
 
 // ───────────────────────── Phase CE: editable post date (backdating) ─────────────────────────

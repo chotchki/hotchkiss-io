@@ -28,7 +28,7 @@ pub struct NotFoundTemplate {
 /// (a plain one), never a 500 — a flaky nav must not turn "page not found"
 /// into "server error".
 pub async fn render_not_found(pool: &SqlitePool, auth_state: AuthenticationState) -> Response {
-    match TopBar::create(pool, "").await {
+    match TopBar::create(pool, "", auth_state.role()).await {
         Ok(top_bar) => (
             StatusCode::NOT_FOUND,
             HtmlTemplate(NotFoundTemplate {

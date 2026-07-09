@@ -42,6 +42,9 @@ pub struct BlogPostCard {
     pub excerpt: String,
     /// Future-dated (scheduled/draft) — admin-only, drives the "Scheduled" badge.
     pub is_scheduled: bool,
+    /// The min_role gate's badge label (from the fail-closed decode; None =
+    /// public, no badge) — renders beside the Scheduled pill.
+    pub visibility: Option<&'static str>,
 }
 
 #[derive(Template)]
@@ -87,6 +90,7 @@ pub async fn show_index(
     for p in raw_posts {
         let cover_url = crate::web::features::media::cover_url_for(&state.pool, p.page_id).await;
         let is_scheduled = p.is_scheduled();
+        let visibility = p.visibility_label();
         posts.push(BlogPostCard {
             title: p.display_title(),
             page_name: p.page_name,
@@ -94,6 +98,7 @@ pub async fn show_index(
             cover_url,
             excerpt: cached_excerpt(&p.page_markdown),
             is_scheduled,
+            visibility,
         });
     }
 
@@ -105,7 +110,7 @@ pub async fn show_index(
     );
 
     let template = BlogIndexTemplate {
-        top_bar: TopBar::create(&state.pool, "blog").await?,
+        top_bar: TopBar::create(&state.pool, "blog", viewer).await?,
         auth_state: session_data.auth_state,
         posts,
         pagination,
@@ -162,7 +167,7 @@ pub async fn show_post(
     );
 
     let gpt = GetPageTemplate {
-        top_bar: TopBar::create(&state.pool, "blog").await?,
+        top_bar: TopBar::create(&state.pool, "blog", viewer).await?,
         auth_state: session_data.auth_state,
         page_path: format!("blog/{slug}"),
         page: lp.clone(),

@@ -100,7 +100,7 @@ pub async fn show_greylist(
         .collect();
 
     Ok(HtmlTemplate(GreylistTemplate {
-        top_bar: TopBar::create(&state.pool, "admin").await?,
+        top_bar: TopBar::create(&state.pool, "admin", session.auth_state.role()).await?,
         auth_state: session.auth_state,
         entries,
         clearances,

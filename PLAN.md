@@ -65,23 +65,13 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] CW.6 - Models gallery under the tab: reparent/curate the Phase-15 hand-picked models (existing STL/3MF viewer + fab-publish)
 - [ ] CW.7 - Tests (route serves bundle + COOP/COEP scoped; media CORP; models render) + CLAUDE.md + deploy
 
-## Phase DA - Page visibility - the min_role predicate
-
-- [ ] DA.0 - Phase exit: content_pages.min_role gates every read path oracle-safely and fail-closed; parity tests green; inert (no rows gated); CLAUDE.md updated
-- [x] DA.1 - Migration: content_pages.min_role TEXT NULL (NULL = the only public spelling); thread the column through ~8 query_as! sites + struct + test constructors (cargo clean for sqlx re-validation)
-- [x] DA.2 - is_visible_to(viewer: Role): special-page exemption narrowed to scheduling only (role clause applies to special pages); fail-closed parse (unknown non-NULL min_role → Admin-only)
-- [x] DA.3 - Fail-closed SQL CASE (WHEN NULL 0 / Registered 1 / Family 2 / ELSE 3) in count_children + both paged fetches; parity tests: count/fetch predicates identical + CASE↔rank() via Role::iter()
-- [x] DA.4 - Thread the ~12 read paths: get_page_path ancestor scan, show_post + sibling retain, home bands, resume, /3d, paginate (viewer_is_admin bool → Role); feed/sitemap/redirect_to_first_page stay unconditionally Anonymous
-- [x] DA.5 - Oracle tests: gated content page returns the byte-identical cat-404 for Anonymous AND Registered; Family/Admin get 200; rollback caveat documented (pre-gate binary serves gated rows publicly)
-- [ ] DA.6 - CLAUDE.md delta + beta validation: sqlite3-stamp min_role on a throwaway beta page, verify all four listing surfaces + direct-serve deny/allow
-
 ## Phase DB - Page visibility - authoring + nav surface
 
 - [ ] DB.0 - Phase exit: visibility is authorable in the editor, badged everywhere Scheduled is, nav is role-aware; beta author→gate→deny loop verified
-- [ ] DB.1 - Editor Visibility select (Public/Registered/Family/Admin-only) as the 5th metadata-grid cell, through PutPageForm → update() (stamps page_modified_date so feed/sitemap validators bust on a visibility flip)
-- [ ] DB.2 - Visibility badge everywhere the Scheduled badge renders (4 card templates + editor header + reader) — admin-facing by construction
-- [ ] DB.3 - Inherit-on-create: new child pages default min_role to the parent's (post_page_path has the parent row in hand) — belt+suspenders over the ancestor scan
-- [ ] DB.4 - Role-aware TopBar::create (viewer Role param, ~15 call sites) — Family sees gated tabs, Anonymous doesn't; tests
+- [x] DB.1 - Editor Visibility select (Public/Registered/Family/Admin-only) as the 5th metadata-grid cell, through PutPageForm → update() (stamps page_modified_date so feed/sitemap validators bust on a visibility flip)
+- [x] DB.2 - Visibility badge everywhere the Scheduled badge renders (4 card templates + editor header + reader) — admin-facing by construction
+- [x] DB.3 - Inherit-on-create: new child pages default min_role to the parent's (post_page_path has the parent row in hand) — belt+suspenders over the ancestor scan
+- [x] DB.4 - Role-aware TopBar::create (viewer Role param, ~15 call sites) — Family sees gated tabs, Anonymous doesn't; tests
 - [ ] DB.5 - Tests + CLAUDE.md delta + beta validation: full author→gate→deny loop through the editor on beta
 
 ## Phase DC - Media visibility - gating the bytes

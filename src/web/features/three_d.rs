@@ -57,6 +57,9 @@ pub struct ModelCard {
     pub excerpt: String,
     /// Future-dated (scheduled) — admin-only, drives the "Scheduled" badge (CU).
     pub is_scheduled: bool,
+    /// The min_role gate's badge label (from the fail-closed decode; None =
+    /// public, no badge) — renders beside the Scheduled pill.
+    pub visibility: Option<&'static str>,
 }
 
 #[derive(Template)]
@@ -78,6 +81,7 @@ async fn card_from(state: &AppState, page: &ContentPageDao) -> ModelCard {
         cover_url: crate::web::features::media::cover_url_for(&state.pool, page.page_id).await,
         excerpt: cached_excerpt(&page.page_markdown),
         is_scheduled: page.is_scheduled(),
+        visibility: page.visibility_label(),
     }
 }
 
@@ -135,7 +139,7 @@ pub async fn show_3d_index(
     );
 
     let template = ThreeDIndexTemplate {
-        top_bar: TopBar::create(&state.pool, "3d").await?,
+        top_bar: TopBar::create(&state.pool, "3d", viewer).await?,
         auth_state: session_data.auth_state,
         featured,
         models,

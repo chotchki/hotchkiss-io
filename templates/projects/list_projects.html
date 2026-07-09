@@ -37,7 +37,7 @@
             </div>
             {% endif %}
             <div class="p-4">
-                {% if project.is_scheduled %}<p class="mb-1"><span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow text-navy uppercase tracking-wide">Scheduled</span></p>{% endif %}
+                {% if project.is_scheduled %}<p class="mb-1"><span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow text-navy uppercase tracking-wide">Scheduled</span></p>{% endif %}{% if let Some(v) = project.visibility %}<p class="mb-1"><span class="px-2 py-0.5 rounded text-xs font-semibold bg-navy text-yellow uppercase tracking-wide">{{v}}</span></p>{% endif %}
                 <h2 class="text-lg font-display text-navy underline">{{project.title}}</h2>
                 {% if !project.excerpt.is_empty() %}
                 <p class="mt-2 text-navy">{{project.excerpt}}</p>

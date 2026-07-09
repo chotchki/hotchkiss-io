@@ -223,7 +223,7 @@ pub async fn show_analytics(
         clearances,
         cleared_ips,
     ) = tokio::try_join!(
-        TopBar::create(&state.pool, "admin"),
+        TopBar::create(&state.pool, "admin", session_data.auth_state.role()),
         RequestLogDao::count_since(&state.pool, &window, audience),
         RequestLogDao::distinct_ip_count(&state.pool, &window, audience),
         RequestLogDao::audience_counts(&state.pool, &window),
@@ -385,7 +385,7 @@ pub async fn show_ip_detail(
     let distinct_404 = wordlist.len() as i64;
 
     let tmpl = IpDetailTemplate {
-        top_bar: TopBar::create(&state.pool, "admin").await?,
+        top_bar: TopBar::create(&state.pool, "admin", session_data.auth_state.role()).await?,
         auth_state: session_data.auth_state,
         ip,
         since_days,

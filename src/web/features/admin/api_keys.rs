@@ -101,7 +101,7 @@ async fn render_page(
         .collect();
 
     let template = ApiKeysTemplate {
-        top_bar: TopBar::create(&state.pool, "admin").await?,
+        top_bar: TopBar::create(&state.pool, "admin", session_data.auth_state.role()).await?,
         auth_state: session_data.auth_state,
         keys,
         new_key,

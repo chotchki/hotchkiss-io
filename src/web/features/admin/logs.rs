@@ -98,7 +98,7 @@ pub async fn show_logs(
         tokio::task::spawn_blocking(move || read_log_tail(&dir, level)).await??;
 
     let tmpl = LogsTemplate {
-        top_bar: TopBar::create(&state.pool, "admin").await?,
+        top_bar: TopBar::create(&state.pool, "admin", session_data.auth_state.role()).await?,
         auth_state: session_data.auth_state,
         level: level.as_str().to_string(),
         lines,

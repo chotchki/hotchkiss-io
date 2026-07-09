@@ -44,7 +44,7 @@ async fn login_page(
     session_data: SessionData,
 ) -> Result<HtmlTemplate<LoginTemplate>, AppError> {
     let template = LoginTemplate {
-        top_bar: TopBar::create(&state.pool, "login").await?,
+        top_bar: TopBar::create(&state.pool, "login", session_data.auth_state.role()).await?,
         auth_state: session_data.auth_state,
     };
 

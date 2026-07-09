@@ -34,6 +34,9 @@ pub struct ProjectCard {
     pub excerpt: String,
     /// Future-dated (scheduled/draft) — admin-only, drives the "Scheduled" badge.
     pub is_scheduled: bool,
+    /// The min_role gate's badge label (from the fail-closed decode; None =
+    /// public, no badge) — renders beside the Scheduled pill.
+    pub visibility: Option<&'static str>,
 }
 
 #[derive(Template)]
@@ -81,12 +84,14 @@ pub async fn show_all_projects(
     for p in raw_projects {
         let cover_url = crate::web::features::media::cover_url_for(&state.pool, p.page_id).await;
         let is_scheduled = p.is_scheduled();
+        let visibility = p.visibility_label();
         projects.push(ProjectCard {
             title: p.display_title(),
             page_name: p.page_name,
             cover_url,
             excerpt: cached_excerpt(&p.page_markdown),
             is_scheduled,
+            visibility,
         });
     }
 
@@ -99,7 +104,7 @@ pub async fn show_all_projects(
     );
 
     let lpt = ListProjectsTemplate {
-        top_bar: TopBar::create(&state.pool, "projects").await?,
+        top_bar: TopBar::create(&state.pool, "projects", viewer).await?,
         auth_state: session_data.auth_state,
         projects,
         pagination,

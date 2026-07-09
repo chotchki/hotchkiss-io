@@ -738,3 +738,22 @@ Design + rationale (the decisions, the honest limits): [docs/greylist-challenge-
 - [x] CZ.6 - Integration gate tests via /test/login?role=Family + CLAUDE.md delta + beta validation (promote a beta user to Family; session survives >24h of activity)
 
 
+---
+
+## 2026-07-09
+
+## Phase DA - Page visibility - the min_role predicate
+
+**Summary:** the security-critical phase of the library arc — `content_pages.min_role` (migration `0025`, NULL = the only public spelling) gates every read path, fail-closed + oracle-safe. Commit `c3540fb`, beta-validated live same day. `is_visible_to(viewer: Role)` = (special_page ‖ Admin ‖ !scheduled) AND `rank() >= min_role_rank()`; the paged trio applies the byte-identical SQL CASE with `viewer: Role` replacing the `viewer_is_admin` bool end-to-end (`paginate` included); ~12 read paths threaded; feed/sitemap/redirect/nav pinned `Role::Anonymous`. **Review catches that mattered:** (1) the SECTION half-gate — a `min_role` on a special row hid the nav tab + `/pages` redirect but `/blog`/`/projects`/`/3d`/`/resume`(+`.pdf`), home's bands, the feed and the sitemap's special branch still served the section (the split itself an oracle) → all seven surfaces now honor the ancestor gate, pinned by the `gated_special_page_darkens_its_whole_section` e2e; (2) the fail-closed catch-all was a literal `3` → now `Role::Admin.rank()` + the `admin_is_the_top_rank` pin (a future mid-ladder insert must not turn "unknown value" into a middle-tier leak); (3) the parity test compared cardinalities and had no teeth for an unlearned variant (both ladders fail closed identically and cross-agree) → row-SET comparison + a positive per-variant pin (a row gated at exactly R must admit viewer R). Oracle tests: gated page ≡ genuine miss byte-for-byte per-session for Anonymous AND Registered; gated ancestor hides its subtree; feed/sitemap never carry gated content even fetched WITH a session. Deliberately NOT fixed: TopBar stays Anonymous until DB.4 (fail-safe), `/diagram/<hash>` = design-doc acceptance, `redirect_to_first_page` unconditional (CU precedent). Rollback caveat documented: a pre-DA binary serves gated rows publicly.
+
+**Validation:** 355 tests green (5 new integration, 3 new unit; clippy at the 5-warning baseline). Beta (`c3540fb`): migration applied, zero rows gated; live matrix on a snapshot post stamped `Family` via sqlite3 — anon direct 404 + absent from /blog, home, sitemap; Bearer-Admin key (chris-minted) read it everywhere while feed/sitemap stayed anonymous-clean WITH the key attached; the one feed grep hit was an escaped cross-link inside another post's body (link-404s, not a leak — the designed property); stamp reverted, post public again.
+
+- [x] DA.0 - Phase exit: content_pages.min_role gates every read path oracle-safely and fail-closed; parity tests green; inert (no rows gated); CLAUDE.md updated
+- [x] DA.1 - Migration: content_pages.min_role TEXT NULL (NULL = the only public spelling); thread the column through ~8 query_as! sites + struct + test constructors (cargo clean for sqlx re-validation)
+- [x] DA.2 - is_visible_to(viewer: Role): special-page exemption narrowed to scheduling only (role clause applies to special pages); fail-closed parse (unknown non-NULL min_role → Admin-only)
+- [x] DA.3 - Fail-closed SQL CASE (WHEN NULL 0 / Registered 1 / Family 2 / ELSE 3) in count_children + both paged fetches; parity tests: count/fetch predicates identical + CASE↔rank() via Role::iter()
+- [x] DA.4 - Thread the ~12 read paths: get_page_path ancestor scan, show_post + sibling retain, home bands, resume, /3d, paginate (viewer_is_admin bool → Role); feed/sitemap/redirect_to_first_page stay unconditionally Anonymous
+- [x] DA.5 - Oracle tests: gated content page returns the byte-identical cat-404 for Anonymous AND Registered; Family/Admin get 200; rollback caveat documented (pre-gate binary serves gated rows publicly)
+- [x] DA.6 - CLAUDE.md delta + beta validation: sqlite3-stamp min_role on a throwaway beta page, verify all four listing surfaces + direct-serve deny/allow
+
+

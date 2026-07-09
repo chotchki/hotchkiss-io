@@ -611,6 +611,31 @@ impl ContentPageDao {
         }
     }
 
+    /// The NAV variant of the visibility gate (DB.4) — lives HERE beside
+    /// `is_visible_to` so a future clause change is edited with its sibling in
+    /// view, never drifting apart silently. It deliberately splits the two
+    /// clauses: ROLE is viewer-aware (a Family session sees the gated
+    /// `library` tab), but SCHEDULING is evaluated as-if-Anonymous — a
+    /// future-dated draft tab is hidden from EVERYONE, Admin included, because
+    /// the nav is unbadged and a draft tab would look live (admin previews by
+    /// direct URL instead).
+    pub fn is_nav_visible_to(&self, viewer: Role) -> bool {
+        (self.special_page || !self.is_scheduled()) && viewer.rank() >= self.min_role_rank()
+    }
+
+    /// The badge / editor-select label for this page's visibility, derived
+    /// from the fail-closed DECODE — never the raw string, so a garbage value
+    /// reads as "Admin-only" instead of rendering its own text while gating as
+    /// admin-only. `None` = public (no badge).
+    pub fn visibility_label(&self) -> Option<&'static str> {
+        match self.min_role_rank() {
+            0 => None,
+            1 => Some("Registered"),
+            2 => Some("Family"),
+            _ => Some("Admin-only"),
+        }
+    }
+
     /// The post date formatted for an `<input type="datetime-local" step="1">` —
     /// the editor's backdating field. (The blog sorts + displays by this date, so
     /// setting it back-dates a Wayback-recovered post to its real slot.)

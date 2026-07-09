@@ -21,7 +21,7 @@
         </div>
         {% endif %}
         <div class="p-4">
-            {% if m.is_scheduled %}<p class="mb-1"><span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow text-navy uppercase tracking-wide">Scheduled</span></p>{% endif %}
+            {% if m.is_scheduled %}<p class="mb-1"><span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow text-navy uppercase tracking-wide">Scheduled</span></p>{% endif %}{% if let Some(v) = m.visibility %}<p class="mb-1"><span class="px-2 py-0.5 rounded text-xs font-semibold bg-navy text-yellow uppercase tracking-wide">{{v}}</span></p>{% endif %}
             <h2 class="text-lg font-display text-navy underline">{{m.title}}</h2>
             {% if !m.excerpt.is_empty() %}
             <p class="mt-2 text-navy">{{m.excerpt}}</p>
