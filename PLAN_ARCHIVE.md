@@ -794,3 +794,22 @@ Design + rationale (the decisions, the honest limits): [docs/greylist-challenge-
 - [x] DC.6 - Tests + CLAUDE.md delta + beta validation: gate a beta media item — anonymous 404, Family 200, private header
 
 
+---
+
+## 2026-07-09
+
+## Phase DD - Audio media kind + player
+
+**Summary:** the family audiobook player is REAL — commits `77d51fa` (kind + player) and `86d32fd` (phone-feedback polish), phone-validated same day on a real iPhone with beta installed as a **PWA (the supported mode)** against a 774 MB, 13.5h Family-gated m4b. Probe classifies by the first REAL audio stream (the `attached_pic` guard — cover-art mjpeg "video" streams no longer misread an audiobook as unsupported video), UNIVERSAL-only codec map (aac/mp3/flac; opus/vorbis/alac bail to File — AAC m4b is canonical), chapters into `media.chapters` (migration `0027`). Cover art reuses `maybe_add_poster` VERBATIM — the same ffmpeg frame-grab fallback chain pulls the embedded art into an image/avif variant (library thumb + lock-screen artwork), zero new machinery (the review caught this as the last gap; empirically verified before wiring). Player: chapter list COLLAPSED by default behind a "Chapters (N)" toggle (`hidden`-class, not `<details>` — invalid inside the embed's `<p>`), ±30s, rate cycle **1/1.25/1.5/1.6/2× persisted globally** (`audio-rate` — speed is a listener trait; 1.6× is the household speed), MediaSession claimed at PLAY time (playing book owns the lock screen, not last-in-DOM) with lazy credentialed-fetch→blob gated artwork, localStorage resume with the `userSeeked` guard (a deliberate scrub-to-zero is never fought). `/media/file/` excluded from `request_log` (a listening household's range storm would self-greylist via R3 + swamp the Humans signal). Rode along: `@source "assets/scripts"` (player JS classes only styled by coincidence before — the documented silent-no-CSS trap), listing new-post/project form styling parity (`d9982bc`), FA music icon for artless audio cards. Review: 6 findings fixed, 1 accepted (video-beats-audio grouping = authoring intent, don't group them).
+
+**Validation:** 368 tests green incl. real-ffprobe/ffmpeg KATs against `tests/fixtures/chapters.m4b` (probe classification + chapters, AVIF cover extraction); live-verified on beta with a chris-minted key (embed attrs, oracle-shaped denials on embed/bytes/page, 206 range, `private` caching on gated artwork); chris's phone checklist all-passed (speed jump, chapter select, resume, screen-off, lock-screen artwork).
+
+- [x] DD.0 - Phase exit: an AAC m4b ingests as Audio with chapters and renders a family-grade player, verified on a real iPhone; /media/file excluded from request_log
+- [x] DD.1 - Probe: audio-stream classification (attached_pic cover-art guard so an m4b with embedded art isn't misread as video), -show_chapters, media.chapters column migration, UNIVERSAL-only codec map (aac/mp3/flac; opus/vorbis/alac stay MediaKind::File)
+- [x] DD.2 - Audio embed arm in render_embed_html (STL-arm shape): <audio controls preload=metadata> + audio/* sources + largest-variant download button + data-chapters/data-ref; degrades to bare element without JS
+- [x] DD.3 - Player JS (first-party, vendored-only): chapter list/seek, ±30s skips, playback rate, MediaSession (+ gated-artwork credentialed-fetch→blob fallback), localStorage resume applied at loadedmetadata AND re-asserted on first play; never autoplay
+- [x] DD.4 - Exclude /media/file/ from request_log (streaming range-requests would self-greylist a listening household via R3 + swamp the Humans/top-paths signal); note the decision in docs/greylist-challenge-design.md deferred-levers
+- [x] DD.5 - On-phone checklist (needs beta gated test page + Family beta user): Safari tab AND installed PWA (separate cookie jar — pick + write down the supported mode), screen-off playback, lock-screen controls/artwork, cold-load resume survives first play, range seeking
+- [x] DD.6 - Tests (probe KAT for an m4b fixture, embed arm, chapters JSON) + CLAUDE.md delta
+
+

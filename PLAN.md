@@ -65,16 +65,6 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] CW.6 - Models gallery under the tab: reparent/curate the Phase-15 hand-picked models (existing STL/3MF viewer + fab-publish)
 - [ ] CW.7 - Tests (route serves bundle + COOP/COEP scoped; media CORP; models render) + CLAUDE.md + deploy
 
-## Phase DD - Audio media kind + player
-
-- [ ] DD.0 - Phase exit: an AAC m4b ingests as Audio with chapters and renders a family-grade player, verified on a real iPhone; /media/file excluded from request_log
-- [x] DD.1 - Probe: audio-stream classification (attached_pic cover-art guard so an m4b with embedded art isn't misread as video), -show_chapters, media.chapters column migration, UNIVERSAL-only codec map (aac/mp3/flac; opus/vorbis/alac stay MediaKind::File)
-- [x] DD.2 - Audio embed arm in render_embed_html (STL-arm shape): <audio controls preload=metadata> + audio/* sources + largest-variant download button + data-chapters/data-ref; degrades to bare element without JS
-- [x] DD.3 - Player JS (first-party, vendored-only): chapter list/seek, ±30s skips, playback rate, MediaSession (+ gated-artwork credentialed-fetch→blob fallback), localStorage resume applied at loadedmetadata AND re-asserted on first play; never autoplay
-- [x] DD.4 - Exclude /media/file/ from request_log (streaming range-requests would self-greylist a listening household via R3 + swamp the Humans/top-paths signal); note the decision in docs/greylist-challenge-design.md deferred-levers
-- [x] DD.5 - On-phone checklist (needs beta gated test page + Family beta user): Safari tab AND installed PWA (separate cookie jar — pick + write down the supported mode), screen-off playback, lock-screen controls/artwork, cold-load resume survives first play, range seeking
-- [x] DD.6 - Tests (probe KAT for an m4b fixture, embed arm, chapters JSON) + CLAUDE.md delta
-
 ## Phase DE - The family Library section
 
 - [ ] DE.0 - Phase exit: family members use the Library tab end-to-end (first real audiobook live on prod); everyone else sees only the sign-in gate on code-defined routes
