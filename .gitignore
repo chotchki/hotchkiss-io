@@ -6,3 +6,4 @@ templates/partials/icons.html
 .env
 .claude/plan-bridge-state.json
 .claude/plan-bridge-state.json.lock
+node_modules/
