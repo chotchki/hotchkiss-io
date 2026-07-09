@@ -6,6 +6,7 @@ use crate::{
             admin::admin_router,
             blog::blog_router,
             home::show_home,
+            library::library_router,
             pages::{pages_router, projects::projects_router},
             three_d::three_d_router,
         },
@@ -66,6 +67,10 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
         .nest("/pages", pages_router())
         .nest("/projects", projects_router())
         .nest("/3d", three_d_router())
+        // Family library (Phase DE): index routes only — book pages live under
+        // /pages/library/... An insufficient viewer gets the sign-in gate, not
+        // a cat-404 (code routes are public knowledge; the DATA stays hidden).
+        .nest("/library", library_router())
         .nest("/blog", blog_router())
         .nest("/admin", admin_router())
         // Public media (Phase BZ): byte serve route + the embed swap target.

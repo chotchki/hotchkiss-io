@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Library{% endblock %}
+
+{% block head %}{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto text-center py-12">
+    {% if auth_state.is_authenticated() %}
+    {# Authenticated but insufficient — a self-registered stranger. Neutral
+       copy, NO tier names (they'd leak the ladder), no sign-in loop. #}
+    <h1 class="text-2xl font-display text-navy mb-4">This section is restricted</h1>
+    <p class="text-navy">Your account doesn't have access to the library.</p>
+    {% else %}
+    <h1 class="text-2xl font-display text-navy mb-4">The library is for family</h1>
+    <p class="text-navy mb-6">Sign in to see your books.</p>
+    <a href="{{ login_href }}"
+        class="inline-block px-6 py-3 bg-navy text-yellow font-display uppercase rounded-lg border-b-4 border-yellow hover:bg-navy/90">
+        Sign in
+    </a>
+    {% endif %}
+</div>
+{% endblock %}

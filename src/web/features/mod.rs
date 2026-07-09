@@ -4,6 +4,7 @@ pub mod challenge;
 pub mod diagram;
 pub mod feed;
 pub mod home;
+pub mod library;
 pub mod listing;
 pub mod login;
 pub mod media;

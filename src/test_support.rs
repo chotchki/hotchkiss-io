@@ -150,6 +150,44 @@ impl TestServer {
         Ok(())
     }
 
+    /// Seed the library's `audiobooks` section (an AUTHORED child of the
+    /// `library` special page — migration 0028 seeds only the parent) plus one
+    /// book page under it. Child rows deliberately stay `min_role NULL`: the
+    /// library row's own `Family` stamp gates the whole subtree via the
+    /// ancestor scan, which is exactly the production shape.
+    pub async fn seed_library_book(&self, slug: &str, markdown: &str) -> Result<()> {
+        let library = ContentPageDao::find_by_name(&self.pool, None, "library")
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("library special_page missing — migration 0028?"))?;
+        let section =
+            match ContentPageDao::find_by_name(&self.pool, Some(library.page_id), "audiobooks")
+                .await?
+            {
+                Some(s) => s,
+                None => {
+                    ContentPageDao::create(
+                        &self.pool,
+                        Some(library.page_id),
+                        "audiobooks".to_string(),
+                        None,
+                        "Audiobooks we own.".to_string(),
+                        None,
+                    )
+                    .await?
+                }
+            };
+        ContentPageDao::create(
+            &self.pool,
+            Some(section.page_id),
+            slug.to_string(),
+            None,
+            markdown.to_string(),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Seed a child of the `3d` special_page (seeded by migration 0023) — a
     /// gallery model page.
     pub async fn seed_3d_model(&self, slug: &str, markdown: &str) -> Result<()> {

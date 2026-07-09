@@ -43,7 +43,12 @@
   /// Attempt to authenticate using the conditional api
   async function webauthn_authenticate(auth_opt_url, auth_finish_url) {
     console.log("Calling webauthn_authenticate");
-    const auth_opt_response = await fetch(auth_opt_url);
+    // Forward the page's own query (?next=...) so the server-side stash also
+    // lands when the login page itself was served from bfcache (no server GET
+    // → login_page never stashed).
+    const auth_opt_response = await fetch(
+      auth_opt_url + window.location.search,
+    );
     if (!auth_opt_response.ok) {
       console.error(`Response from auth options: ${response.status}`);
       return false;
@@ -77,15 +82,21 @@
       body: auth_response_str,
     });
 
-    if (!finish_auth_response.ok) {
+    // fetch FOLLOWS the server's success redirect, so the final status is the
+    // ?next TARGET's — which can legitimately 404 (a stashed link to a page
+    // the ceremony's role still can't see, or a deleted bookmark). The
+    // ceremony's own verdict is the redirect: the finish handler only ever
+    // redirects on success, and only ever errors without one.
+    if (!finish_auth_response.redirected && !finish_auth_response.ok) {
       console.error(
-        `Response from auth options: ${finish_auth_response.status}`,
+        `Response from finish authentication: ${finish_auth_response.status}`,
       );
       return false;
     }
 
     console.log("server response was good");
-    return true;
+    // The final URL is the stashed ?next destination (Phase DE), or /.
+    return finish_auth_response.url || true;
   }
 
   /// Attempt to authenticate using the conditional api
@@ -95,7 +106,8 @@
     display_name,
   ) {
     const register_opt_response = await fetch(
-      start_register_url + "/" + display_name,
+      // location.search forwards ?next= — see webauthn_authenticate.
+      start_register_url + "/" + display_name + window.location.search,
       {
         method: "GET",
         headers: {
@@ -129,14 +141,17 @@
       body: register_response_str,
     });
 
-    if (!finish_reg_response.ok) {
+    // Same as authenticate: the redirect IS the success signal — the followed
+    // ?next target's own status (a legit 404) must not fail the ceremony.
+    if (!finish_reg_response.redirected && !finish_reg_response.ok) {
       console.error(
         `Response from finish registration: ${finish_reg_response.status}`,
       );
       return false;
     }
 
-    return true;
+    // The final URL carries the stashed ?next.
+    return finish_reg_response.url || true;
   }
 
   htmx.defineExtension("webauthn-autofill", {
@@ -158,7 +173,10 @@
         })
         .then((auth) => {
           if (auth) {
-            window.location.href = "/";
+            // auth is the finish fetch's final URL (string) — the server's
+            // ?next redirect target — or `true` from an older path; both land
+            // somewhere sane.
+            window.location.href = typeof auth === "string" ? auth : "/";
           } else {
             document.getElementById("error_message").innerHTML =
               "Error logging in";
@@ -194,7 +212,8 @@
         )
         .then((register) => {
           if (register) {
-            window.location.href = "/";
+            window.location.href =
+              typeof register === "string" ? register : "/";
           } else {
             document.getElementById("error_message").innerHTML =
               "Error registering";

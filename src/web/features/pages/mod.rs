@@ -145,6 +145,20 @@ pub async fn get_page_path(
             // the template below.
             let viewer = session_data.auth_state.role();
             if !pages_path.iter().all(|n| n.is_visible_to(viewer)) {
+                // Special-leaf wrinkle (Phase DE): nav tabs link /pages/<name>,
+                // and a SPECIAL page's only possible is_visible_to failure is
+                // the ROLE clause (the special_page conjunct exempts scheduling)
+                // — so when every ancestor passes and only the special leaf
+                // fails, issue the redirect anyway and let the target code
+                // route (e.g. /library) show its state-aware sign-in gate. A
+                // cat-404 here would read as a broken bookmark to a logged-out
+                // family member. DATA pages keep the miss shape below.
+                let ancestors_visible = pages_path[..pages_path.len() - 1]
+                    .iter()
+                    .all(|n| n.is_visible_to(viewer));
+                if lp.special_page && ancestors_visible {
+                    return Ok(Redirect::temporary(&lp.page_markdown).into_response());
+                }
                 return Ok(not_found::render_not_found(&state.pool, session_data.auth_state).await);
             }
 

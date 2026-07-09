@@ -12,6 +12,7 @@ use sqlx::SqlitePool;
 
 use crate::db::dao::content_pages::ContentPageDao;
 use crate::db::dao::roles::Role;
+use crate::web::util::urlencode::urlencode;
 
 /// Items per page.
 pub const PAGE_SIZE: i64 = 10;
@@ -83,21 +84,6 @@ impl Pagination {
             format!("{}?{}", self.base_path, parts.join("&"))
         }
     }
-}
-
-/// Minimal percent-encoding for a query value — enough to keep a search term with
-/// spaces/specials from breaking the URL.
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
 }
 
 /// Fetch one page of `parent`'s children (ordered per `order`, filtered by the

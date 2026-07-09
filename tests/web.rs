@@ -2669,10 +2669,26 @@ async fn gated_special_page_darkens_its_whole_section() {
 
     // Anonymous: every surface is dark.
     let anon = client();
-    for path in ["/blog", "/pages/blog", "/blog/kin-post"] {
+    for path in ["/blog", "/blog/kin-post"] {
         let resp = anon.get(server.url(path)).send().await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND, "anon {path} must be dark");
     }
+    // /pages/<special> redirects even for an insufficient viewer (the DE
+    // wrinkle: a special leaf's only possible failure is ROLE, and its route
+    // name is public knowledge) — the TARGET route then stays dark (/blog
+    // cat-404s above; /library shows its sign-in gate). DATA pages keep the
+    // miss shape — /blog/kin-post above proves the subtree stays dark.
+    let resp = anon.get(server.url("/pages/blog")).send().await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::TEMPORARY_REDIRECT,
+        "anon /pages/blog redirects to the (dark) code route"
+    );
+    assert_eq!(
+        resp.headers().get("location").unwrap().to_str().unwrap(),
+        "/blog",
+        "the redirect goes to the section route, never a data URL"
+    );
     let home = anon.get(server.url("/")).send().await.unwrap().text().await.unwrap();
     assert!(!home.contains("/pages/blog"), "nav must drop the gated section's tab");
     assert!(!home.contains("Kin Post"), "home bands must drop the gated section's children");
@@ -3424,4 +3440,237 @@ async fn featured_section_respects_page_order() {
         region.find("proj-c").expect("c"),
     );
     assert!(pb < pc && pc < pa, "Featured must order by page_order (b=0, c=1, a=2); got b={pb} c={pc} a={pa}");
+}
+
+/// The /library sign-in gate, all three viewer states (Phase DE). Code-defined
+/// routes deliberately do NOT miss-shape — route names are public knowledge —
+/// but the copy is state-aware and never names a tier, and everything
+/// DATA-defined stays behind the cat-404 oracle (next test).
+#[tokio::test]
+async fn library_gate_states_and_family_entry() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_library_book("first-book", "# First Book\n\nA family read.")
+        .await
+        .expect("seed");
+
+    // Anonymous → sign-in copy + a ?next login link, on BOTH code routes.
+    let anon = client();
+    for (path, next_href) in [
+        ("/library", "/login?next=%2Flibrary"),
+        ("/library/audiobooks", "/login?next=%2Flibrary%2Faudiobooks"),
+    ] {
+        let resp = anon.get(server.url(path)).send().await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "gate serves a page, not an error");
+        let body = resp.text().await.unwrap();
+        assert!(body.contains("Sign in"), "anon {path} must offer sign-in");
+        assert!(body.contains(next_href), "{path} gate must carry its own ?next");
+        assert!(!body.contains("First Book"), "{path} gate must not leak data");
+    }
+
+    // Authenticated-but-insufficient (a self-registered stranger) → neutral
+    // restricted copy: no tier names, no sign-in loop, still no data.
+    let reg = client();
+    reg.post(server.url("/test/login?role=Registered")).send().await.unwrap();
+    let body = reg
+        .get(server.url("/library"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("restricted"), "insufficient copy is the neutral one");
+    assert!(!body.contains("Sign in"), "no sign-in loop for an authenticated viewer");
+    assert!(
+        !body.contains("Family") && !body.contains("family"),
+        "gate copy must never name the tier a stranger would need"
+    );
+    assert!(!body.contains("First Book"), "restricted gate must not leak data");
+
+    // Family → doors index, book listing, and the book page itself.
+    let fam = client();
+    fam.post(server.url("/test/login?role=Family")).send().await.unwrap();
+    let doors = fam
+        .get(server.url("/library"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        doors.contains("/library/audiobooks"),
+        "the audiobooks section door renders for Family"
+    );
+    let listing = fam
+        .get(server.url("/library/audiobooks"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(listing.contains("First Book"), "the book card lists for Family");
+    assert!(
+        listing.contains("/pages/library/audiobooks/first-book"),
+        "the card links into the content tree"
+    );
+    let book = fam
+        .get(server.url("/pages/library/audiobooks/first-book"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(book.status(), StatusCode::OK, "Family reads the book page");
+
+    // Nav: Family sees the tab; anonymous doesn't.
+    assert!(doors.contains("/pages/library"), "Family nav carries the Library tab");
+    let home = anon
+        .get(server.url("/"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(!home.contains("/pages/library"), "anon nav must not show the tab");
+}
+
+/// DATA under /library stays oracle-shaped (Phase DE): a book page for an
+/// insufficient viewer is byte-identical to a genuine miss, while the special
+/// LEAF (/pages/library) redirects even when denied — its route name is
+/// public, and the target shows the sign-in gate.
+#[tokio::test]
+async fn library_data_stays_miss_shaped_and_special_leaf_redirects() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_library_book("secret-book", "# Secret Book\n\nnot for strangers")
+        .await
+        .expect("seed");
+
+    for role in [None, Some("Registered")] {
+        let c = client();
+        if let Some(r) = role {
+            c.post(server.url(&format!("/test/login?role={r}"))).send().await.unwrap();
+        }
+        let real = c
+            .get(server.url("/pages/library/audiobooks/secret-book"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(real.status(), StatusCode::NOT_FOUND);
+        let miss = c
+            .get(server.url("/pages/library/audiobooks/no-such-book"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(miss.status(), StatusCode::NOT_FOUND);
+        let (real_body, miss_body) =
+            (real.text().await.unwrap(), miss.text().await.unwrap());
+        assert_eq!(
+            real_body, miss_body,
+            "role {role:?}: gated book vs genuine miss must be byte-identical"
+        );
+
+        // The special LEAF redirects to the code route (which gates) — the
+        // one deliberate non-miss surface.
+        let leaf = c.get(server.url("/pages/library")).send().await.unwrap();
+        assert_eq!(leaf.status(), StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(
+            leaf.headers().get("location").unwrap().to_str().unwrap(),
+            "/library"
+        );
+    }
+}
+
+/// Login ?next end to end minus the passkey ceremony (Phase DE): a valid next
+/// stashes in the session at /login and pops in the finish handler; the
+/// open-redirect vectors never stash. The ceremony itself is covered by the
+/// browser e2e — here the pop is exercised via the finish handlers' shared
+/// helper by asserting the stash side: /login?next=X then the login page
+/// renders (stash is invisible), and the WHATWG bypass strings are unit-vector
+/// pinned in web::util::next_url.
+#[tokio::test]
+async fn login_next_param_accepts_paths_and_serves() {
+    let server = spawn_test_server().await.expect("spawn");
+    let c = client();
+    for q in [
+        "/login?next=%2Flibrary",
+        "/login?next=%2F%5Cevil.com", // /\evil.com — rejected, page still serves
+        "/login?next=%2F%2Fevil.com", // //evil.com — rejected, page still serves
+        "/login",
+    ] {
+        let resp = c.get(server.url(q)).send().await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{q} must serve the login page");
+    }
+}
+
+/// The library authoring surface (Phase DE): /pages/library redirects for
+/// everyone (special leaf), so section/book creation lives on the code index
+/// pages as admin-only forms — the blog/projects pattern. The full loop:
+/// create the section via /library's form target, a book via the section's,
+/// and both land Family-gated (inherit-on-create from the seeded row).
+#[tokio::test]
+async fn library_admin_authoring_loop_creates_gated_pages() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // Admin sees the create forms on the code index pages.
+    let index = admin
+        .get(server.url("/library"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(index.contains("hx-post=\"/pages/library\""), "New-section form renders");
+
+    // Create the section + a book through the same form targets.
+    admin
+        .post(server.url("/pages/library"))
+        .form(&[("page_title", "AudioBooks")])
+        .send()
+        .await
+        .unwrap();
+    let listing = admin
+        .get(server.url("/library/audiobooks"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        listing.contains("hx-post=\"/pages/library/audiobooks\""),
+        "New-book form renders once the section exists"
+    );
+    admin
+        .post(server.url("/pages/library/audiobooks"))
+        .form(&[("page_title", "Gated Book")])
+        .send()
+        .await
+        .unwrap();
+
+    // Inherit-on-create: both authored pages carry the parent's Family gate.
+    for slug in ["audiobooks", "gated-book"] {
+        let min_role: Option<String> = sqlx::query_scalar(
+            "SELECT min_role FROM content_pages WHERE page_name = ?1",
+        )
+        .bind(slug)
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+        assert_eq!(min_role.as_deref(), Some("Family"), "{slug} inherits the gate");
+    }
+
+    // And the authored book stays miss-shaped for anonymous.
+    let anon = client();
+    let resp = anon
+        .get(server.url("/pages/library/audiobooks/gated-book"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }

@@ -68,14 +68,14 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 ## Phase DE - The family Library section
 
 - [ ] DE.0 - Phase exit: family members use the Library tab end-to-end (first real audiobook live on prod); everyone else sees only the sign-in gate on code-defined routes
-- [ ] DE.1 - Migration: seed the library special page ('library','/library',-1,true) mirroring 0023, with min_role='Family' stamped on the row
-- [ ] DE.2 - /library route (section doors from children, /3d shape) + /library/audiobooks (paginated book cards via listing.rs paginate + search/pager partials); detail pages stay on get_page_path
-- [ ] DE.3 - Sign-in gate on ALL code-defined /library routes: logged-out copy ("sign in" + ?next link) vs authenticated-insufficient copy ("restricted", no tier names); get_page_path still redirects a special leaf whose ONLY failure is role (nav links /pages/library); oracle tests for both states + data stays miss-shaped
-- [ ] DE.4 - Login ?next: validated (leading /, second char not / or \, NO backslash anywhere — test vectors /\evil.com + //evil.com) and SESSION-stashed at login_page/get_auth_opts/start_register; finish handlers pop + redirect; htmx-webauthn.js navigates to response.url instead of hardcoded "/"
-- [ ] DE.5 - Add the /library index (exact path, not subtree) to greylist EXEMPT_PREFIXES beside /login — a greylisted logged-out family member must reach the sign-in gate, and the gate serves nothing scrapable
+- [x] DE.1 - Migration: seed the library special page ('library','/library',-1,true) mirroring 0023, with min_role='Family' stamped on the row
+- [x] DE.2 - /library route (section doors from children, /3d shape) + /library/audiobooks (paginated book cards via listing.rs paginate + search/pager partials); detail pages stay on get_page_path
+- [x] DE.3 - Sign-in gate on ALL code-defined /library routes: logged-out copy ("sign in" + ?next link) vs authenticated-insufficient copy ("restricted", no tier names); get_page_path still redirects a special leaf whose ONLY failure is role (nav links /pages/library); oracle tests for both states + data stays miss-shaped
+- [x] DE.4 - Login ?next: validated (leading /, second char not / or \, NO backslash anywhere — test vectors /\evil.com + //evil.com) and SESSION-stashed at login_page/get_auth_opts/start_register; finish handlers pop + redirect; htmx-webauthn.js navigates to response.url instead of hardcoded "/"
+- [x] DE.5 - Add the /library index (exact path, not subtree) to greylist EXEMPT_PREFIXES beside /login — a greylisted logged-out family member must reach the sign-in gate, and the gate serves nothing scrapable
 - [ ] DE.6 - Author the first real audiobook end-to-end on beta (upload gated m4b → book page → family listen) then prod tag
-- [ ] DE.7 - Browser e2e (register 2nd virtual-authenticator user, promote via server.pool): Family sees Library tab + book page renders; anonymous: no tab, cat-404 book, sign-in gate on /library
-- [ ] DE.8 - CLAUDE.md major update: role ladder, min_role axes, Library section, audio kind, the new request_log exclusions
+- [x] DE.7 - Browser e2e (register 2nd virtual-authenticator user, promote via server.pool): Family sees Library tab + book page renders; anonymous: no tab, cat-404 book, sign-in gate on /library
+- [x] DE.8 - CLAUDE.md major update: role ladder, min_role axes, Library section, audio kind, the new request_log exclusions
 
 ## Phase DF - Listening progress sync
 

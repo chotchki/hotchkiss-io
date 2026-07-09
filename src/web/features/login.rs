@@ -7,11 +7,12 @@ use crate::{
 use anyhow::{anyhow, Context};
 use askama::Template;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::Redirect,
     routing::{get, post},
     Json, Router,
 };
+use serde::Deserialize;
 use tower_sessions::Session;
 use tracing::debug;
 use uuid::Uuid;
@@ -39,10 +40,49 @@ struct LoginTemplate {
     auth_state: AuthenticationState,
 }
 
+/// Session key for the validated post-login destination (Phase DE). The
+/// ceremony is `fetch()`-driven — a hidden form field has nowhere to ride — so
+/// the destination is stashed server-side alongside the ceremony state and
+/// popped by the finish handlers. One-shot; last-stashed wins.
+const LOGIN_NEXT_KEY: &str = "login_next";
+
+/// `?next=` on the login GET routes — optional, strictly validated.
+#[derive(Deserialize, Default)]
+struct NextQuery {
+    next: Option<String>,
+}
+
+/// Stash a VALID `?next` into the session; invalid/absent values never write
+/// (an open-redirect string must not survive to the pop, and an absent param
+/// must not clobber a stash from an earlier hop of the same flow).
+async fn stash_next(session: &Session, query: &NextQuery) -> Result<(), AppError> {
+    if let Some(next) = query.next.as_deref()
+        && let Some(valid) = crate::web::util::next_url::safe_next(next)
+    {
+        session.insert(LOGIN_NEXT_KEY, valid.to_string()).await?;
+    }
+    Ok(())
+}
+
+/// Pop the stashed destination, RE-validating on the way out (the session
+/// value is attacker-adjacent state; validation rules may also have tightened
+/// since it was written). Fallback: `/`.
+async fn pop_next(session: &Session) -> String {
+    let stashed: Option<String> = session.remove(LOGIN_NEXT_KEY).await.ok().flatten();
+    stashed
+        .as_deref()
+        .and_then(crate::web::util::next_url::safe_next)
+        .unwrap_or("/")
+        .to_string()
+}
+
 async fn login_page(
     State(state): State<AppState>,
+    session: Session,
     session_data: SessionData,
+    Query(query): Query<NextQuery>,
 ) -> Result<HtmlTemplate<LoginTemplate>, AppError> {
+    stash_next(&session, &query).await?;
     let template = LoginTemplate {
         top_bar: TopBar::create(&state.pool, "login", session_data.auth_state.role()).await?,
         auth_state: session_data.auth_state,
@@ -55,10 +95,12 @@ async fn authentication_options(
     State(state): State<AppState>,
     session: Session,
     mut session_data: SessionData,
+    Query(query): Query<NextQuery>,
 ) -> Result<Json<RequestChallengeResponse>, AppError> {
     if let AuthenticationState::Authenticated(_) = session_data.auth_state {
         return Err(anyhow!("Already logged in").into());
     }
+    stash_next(&session, &query).await?;
 
     let (challenge, discoverable_auth) = state.webauthn.start_discoverable_authentication()?;
     session_data.auth_state = AuthenticationState::AuthOptions(discoverable_auth);
@@ -98,7 +140,10 @@ async fn finish_authentication(
         session_data.auth_state = AuthenticationState::Authenticated(user);
         SessionData::update_session(&session, &session_data).await?;
 
-        Ok(Redirect::to("/"))
+        // The JS navigates to this response's final URL (fetch follows the
+        // redirect), so the stashed ?next lands the user where the gate
+        // sent them to log in.
+        Ok(Redirect::to(&pop_next(&session).await))
     } else {
         Err(anyhow!("Authentication not in progress").into())
     }
@@ -109,7 +154,9 @@ async fn start_registration(
     session: Session,
     Path(display_name): Path<String>,
     mut session_data: SessionData,
+    Query(query): Query<NextQuery>,
 ) -> Result<Json<CreationChallengeResponse>, AppError> {
+    stash_next(&session, &query).await?;
     let user_unique_id = Uuid::new_v4();
 
     // Initiate a basic registration flow, allowing any cryptograhpic authenticator to proceed.
@@ -161,7 +208,7 @@ async fn finish_registration(
 
         SessionData::update_session(&session, &session_data).await?;
 
-        Ok(Redirect::to("/"))
+        Ok(Redirect::to(&pop_next(&session).await))
     } else {
         Err(anyhow!("Registration not in progress").into())
     }

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% import "partials/icons.html" as icons %}
+
+{% block title %}AudioBooks{% endblock %}
+
+{% block head %}{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+<h1 class="text-2xl font-display text-navy mb-4">AudioBooks</h1>
+
+{% if !section_exists %}
+<p class="text-navy italic">No audiobooks yet.</p>
+{% else %}
+
+{% if auth_state.is_admin() %}
+<form hx-post="/pages/library/audiobooks" class="mb-4 flex flex-row gap-2">
+    <input class="border border-navy px-2 grow min-w-0 rounded-sm" name="page_title" type="text"
+        placeholder="Book title" required />
+    <button class="px-3 py-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">{% call icons::plus() %} New book</button>
+</form>
+{% endif %}
+
+{% include "partials/listing_search.html" %}
+
+{% if books.is_empty() %}
+<p class="text-navy italic">{% if pagination.is_search() %}No books match your search.{% else %}No audiobooks yet.{% endif %}</p>
+{% else %}
+<ul class="grid grid-cols-1 md:grid-cols-2 gap-4 list-none p-0">
+    {% for book in books %}
+    <li class="border-2 border-navy rounded-md overflow-hidden bg-body-grey">
+        <a href="/pages/library/audiobooks/{{book.page_name}}" class="block hover:opacity-90">
+            {% if let Some(cover) = book.cover_url %}
+            <div class="h-40 bg-navy">
+                <img src="{{cover}}" alt="" class="w-full h-full object-cover" />
+            </div>
+            {% else %}
+            <div class="h-40 bg-navy flex items-center justify-center">
+                <span class="text-5xl text-yellow">{% call icons::music() %}</span>
+            </div>
+            {% endif %}
+            <div class="p-4">
+                {% if book.is_scheduled %}<p class="mb-1"><span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow text-navy uppercase tracking-wide">Scheduled</span></p>{% endif %}{% if let Some(v) = book.visibility %}<p class="mb-1"><span class="px-2 py-0.5 rounded text-xs font-semibold bg-navy text-yellow uppercase tracking-wide">{{v}}</span></p>{% endif %}
+                <h2 class="text-lg font-display text-navy underline">{{book.title}}</h2>
+                {% if !book.excerpt.is_empty() %}
+                <p class="mt-2 text-navy">{{book.excerpt}}</p>
+                {% endif %}
+            </div>
+        </a>
+    </li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+{% include "partials/listing_pager.html" %}
+{% endif %}
+</div>
+{% endblock %}

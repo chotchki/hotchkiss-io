@@ -39,7 +39,13 @@ const EXEMPT_PREFIXES: &[&str] = &[
 ];
 
 fn is_exempt_path(path: &str) -> bool {
-    path == "/favicon.ico" || EXEMPT_PREFIXES.iter().any(|p| path.starts_with(p))
+    // `/library` is EXACT, not a prefix (Phase DE): a greylisted logged-out
+    // family member must reach the sign-in gate, and the gate page serves
+    // nothing worth scraping — but the SUBTREE (book listings under
+    // /library/*, /pages/library/*) stays behind the toll like any content.
+    path == "/favicon.ico"
+        || path == "/library"
+        || EXEMPT_PREFIXES.iter().any(|p| path.starts_with(p))
 }
 
 /// Pull one cookie value from the `Cookie` header (no cookie crate needed for a single lookup).

@@ -528,3 +528,83 @@ async fn greylisted_browser_pays_the_toll_and_reaches_content() {
     let _ = std::fs::remove_dir_all(&profile);
     drop(server);
 }
+
+/// The family-library journey (Phase DE), full-stack: anonymous sees no tab +
+/// the sign-in gate + a miss-shaped book page; registering through
+/// `/login?next=/library` runs the REAL passkey ceremony and the JS lands on
+/// /library via the finish response's URL (the session-stashed ?next); a
+/// pool-side promote to Family (the e2e Family mint — registration alone only
+/// produces Admin/Registered, and refresh_session_role picks the new role up
+/// on the next request) opens the doors, the listing and the book itself.
+#[tokio::test]
+async fn family_library_gate_login_next_and_entry() {
+    let _e2e = e2e_lock().await;
+    let server: TestServer = spawn_test_server().await.expect("spawn harness");
+    server
+        .seed_library_book("e2e-book", "# E2E Book\n\na family read")
+        .await
+        .expect("seed book");
+    let (mut browser, handle, profile) = launch().await;
+    let page = browser.new_page("about:blank").await.expect("new page");
+
+    add_virtual_authenticator(&page).await;
+
+    // Anonymous: no Library tab, the sign-in gate, and a miss-shaped book.
+    page.goto(server.url("/")).await.expect("goto /");
+    let home = page.content().await.expect("home content");
+    assert!(!home.contains("/pages/library"), "anon nav must not show the tab");
+    page.goto(server.url("/library")).await.expect("goto /library");
+    let gate = page.content().await.expect("gate content");
+    assert!(gate.contains("Sign in"), "anon /library shows the sign-in gate");
+    page.goto(server.url("/pages/library/audiobooks/e2e-book"))
+        .await
+        .expect("goto book");
+    let miss = page.content().await.expect("book content");
+    assert!(!miss.contains("E2E Book"), "anon book page must stay miss-shaped");
+
+    // Register through /login?next=/library — the stashed next must carry the
+    // browser to /library after the ceremony (first user lands Admin, which
+    // passes the gate).
+    page.goto(server.url("/login?next=%2Flibrary"))
+        .await
+        .expect("goto /login?next");
+    let username = page.find_element("#username").await.expect("#username");
+    username.click().await.expect("focus #username");
+    username.type_str("e2e-family").await.expect("type username");
+    page.find_element("button[type=submit]")
+        .await
+        .expect("submit button")
+        .click()
+        .await
+        .expect("click submit");
+    wait_until_left_login(&page).await;
+    let landed = page.url().await.expect("url").expect("some url");
+    assert!(
+        landed.ends_with("/library"),
+        "?next must land the ceremony on /library, got {landed}"
+    );
+
+    // Promote to Family via the pool; live role refresh applies it next request.
+    sqlx::query("UPDATE users SET app_role = 'Family'")
+        .execute(&server.pool)
+        .await
+        .expect("promote to Family");
+
+    page.goto(server.url("/library")).await.expect("re-goto /library");
+    let doors = page.content().await.expect("doors content");
+    assert!(
+        doors.contains("/library/audiobooks"),
+        "Family sees the audiobooks door"
+    );
+    assert!(doors.contains("/pages/library"), "Family nav carries the tab");
+    page.goto(server.url("/pages/library/audiobooks/e2e-book"))
+        .await
+        .expect("goto book as family");
+    let book = page.content().await.expect("book content");
+    assert!(book.contains("E2E Book"), "Family reads the book page");
+
+    browser.close().await.ok();
+    handle.await.ok();
+    let _ = std::fs::remove_dir_all(&profile);
+    drop(server);
+}
