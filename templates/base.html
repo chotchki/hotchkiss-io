@@ -67,7 +67,11 @@
            phone viewport — that bug let `overflow-x-auto` children never kick in. #}
         <div class="p-2 w-full min-w-0">
             <!-- Navigation -->
-            <nav class="max-w-screen-md pl-2" aria-label="Primary">
+            {# max-w-screen-lg, not -md: the logged-in row (5 content tabs since
+               the Library tab + the admin group) runs ~910px — the -md cap
+               wrapped it. This block only renders at lg:+ viewports, so the
+               1024px cap always fits on screen. #}
+            <nav class="max-w-screen-lg pl-2" aria-label="Primary">
                 <!-- Desktop (lg+): single-row nav — content tabs + admin tabs (own group) -->
                 <div class="hidden lg:flex flex-row items-end gap-4">
                     <ul class="flex flex-row flex-wrap list-none gap-px">
