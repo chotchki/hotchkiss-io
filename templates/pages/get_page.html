@@ -126,7 +126,9 @@
          match the sibling text inputs; the chevron is ours (pointer-events-none
          so clicks fall through to the select). #}
       <span class="relative">
-        <select class="w-full appearance-none bg-white border border-navy/30 rounded px-3 py-2 pr-8" name="min_role">
+        {# no bg class: Tailwind preflight makes form fields transparent, and the
+           sibling text inputs ride that — an explicit bg-white read brighter. #}
+        <select class="w-full appearance-none border border-navy/30 rounded px-3 py-2 pr-8" name="min_role">
           <option value="Public"{% if page.min_role_rank() == 0 %} selected{% endif %}>Public</option>
           <option value="Registered"{% if page.min_role_rank() == 1 %} selected{% endif %}>Registered</option>
           <option value="Family"{% if page.min_role_rank() == 2 %} selected{% endif %}>Family</option>
