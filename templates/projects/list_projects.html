@@ -12,9 +12,9 @@
 
 {% if auth_state.is_admin() %}
 <form hx-post="/pages/projects" class="mb-4 flex flex-row gap-2">
-    <input class="border border-navy px-2 grow min-w-0" name="page_title" type="text"
+    <input class="border border-navy px-2 grow min-w-0 rounded-sm" name="page_title" type="text"
         placeholder="Project name" required />
-    <button class="px-3 bg-navy border-navy rounded-sm text-div-grey" type="submit">{% call icons::plus() %} New project</button>
+    <button class="px-3 py-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">{% call icons::plus() %} New project</button>
 </form>
 {% endif %}
 
