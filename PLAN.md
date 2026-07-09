@@ -85,6 +85,12 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] DF.3 - Player server-resume swap (localStorage stays as fallback); saves ~30s + pause + visibilitychange→hidden + pagehide beacon (throttle is the real guarantee on iOS); save rejection → "session expired, sign in" prompt, never a silent stall
 - [ ] DF.4 - Exclude /library/progress from request_log (machine telemetry, ~120 rows/listening-hour — same self-feed logic as /challenge; keeps it out of greylist R3)
 - [ ] DF.5 - Tests + CLAUDE.md delta + phone re-check: progress saves continue with the screen off
+## Phase DG - Series playlist
+- [ ] DG.0 - Phase exit: a multi-volume series page auto-plays through volumes with the screen off on a real iPhone; standalone books (single embed) unchanged
+- [ ] DG.1 - Player playlist mode: a page's audio embeds (document order) form an ordered playlist — on `ended` advance to the next volume
+- [ ] DG.2 - MediaSession volume skip: nexttrack/prevtrack map to next/previous volume; lock-screen metadata (title + artwork) updates per volume
+- [ ] DG.3 - Up-next affordance: on page open, highlight/scroll to the last-listened volume (per-ref saved positions decide it)
+- [ ] DG.4 - Tests + CLAUDE.md delta + real-phone validation: screen-off auto-advance, lock-screen volume skip, series authoring convention documented
 
 ## Backlog (not yet phased)
 
