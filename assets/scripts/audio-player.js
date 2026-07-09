@@ -8,7 +8,13 @@
  *     screen (WebKit's out-of-page artwork fetch may not carry cookies),
  *   - localStorage resume (key audio-pos:<ref>) applied at loadedmetadata AND
  *     re-asserted on first play (iOS silently drops a currentTime set before
- *     metadata). Never autoplays.
+ *     metadata). Never autoplays on page load,
+ *   - playlist auto-advance (Phase DG): a page's audio embeds in document
+ *     order ARE the series order — on `ended` the next volume plays (chained
+ *     from an active playback, not a page-load autoplay), MediaSession
+ *     nexttrack/prevtrack skip between volumes from the lock screen, and
+ *     starting one player pauses the others. A single-embed page is a
+ *     playlist of one — none of this fires.
  *
  * Embeds arrive via an HTMX swap, so we scan on load AND after settles,
  * guarded per-element by data-enhanced. Degrades to the bare native controls
@@ -32,6 +38,17 @@
     return h > 0
       ? h + ":" + String(m).padStart(2, "0") + ":" + sec
       : m + ":" + sec;
+  }
+
+  // Playlist neighbors resolve against the LIVE DOM at call time, not at
+  // enhance time — embeds arrive via independent HTMX swaps in any order,
+  // and document order is the series order the author wrote.
+  function neighborAudio(audio, delta) {
+    const all = Array.from(
+      document.querySelectorAll(".audio-embed audio[data-ref]"),
+    );
+    const i = all.indexOf(audio);
+    return i < 0 ? null : all[i + delta] || null;
   }
 
   function button(label, title, onClick) {
@@ -104,6 +121,30 @@
       }
     });
     audio.addEventListener("pause", save);
+
+    // ---- playlist (Phase DG) ----
+    // Exclusive playback: two volumes narrating over each other is never
+    // what anyone wants.
+    audio.addEventListener("play", () => {
+      document
+        .querySelectorAll(".audio-embed audio[data-ref]")
+        .forEach((other) => {
+          if (other !== audio && !other.paused) other.pause();
+        });
+    });
+    // Auto-advance: chain the next volume from an ENDED playback — the same
+    // active audio session, which is what lets iOS allow it (a page-load
+    // autoplay would be blocked, and we never do that). The next player's own
+    // first-play hooks apply its saved position + the global rate. If iOS
+    // still blocks with the screen locked, the src-swap-on-one-element
+    // fallback is the DG.1 plan B — validate on the real phone first.
+    audio.addEventListener("ended", () => {
+      const next = neighborAudio(audio, 1);
+      if (!next) return;
+      next.play().catch(() => {
+        /* blocked — the listener taps play; no worse than pre-DG */
+      });
+    });
 
     const skip = (delta) => {
       seekTo(Math.max(0, audio.currentTime + delta));
@@ -257,6 +298,19 @@
         setHandler("seekto", (d) => {
           if (d && typeof d.seekTime === "number") seekTo(d.seekTime);
         });
+        // Volume skip (Phase DG): the lock screen jumps between BOOKS; the
+        // ±30s seeks above stay the in-volume controls. A null handler at
+        // the ends hides the button — a single-book page shows no next/prev.
+        // Re-resolved on every claim (each `play`), so late-settling embeds
+        // are picked up by the time anyone can press the button.
+        const jump = (delta) => () => {
+          const target = neighborAudio(audio, delta);
+          if (!target) return;
+          audio.pause();
+          target.play().catch(() => {});
+        };
+        setHandler("nexttrack", neighborAudio(audio, 1) ? jump(1) : null);
+        setHandler("previoustrack", neighborAudio(audio, -1) ? jump(-1) : null);
       };
       audio.addEventListener("play", claimSession);
     }
