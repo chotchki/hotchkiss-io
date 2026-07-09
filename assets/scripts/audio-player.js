@@ -19,9 +19,10 @@
   "use strict";
 
   const POS_PREFIX = "audio-pos:";
+  const RATE_KEY = "audio-rate"; // global, not per-book — speed is a listener trait
   const SAVE_EVERY_MS = 5000;
   const SKIP_SECONDS = 30;
-  const RATES = [1, 1.25, 1.5, 2];
+  const RATES = [1, 1.25, 1.5, 1.6, 2];
 
   function fmtTime(totalSeconds) {
     const s = Math.max(0, Math.floor(totalSeconds));
@@ -82,6 +83,7 @@
     // never fight the user's own seeking again.
     audio.addEventListener("play", function onFirstPlay() {
       audio.removeEventListener("play", onFirstPlay);
+      audio.playbackRate = RATES[rateIdx]; // iOS may reset rate when the stream loads
       if (userSeeked) return;
       if (!resumed) applyResume();
       else if (savedPos > 3 && audio.currentTime < 1) seekTo(savedPos);
@@ -116,11 +118,22 @@
     controls.appendChild(
       button("+30s", "Forward 30 seconds", () => skip(SKIP_SECONDS)),
     );
-    let rateIdx = 0;
-    const rateBtn = button("1×", "Playback speed", () => {
+    // Speed persists across books/devices' sessions (a 1.6× listener is a
+    // 1.6× listener); an unknown stored value (older RATES list) falls to 1×.
+    let rateIdx = RATES.indexOf(
+      parseFloat(localStorage.getItem(RATE_KEY) || "1"),
+    );
+    if (rateIdx < 0) rateIdx = 0;
+    audio.playbackRate = RATES[rateIdx];
+    const rateBtn = button(RATES[rateIdx] + "×", "Playback speed", () => {
       rateIdx = (rateIdx + 1) % RATES.length;
       audio.playbackRate = RATES[rateIdx];
       rateBtn.textContent = RATES[rateIdx] + "×";
+      try {
+        localStorage.setItem(RATE_KEY, String(RATES[rateIdx]));
+      } catch {
+        /* storage full/blocked — speed just won't persist */
+      }
     });
     controls.appendChild(rateBtn);
     audio.insertAdjacentElement("afterend", controls);
@@ -134,9 +147,23 @@
     }
     const rows = [];
     if (chapters.length) {
+      // Collapsed by default — a 13h audiobook's ~50 chapters would otherwise
+      // dominate the page. `hidden` beats <details>: the embed lives inside a
+      // <p>, where flow content like <details> is invalid (the STL <span> rule).
       const list = document.createElement("span");
       list.className =
-        "flex flex-col w-full mt-1 border border-navy/20 rounded divide-y divide-navy/10";
+        "hidden flex-col w-full mt-1 border border-navy/20 rounded divide-y divide-navy/10";
+      const chapBtn = button(
+        "Chapters (" + chapters.length + ") ▸",
+        "Show chapters",
+        () => {
+          const open = list.classList.toggle("hidden") === false;
+          list.classList.toggle("flex", open);
+          chapBtn.textContent =
+            "Chapters (" + chapters.length + ") " + (open ? "▾" : "▸");
+        },
+      );
+      controls.appendChild(chapBtn);
       chapters.forEach((ch, i) => {
         const startS = (ch.start_ms || 0) / 1000;
         const row = document.createElement("button");

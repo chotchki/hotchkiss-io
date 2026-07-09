@@ -3,6 +3,9 @@
 @source "templates";
 @source "src/web/markdown";
 @source "src/web/features";
+/* First-party JS builds DOM with utility classes (audio-player, upload-progress);
+   without this scan, a class used ONLY there silently produces no CSS. */
+@source "assets/scripts";
 
 @theme {
   --color-navy: #14213d;

@@ -72,7 +72,7 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [x] DD.2 - Audio embed arm in render_embed_html (STL-arm shape): <audio controls preload=metadata> + audio/* sources + largest-variant download button + data-chapters/data-ref; degrades to bare element without JS
 - [x] DD.3 - Player JS (first-party, vendored-only): chapter list/seek, ±30s skips, playback rate, MediaSession (+ gated-artwork credentialed-fetch→blob fallback), localStorage resume applied at loadedmetadata AND re-asserted on first play; never autoplay
 - [x] DD.4 - Exclude /media/file/ from request_log (streaming range-requests would self-greylist a listening household via R3 + swamp the Humans/top-paths signal); note the decision in docs/greylist-challenge-design.md deferred-levers
-- [ ] DD.5 - On-phone checklist (needs beta gated test page + Family beta user): Safari tab AND installed PWA (separate cookie jar — pick + write down the supported mode), screen-off playback, lock-screen controls/artwork, cold-load resume survives first play, range seeking
+- [x] DD.5 - On-phone checklist (needs beta gated test page + Family beta user): Safari tab AND installed PWA (separate cookie jar — pick + write down the supported mode), screen-off playback, lock-screen controls/artwork, cold-load resume survives first play, range seeking
 - [x] DD.6 - Tests (probe KAT for an m4b fixture, embed arm, chapters JSON) + CLAUDE.md delta
 
 ## Phase DE - The family Library section
