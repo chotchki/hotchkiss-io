@@ -122,12 +122,18 @@
     </label>
     <label class="flex flex-col gap-1">
       <span class="text-sm font-display text-navy uppercase">Visibility</span>
-      <select class="border border-navy/30 rounded px-3 py-2" name="min_role">
-        <option value="Public"{% if page.min_role_rank() == 0 %} selected{% endif %}>Public</option>
-        <option value="Registered"{% if page.min_role_rank() == 1 %} selected{% endif %}>Registered</option>
-        <option value="Family"{% if page.min_role_rank() == 2 %} selected{% endif %}>Family</option>
-        <option value="Admin"{% if page.min_role_rank() == 3 %} selected{% endif %}>Admin-only</option>
-      </select>
+      {# appearance-none kills the native select chrome so the border/padding
+         match the sibling text inputs; the chevron is ours (pointer-events-none
+         so clicks fall through to the select). #}
+      <span class="relative">
+        <select class="w-full appearance-none bg-white border border-navy/30 rounded px-3 py-2 pr-8" name="min_role">
+          <option value="Public"{% if page.min_role_rank() == 0 %} selected{% endif %}>Public</option>
+          <option value="Registered"{% if page.min_role_rank() == 1 %} selected{% endif %}>Registered</option>
+          <option value="Family"{% if page.min_role_rank() == 2 %} selected{% endif %}>Family</option>
+          <option value="Admin"{% if page.min_role_rank() == 3 %} selected{% endif %}>Admin-only</option>
+        </select>
+        <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-navy/60">{% call icons::chevron_down() %}</span>
+      </span>
       <span class="text-xs text-navy/50">Minimum role to see this page — child pages inherit it on creation, and the whole subtree is hidden below this role.</span>
     </label>
   </div>
