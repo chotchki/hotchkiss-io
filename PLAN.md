@@ -91,6 +91,7 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] DG.2 - MediaSession volume skip: nexttrack/prevtrack map to next/previous volume; lock-screen metadata (title + artwork) updates per volume
 - [ ] DG.3 - Up-next affordance: on page open, highlight/scroll to the last-listened volume (per-ref saved positions decide it)
 - [ ] DG.4 - Tests + CLAUDE.md delta + real-phone validation: screen-off auto-advance, lock-screen volume skip, series authoring convention documented
+- [ ] DG.5 - Audio embed: cover-art + title header replaces the download button
 
 ## Backlog (not yet phased)
 

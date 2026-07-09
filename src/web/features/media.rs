@@ -402,27 +402,40 @@ Your browser can't play this video.</video>"
                     v.url_key, v.mime
                 ));
             }
-            let artwork = variants
+            let artwork_url = variants
                 .iter()
                 .rev()
                 .find(|v| v.mime.starts_with("image/"))
-                .map(|v| format!(" data-artwork=\"/media/file/{}\"", v.url_key))
+                .map(|v| format!("/media/file/{}", v.url_key));
+            let artwork_attr = artwork_url
+                .as_ref()
+                .map(|u| format!(" data-artwork=\"{u}\""))
                 .unwrap_or_default();
             let chapters_attr = media
                 .chapters
                 .as_deref()
                 .map(|c| format!(" data-chapters=\"{}\"", attr_escape(c)))
                 .unwrap_or_default();
-            // Download = the largest audio variant (a hand-added low-bitrate
-            // AAC would be a smaller sibling; the full-quality file downloads).
-            let full = audios.iter().copied().max_by_key(|v| v.bytes).unwrap();
+            // Header = cover art + title, NOT a download button (a series page
+            // of N volumes was N navy download slabs — the wrong emphasis for
+            // listeners; the bytes stay reachable via the library's Copy link).
+            // The <img> is decorative (alt="") — the adjacent title names it.
+            let cover_img = artwork_url
+                .as_ref()
+                .map(|u| {
+                    format!(
+                        "<img class=\"size-24 rounded-md border-2 border-navy object-cover shrink-0\" \
+src=\"{u}\" alt=\"\" loading=\"lazy\" />"
+                    )
+                })
+                .unwrap_or_default();
             format!(
                 "<span class=\"audio-embed flex flex-col items-center gap-2 my-4 w-full max-w-2xl mx-auto\">\
-<audio class=\"w-full\" controls preload=\"metadata\" data-ref=\"{media_ref}\" data-title=\"{alt}\"{chapters_attr}{artwork}>{sources}\
-Your browser can't play this audio.</audio>\
-{download}</span>",
+<span class=\"flex flex-row items-center gap-3 w-full\">{cover_img}\
+<span class=\"font-display text-navy text-lg\">{alt}</span></span>\
+<audio class=\"w-full\" controls preload=\"metadata\" data-ref=\"{media_ref}\" data-title=\"{alt}\"{chapters_attr}{artwork_attr}>{sources}\
+Your browser can't play this audio.</audio></span>",
                 media_ref = attr_escape(&media.media_ref),
-                download = download_button(&full.url_key, &alt, full.bytes),
             )
         }
         MediaKind::File => {
@@ -818,11 +831,12 @@ mod tests {
         );
     }
 
-    /// DD.2: the audio arm — native <audio> with universal sources, the
-    /// data-* contract the player enhances, artwork excluded from sources,
-    /// download = the largest audio variant.
+    /// DD.2 + DG.5: the audio arm — native <audio> with universal sources, the
+    /// data-* contract the player enhances, artwork excluded from sources, and
+    /// a cover+title header instead of a download button (series-page feedback:
+    /// N volumes were N download slabs).
     #[test]
-    fn audio_renders_player_element_with_chapters_and_download() {
+    fn audio_renders_player_element_with_chapters_and_cover_header() {
         let mut m = media("audio");
         m.title = Some("Test Book".to_string());
         m.chapters = Some(r#"[{"start_ms":0,"title":"One"}]"#.to_string());
@@ -849,20 +863,29 @@ mod tests {
             "artwork is never a playback source: {html}"
         );
         assert!(
-            html.contains("href=\"/media/file/fullaudio\""),
-            "download = the LARGEST audio variant: {html}"
+            html.contains("<img") && html.contains("src=\"/media/file/artkey\""),
+            "the cover art renders as the visible header image: {html}"
+        );
+        assert!(
+            html.contains(">Test Book</span>"),
+            "the title renders as visible header text: {html}"
+        );
+        assert!(
+            !html.contains("media-download"),
+            "audio carries NO download button (DG.5): {html}"
         );
         assert!(html.contains("Your browser can't play this audio."), "{html}");
     }
 
-    /// A chapterless mp3 renders the bare player contract — no data-chapters,
-    /// no artwork attr — and still downloads.
+    /// A chapterless, artless mp3 renders the bare player contract — no
+    /// data-chapters, no artwork attr, no cover img — title header only.
     #[test]
     fn chapterless_audio_omits_optional_attrs() {
         let html = render_embed_html(&media("audio"), &[variant("mp3key", "audio/mpeg", None)]);
         assert!(html.contains("<audio"), "{html}");
         assert!(!html.contains("data-chapters"), "{html}");
         assert!(!html.contains("data-artwork"), "{html}");
+        assert!(!html.contains("<img"), "no cover art → no header image: {html}");
         assert!(html.contains("type=\"audio/mpeg\""), "{html}");
     }
 
