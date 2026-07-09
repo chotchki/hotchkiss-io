@@ -3652,7 +3652,9 @@ async fn library_admin_authoring_loop_creates_gated_pages() {
         "New-book form renders once the section exists"
     );
     // Edit-section affordance (DE.7): the section's content page is shadowed
-    // by the /library routes, so the indexes must link its editor.
+    // by the /library routes, so the SECTION index links its editor. The
+    // doors page deliberately doesn't — it's the family-facing entry hall
+    // (chris's call after seeing both).
     assert!(
         listing.contains("/pages/library/audiobooks?edit"),
         "the section index links the section editor for admin"
@@ -3666,8 +3668,8 @@ async fn library_admin_authoring_loop_creates_gated_pages() {
         .await
         .unwrap();
     assert!(
-        doors.contains("/pages/library/audiobooks?edit"),
-        "the door carries an admin edit link"
+        !doors.contains("Edit section"),
+        "the doors page stays free of admin edit links"
     );
     admin
         .post(server.url("/pages/library/audiobooks"))

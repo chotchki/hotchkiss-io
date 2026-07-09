@@ -67,10 +67,6 @@ pub struct SectionDoor {
     /// Door target: `/library/<page_name>` (the audiobooks child resolves to
     /// the code route; future sections get routes when they're built).
     pub href: String,
-    /// Slug for the admin edit link (`/pages/library/<page_name>?edit`) —
-    /// sections are real authored pages, and the index is the only place an
-    /// admin ever sees them (the /library routes shadow the content view).
-    pub page_name: String,
     pub title: String,
     pub excerpt: String,
 }
@@ -156,7 +152,6 @@ pub async fn show_library_index(
         .iter()
         .map(|p| SectionDoor {
             href: format!("/library/{}", p.page_name),
-            page_name: p.page_name.clone(),
             title: p.display_title(),
             excerpt: cached_excerpt(&p.page_markdown),
         })
