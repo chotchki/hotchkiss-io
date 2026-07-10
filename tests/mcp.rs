@@ -247,3 +247,50 @@ async fn write_tools_create_update_delete_a_page() {
     let gone = tool_call(&client, &url, &key, "get_page", json!({ "path": "blog/agent-post" })).await;
     assert!(gone.contains("not found"), "the page is gone: {gone}");
 }
+
+/// DI.7: the action tools flip scheduled + featured state, and feature is idempotent.
+#[tokio::test]
+async fn action_tools_schedule_and_feature_a_page() {
+    let server = spawn_test_server().await.expect("test server");
+    let key = server
+        .seed_admin_api_key("mcp-actions")
+        .await
+        .expect("admin key");
+    server.seed_blog_post("act-post", "# Act").await.unwrap();
+    let client = reqwest::Client::new();
+    let url = server.url("/mcp");
+
+    let body = tool_call(&client, &url, &key, "unpublish_page", json!({ "path": "blog/act-post" })).await;
+    assert!(body.contains("\"scheduled\":true"), "unpublish -> draft: {body}");
+    let body = tool_call(&client, &url, &key, "publish_page", json!({ "path": "blog/act-post" })).await;
+    assert!(body.contains("\"scheduled\":false"), "publish -> live: {body}");
+
+    let body = tool_call(&client, &url, &key, "feature_page", json!({ "path": "blog/act-post", "featured": true })).await;
+    assert!(body.contains("\"featured\":true"), "featured: {body}");
+    // Idempotent — a second featured=true stays true (not a toggle).
+    let body = tool_call(&client, &url, &key, "feature_page", json!({ "path": "blog/act-post", "featured": true })).await;
+    assert!(body.contains("\"featured\":true"), "idempotent set: {body}");
+    let body = tool_call(&client, &url, &key, "feature_page", json!({ "path": "blog/act-post", "featured": false })).await;
+    assert!(body.contains("\"featured\":false"), "unfeatured: {body}");
+}
+
+/// DI.7: the media-upload recipe hands the agent a ready-to-run curl for the out-of-band lane.
+#[tokio::test]
+async fn media_upload_recipe_gives_a_curl() {
+    let server = spawn_test_server().await.expect("test server");
+    let key = server
+        .seed_admin_api_key("mcp-recipe")
+        .await
+        .expect("admin key");
+    let client = reqwest::Client::new();
+    let body = tool_call(
+        &client,
+        &server.url("/mcp"),
+        &key,
+        "media_upload_recipe",
+        json!({}),
+    )
+    .await;
+    assert!(body.contains("/admin/media/upload"), "targets the upload endpoint: {body}");
+    assert!(body.contains("curl"), "it's a curl: {body}");
+}

@@ -34,6 +34,7 @@ use rmcp::{
         StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
     },
 };
+use sqlx::types::chrono::{DateTime, Utc};
 
 use crate::db::dao::content_pages::ContentPageDao;
 use crate::db::dao::media::MediaDao;
@@ -41,6 +42,7 @@ use crate::db::dao::roles::Role;
 use crate::web::app_state::AppState;
 use crate::web::features::pages::write::{self, PageUpdate, PageWriteError, WrittenPage};
 use crate::web::session::SessionData;
+use crate::web::util::category;
 
 /// The MCP handler. Holds `AppState` so tools can reach the pool / site_host /
 /// media store; a fresh one is built per session by the service factory.
@@ -244,6 +246,28 @@ pub struct DeleteResult {
     pub deleted: String,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct PagePathParam {
+    /// The page's tree path, e.g. "blog/my-post".
+    pub path: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct FeaturePageParams {
+    /// The page's tree path.
+    pub path: String,
+    /// true to pin on the home Featured band, false to unpin (idempotent).
+    pub featured: bool,
+}
+
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub struct MediaUploadRecipe {
+    /// A ready-to-run curl — fill in the file path; set $HIO_TOKEN to your API key.
+    pub curl: String,
+    /// What the response looks like + how to reference the uploaded media.
+    pub notes: String,
+}
+
 /// Fields a create/update tool can set, merged over the CURRENT page (a partial
 /// update) before the full-replace `write::update_page`.
 struct WriteFields {
@@ -309,6 +333,32 @@ async fn apply_page_update(
         .await
         .map_err(map_write_err)?;
     Ok(write_result(w))
+}
+
+/// Fetch the leaf page at `path` or a JSON-RPC not-found.
+async fn find_leaf(state: &AppState, path: &[&str]) -> Result<ContentPageDao, ErrorData> {
+    let chain = ContentPageDao::find_by_path(&state.pool, path)
+        .await
+        .map_err(internal)?;
+    chain
+        .last()
+        .cloned()
+        .ok_or_else(|| ErrorData::resource_not_found("page not found", None))
+}
+
+/// The page's current summary — re-fetched after an action mutation so the result
+/// reflects the new scheduled / featured state.
+async fn page_summary_at(state: &AppState, path: &[&str]) -> Result<PageSummary, ErrorData> {
+    let lp = find_leaf(state, path).await?;
+    Ok(PageSummary {
+        path: path.join("/"),
+        slug: lp.page_name.clone(),
+        title: lp.display_title(),
+        min_role: lp.min_role.clone(),
+        scheduled: lp.is_scheduled(),
+        featured: lp.is_featured(),
+        created: lp.page_creation_date.to_rfc3339(),
+    })
 }
 
 #[tool_router]
@@ -538,6 +588,78 @@ impl McpServer {
         }
         lp.delete(&self.state.pool).await.map_err(internal)?;
         Ok(Json(DeleteResult { deleted: segs.join("/") }))
+    }
+
+    #[tool(
+        description = "Publish a page NOW (set its post date to the current instant), taking it out of scheduled/draft state. Returns the page's updated status."
+    )]
+    async fn publish_page(
+        &self,
+        Parameters(PagePathParam { path }): Parameters<PagePathParam>,
+    ) -> Result<Json<PageSummary>, ErrorData> {
+        let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        let lp = find_leaf(&self.state, &segs).await?;
+        ContentPageDao::set_creation_date(&self.state.pool, lp.page_id, Utc::now())
+            .await
+            .map_err(internal)?;
+        Ok(Json(page_summary_at(&self.state, &segs).await?))
+    }
+
+    #[tool(
+        description = "Unpublish a page: move its post date far into the future so it becomes a hidden draft (Admin-only until re-published). Returns the page's updated status."
+    )]
+    async fn unpublish_page(
+        &self,
+        Parameters(PagePathParam { path }): Parameters<PagePathParam>,
+    ) -> Result<Json<PageSummary>, ErrorData> {
+        let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        let lp = find_leaf(&self.state, &segs).await?;
+        let sentinel: DateTime<Utc> = "2999-01-01T00:00:00Z"
+            .parse()
+            .map_err(|e| ErrorData::internal_error(format!("bad draft sentinel: {e}"), None))?;
+        ContentPageDao::set_creation_date(&self.state.pool, lp.page_id, sentinel)
+            .await
+            .map_err(internal)?;
+        Ok(Json(page_summary_at(&self.state, &segs).await?))
+    }
+
+    #[tool(
+        description = "Pin or unpin a page on the home page's Featured band (idempotent: featured=true pins, false unpins). Returns the page's updated status."
+    )]
+    async fn feature_page(
+        &self,
+        Parameters(FeaturePageParams { path, featured }): Parameters<FeaturePageParams>,
+    ) -> Result<Json<PageSummary>, ErrorData> {
+        let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        let lp = find_leaf(&self.state, &segs).await?;
+        if category::is_featured(lp.page_category.as_deref()) != featured {
+            let new_cat = category::toggle_featured(lp.page_category.as_deref());
+            ContentPageDao::set_category(&self.state.pool, lp.page_id, new_cat)
+                .await
+                .map_err(internal)?;
+        }
+        Ok(Json(page_summary_at(&self.state, &segs).await?))
+    }
+
+    #[tool(
+        description = "How to upload NEW media (images/video/files) out-of-band: returns a ready-to-run curl for POST /admin/media/upload with your API key. The MCP tools reference EXISTING media (list_media + cover_ref); this is the lane for adding new bytes. The response gives a media_ref to reference."
+    )]
+    async fn media_upload_recipe(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<Json<MediaUploadRecipe>, ErrorData> {
+        let host = crate::web::util::host::request_host(&parts.headers, &parts.uri);
+        let curl = format!(
+            "curl -X POST https://{host}/admin/media/upload \\\n  \
+             -H \"Authorization: Bearer $HIO_TOKEN\" \\\n  \
+             -F \"file=@/path/to/your-file\" \\\n  \
+             -F \"title=Optional title\" \\\n  \
+             -F \"min_role=Family\"   # optional gate; omit for public"
+        );
+        let notes = "Response JSON: {\"media_id\":.., \"media_ref\":\"<ref>\", \"markdown\":\"![](/media/<ref>)\"}. \
+             Reference <media_ref> via create_page/update_page cover_ref, or embed ![](/media/<ref>) in markdown."
+            .to_string();
+        Ok(Json(MediaUploadRecipe { curl, notes }))
     }
 }
 
