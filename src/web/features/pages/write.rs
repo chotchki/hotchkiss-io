@@ -5,6 +5,7 @@
 //! path and can't drift. Handlers keep only HTTP concerns (form extraction, the
 //! response); the typed outcome is `WrittenPage`.
 
+use serde::Serialize;
 use sqlx::SqlitePool;
 use sqlx::types::chrono::{DateTime, NaiveDateTime, Utc};
 
@@ -16,12 +17,7 @@ use crate::web::util::slug::slugify;
 /// The typed result of a page write — the entity the handlers used to DISCARD
 /// (they redirected/refreshed and dropped the DAO, so even the new slug had to be
 /// recomputed downstream). DI.3's responder renders this per client.
-// The handlers only read `pages_url()` (→ `path_segments`) today; the rest of the
-// fields are the content-plane payload the DI.3 responder + the DI.5/6 MCP tools
-// consume. Landing the full result type IS the DI.2 deliverable — the allow drops
-// off as those consumers arrive.
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct WrittenPage {
     pub page_id: i64,
     /// URL slug (`page_name`).

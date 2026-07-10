@@ -96,7 +96,7 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] DI.0 - Phase exit: MCP publishing + multi-frontend write responder, shipped + dogfooded
 - [x] DI.1 - rmcp spike + build-vs-buy gate (stateless streamable-http at /mcp; h2 host-validation)
 - [x] DI.2 - Extract PageWrite service → typed WrittenPage; refactor handlers (content plane)
-- [ ] DI.3 - Multi-frontend write responder: StateDirective + ClientKind (HTMX | native 303 | JSON)
+- [x] DI.3 - Multi-frontend write responder: StateDirective + ClientKind (HTMX | native 303 | JSON)
 - [ ] DI.4 - Mount /mcp nest + auth hardening (flat-403 require_admin, allowed_hosts, exclusions)
 - [ ] DI.5 - Read tools: list_pages, get_page, list_media
 - [ ] DI.6 - Write tools: create_page, update_page, delete_page (via PageWrite)

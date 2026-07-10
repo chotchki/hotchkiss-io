@@ -1008,6 +1008,7 @@ async fn only_admin_can_mutate_pages() {
         .unwrap();
     let resp = admin
         .put(server.url("/pages/Victim"))
+        .header("HX-Request", "true")
         .form(&[
             ("page_category", ""),
             ("page_markdown", "# edited by admin"),
@@ -1022,6 +1023,65 @@ async fn only_admin_can_mutate_pages() {
         "admin PUT should succeed, got {}",
         resp.status()
     );
+}
+
+/// DI.3: the page write routes content-negotiate off ONE handler — htmx gets the
+/// HX-* header (unchanged), a JSON client gets the `{directive, page}` envelope, a
+/// no-JS/native client gets a real 303. Same backend, three frontends.
+#[tokio::test]
+async fn write_route_content_negotiates_across_frontends() {
+    let server = spawn_test_server().await.expect("spawn");
+    server
+        .seed_content_page("NegPage", "# start")
+        .await
+        .expect("seed");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    let form = [
+        ("page_category", ""),
+        ("page_markdown", "# body"),
+        ("page_order", "0"),
+    ];
+
+    // htmx → HX-Refresh header, 200 (byte-identical to pre-DI.3).
+    let r = admin
+        .put(server.url("/pages/NegPage"))
+        .header("HX-Request", "true")
+        .form(&form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(r.headers().get("hx-refresh").unwrap(), "true");
+
+    // JSON → 200 + the {directive, page} envelope.
+    let r = admin
+        .put(server.url("/pages/NegPage"))
+        .header("Accept", "application/json")
+        .form(&form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(r.headers().get("content-type").unwrap(), "application/json");
+    let v: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(v["directive"]["type"], "refresh");
+    assert_eq!(v["page"]["slug"], "NegPage");
+
+    // Native (no htmx, no json) → a real 303 to the page (POST-redirect-GET).
+    let r = admin
+        .put(server.url("/pages/NegPage"))
+        .form(&form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers().get("location").unwrap(), "/pages/NegPage");
 }
 
 /// Phase BU: saving a page rewrites absolute same-site links to root-relative
@@ -1043,6 +1103,7 @@ async fn save_relativizes_same_site_links() {
         .unwrap();
     let resp = admin
         .put(server.url("/pages/RelTest"))
+        .header("HX-Request", "true")
         .form(&[
             ("page_category", ""),
             (
@@ -2879,7 +2940,7 @@ async fn editor_visibility_select_authors_the_gate() {
         let admin = &admin;
         let url = server.url("/pages/VisPage");
         async move {
-            let r = admin.put(url).form(&fields).send().await.unwrap();
+            let r = admin.put(url).header("HX-Request", "true").form(&fields).send().await.unwrap();
             assert!(r.status().is_success(), "PUT should succeed: {}", r.status());
         }
     };
@@ -2945,6 +3006,7 @@ async fn new_child_inherits_the_parent_gate() {
     admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
     let r = admin
         .post(server.url("/pages/GatedTree"))
+        .header("HX-Request", "true")
         .form(&[("page_title", "Secret Child")])
         .send()
         .await
@@ -2987,6 +3049,7 @@ async fn admin_can_backdate_a_page() {
     let put = |date: &str| {
         admin
             .put(server.url("/pages/old-post"))
+            .header("HX-Request", "true")
             .form(&[
                 ("page_title", "Old Post"),
                 ("page_category", ""),
@@ -3190,6 +3253,7 @@ async fn setting_a_cover_accepts_the_copyable_media_forms() {
     let put = |cover: &str| {
         admin
             .put(server.url("/pages/projects/skylander"))
+            .header("HX-Request", "true")
             .form(&[
                 ("page_title", "Skylander"),
                 ("page_category", ""),

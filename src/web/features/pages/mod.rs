@@ -1,11 +1,11 @@
-use crate::web::htmx_responses::htmx_redirect;
 use crate::web::util::deserialize::empty_string_as_none;
 use crate::{
     db::dao::content_pages::ContentPageDao,
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
-        html_template::HtmlTemplate, htmx_responses::htmx_refresh,
+        html_template::HtmlTemplate,
         markdown::{render_cache::cached_transform, title::strip_leading_h1},
+        responder::{ClientKind, WriteOutcome},
         session::SessionData,
     },
 };
@@ -207,6 +207,7 @@ pub async fn get_page_path(
 pub async fn delete_page_path(
     State(state): State<AppState>,
     Path(page_path): Path<String>,
+    client: ClientKind,
 ) -> Result<Response, AppError> {
     let page_names: Vec<&str> = page_path.split("/").collect();
     let pages_path = ContentPageDao::find_by_path(&state.pool, &page_names).await?;
@@ -221,16 +222,14 @@ pub async fn delete_page_path(
 
             lp.delete(&state.pool).await?;
 
-            //Since the page is gone we can only send you to the parent page
+            // The page is gone → send the client to the parent (or the index).
             let (_, parent_paths) = page_names.split_last().unwrap();
-            if !parent_paths.is_empty() {
-                Ok(htmx_redirect(&format!(
-                    "/pages/{}",
-                    parent_paths.join("/")
-                ))?)
+            let target = if !parent_paths.is_empty() {
+                format!("/pages/{}", parent_paths.join("/"))
             } else {
-                Ok(htmx_redirect("/pages")?)
-            }
+                "/pages".to_string()
+            };
+            Ok(WriteOutcome::navigate(target, None).into_response(client))
         }
         None => Ok((StatusCode::NOT_FOUND, "No such page").into_response()),
     }
@@ -262,6 +261,7 @@ pub struct PutPageForm {
 pub async fn put_page_path(
     State(state): State<AppState>,
     Path(page_path): Path<String>,
+    client: ClientKind,
     Form(put_page_form): Form<PutPageForm>,
 ) -> Result<Response, AppError> {
     let page_names: Vec<&str> = page_path.split("/").collect();
@@ -275,7 +275,7 @@ pub async fn put_page_path(
         cover_ref: put_page_form.page_cover_media_ref,
     };
     match update_page(&state.pool, &state.site_host, &page_names, input).await {
-        Ok(_) => Ok(htmx_refresh()),
+        Ok(w) => Ok(WriteOutcome::refresh(Some(w)).into_response(client)),
         Err(PageWriteError::NotFound) => Ok((StatusCode::NOT_FOUND, "No such page").into_response()),
         Err(PageWriteError::Internal(e)) => Err(e.into()),
         // update_page never slugs a title, so EmptyTitle can't occur here.
@@ -294,31 +294,38 @@ pub struct PostPageForm {
 
 pub async fn post_top_level_page_path(
     State(state): State<AppState>,
+    client: ClientKind,
     Form(post_page_form): Form<PostPageForm>,
 ) -> Result<Response, AppError> {
-    create_and_redirect(&state, &[], &post_page_form.page_title).await
+    create_and_redirect(&state, &[], &post_page_form.page_title, client).await
 }
 
 pub async fn post_page_path(
     State(state): State<AppState>,
     Path(page_path): Path<String>,
+    client: ClientKind,
     Form(post_page_form): Form<PostPageForm>,
 ) -> Result<Response, AppError> {
     let page_names: Vec<&str> = page_path.split("/").collect();
-    create_and_redirect(&state, &page_names, &post_page_form.page_title).await
+    create_and_redirect(&state, &page_names, &post_page_form.page_title, client).await
 }
 
 /// Create a child (or top-level, EMPTY `parent_path`) page from a title, then land
 /// the author on it in edit mode — the shared body of both create handlers. All
 /// the domain work (slug derivation, the empty-title guard, inherit-on-create)
-/// lives in `create_page`; this just maps the outcome to an HTMX response.
+/// lives in `create_page`; the outcome renders per `ClientKind` (htmx redirect /
+/// native 303 / JSON).
 async fn create_and_redirect(
     state: &AppState,
     parent_path: &[&str],
     title: &str,
+    client: ClientKind,
 ) -> Result<Response, AppError> {
     match create_page(&state.pool, parent_path, title).await {
-        Ok(w) => Ok(htmx_redirect(&format!("{}?edit=1", w.pages_url()))?),
+        Ok(w) => {
+            let target = format!("{}?edit=1", w.pages_url());
+            Ok(WriteOutcome::navigate(target, Some(w)).into_response(client))
+        }
         Err(PageWriteError::EmptyTitle) => Ok((
             StatusCode::BAD_REQUEST,
             "Title must contain letters or numbers",
