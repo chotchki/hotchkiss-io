@@ -1,15 +1,11 @@
 use crate::web::htmx_responses::htmx_redirect;
 use crate::web::util::deserialize::empty_string_as_none;
-use sqlx::types::chrono::{DateTime, NaiveDateTime, Utc};
-use crate::web::util::slug::slugify;
 use crate::{
     db::dao::content_pages::ContentPageDao,
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
         html_template::HtmlTemplate, htmx_responses::htmx_refresh,
-        markdown::{
-            links::rewrite_site_links, render_cache::cached_transform, title::strip_leading_h1,
-        },
+        markdown::{render_cache::cached_transform, title::strip_leading_h1},
         session::SessionData,
     },
 };
@@ -29,6 +25,9 @@ use super::{not_found, top_bar::TopBar};
 
 pub mod preview;
 pub mod projects;
+pub mod write;
+
+use write::{PageUpdate, PageWriteError, create_page, update_page};
 
 pub fn pages_router() -> Router<AppState> {
     Router::new()
@@ -260,77 +259,29 @@ pub struct PutPageForm {
     pub min_role: Option<String>,
 }
 
-/// Parse a `datetime-local` form value as a UTC instant. The input carries no
-/// timezone, so we store it as UTC verbatim (exact tz is irrelevant for backdating
-/// an old post). `None` on a bad/empty value → a save with no override keeps the
-/// existing date.
-fn parse_local_datetime(s: &str) -> Option<DateTime<Utc>> {
-    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
-        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M"))
-        .ok()
-        .map(|naive| naive.and_utc())
-}
-
 pub async fn put_page_path(
     State(state): State<AppState>,
     Path(page_path): Path<String>,
     Form(put_page_form): Form<PutPageForm>,
 ) -> Result<Response, AppError> {
-    // The cover is a media ref (BZ.8). The field tolerates every copyable shape
-    // (`![](/media/<ref>)`, `/media/file/<url_key>`, a bare ref) — see
-    // `resolve_cover_media_id`. Three outcomes:
-    //   empty field       → clear the cover
-    //   resolves          → set it
-    //   non-empty, no hit  → leave the cover ALONE (a typo must not wipe an
-    //                        existing cover — was the silent data-loss footgun).
-    let cover_update: Option<Option<i64>> = match &put_page_form.page_cover_media_ref {
-        None => Some(None),
-        // Some(id) → set it; None (unresolvable) → skip, preserving the existing cover.
-        Some(raw) => crate::web::features::media::resolve_cover_media_id(&state.pool, raw)
-            .await
-            .map(Some),
-    };
-
     let page_names: Vec<&str> = page_path.split("/").collect();
-    let pages_path = ContentPageDao::find_by_path(&state.pool, &page_names).await?;
-
-    match pages_path.to_owned().last() {
-        Some(lp) => {
-            let mut lp = lp.to_owned();
-            lp.page_title = put_page_form.page_title;
-            lp.page_category = put_page_form.page_category;
-            lp.page_markdown = rewrite_site_links(&put_page_form.page_markdown, &state.site_host)?;
-            lp.page_order = put_page_form.page_order;
-            // Optional backdating: only override the post date when a valid value
-            // is supplied; otherwise keep the existing one.
-            if let Some(dt) = put_page_form
-                .page_creation_date
-                .as_deref()
-                .and_then(parse_local_datetime)
-            {
-                lp.page_creation_date = dt;
-            }
-            // Visibility (DB.1): explicit values only; absent/unrecognized
-            // keeps the existing gate. `update()` stamps page_modified_date,
-            // so a visibility flip busts the feed/sitemap validators.
-            match put_page_form.min_role.as_deref() {
-                Some("Public") => lp.min_role = None,
-                Some(v @ ("Registered" | "Family" | "Admin")) => lp.min_role = Some(v.to_string()),
-                _ => {}
-            }
-            lp.update(&state.pool).await?;
-
-            // Cover lives in a separate column (`page_cover_media_id`) that
-            // `update()` doesn't touch; set_cover stamps `page_modified_date` too
-            // so a cover change keeps the feed/sitemap validators fresh. Skip it
-            // entirely on an unresolvable ref so the existing cover is preserved.
-            if let Some(cover_media_id) = cover_update {
-                ContentPageDao::set_cover(&state.pool, lp.page_id, cover_media_id).await?;
-            }
-
-            Ok(htmx_refresh())
+    let input = PageUpdate {
+        title: put_page_form.page_title,
+        category: put_page_form.page_category,
+        markdown: put_page_form.page_markdown,
+        order: put_page_form.page_order,
+        creation_date: put_page_form.page_creation_date,
+        min_role: put_page_form.min_role,
+        cover_ref: put_page_form.page_cover_media_ref,
+    };
+    match update_page(&state.pool, &state.site_host, &page_names, input).await {
+        Ok(_) => Ok(htmx_refresh()),
+        Err(PageWriteError::NotFound) => Ok((StatusCode::NOT_FOUND, "No such page").into_response()),
+        Err(PageWriteError::Internal(e)) => Err(e.into()),
+        // update_page never slugs a title, so EmptyTitle can't occur here.
+        Err(PageWriteError::EmptyTitle) => {
+            Err(anyhow::anyhow!("update_page returned an unexpected EmptyTitle").into())
         }
-        None => Ok((StatusCode::NOT_FOUND, "No such page").into_response()),
     }
 }
 
@@ -345,25 +296,7 @@ pub async fn post_top_level_page_path(
     State(state): State<AppState>,
     Form(post_page_form): Form<PostPageForm>,
 ) -> Result<Response, AppError> {
-    let title = post_page_form.page_title.trim().to_string();
-    let slug = slugify(&title);
-    if slug.is_empty() {
-        return Ok(
-            (StatusCode::BAD_REQUEST, "Title must contain letters or numbers").into_response(),
-        );
-    }
-
-    let mut cp =
-        ContentPageDao::create(&state.pool, None, slug.clone(), None, String::new(), None).await?;
-    cp.page_title = Some(title);
-    // Top-level pages are born PUBLIC — no parent to inherit a gate from.
-    // Explicit (create() already returns None) so the invariant survives a
-    // future create() change.
-    cp.min_role = None;
-    cp.update(&state.pool).await?;
-
-    // Land the author on the new page in edit mode, not back on the list.
-    Ok(htmx_redirect(&format!("/pages/{slug}?edit=1"))?)
+    create_and_redirect(&state, &[], &post_page_form.page_title).await
 }
 
 pub async fn post_page_path(
@@ -372,40 +305,28 @@ pub async fn post_page_path(
     Form(post_page_form): Form<PostPageForm>,
 ) -> Result<Response, AppError> {
     let page_names: Vec<&str> = page_path.split("/").collect();
+    create_and_redirect(&state, &page_names, &post_page_form.page_title).await
+}
 
-    let title = post_page_form.page_title.trim().to_string();
-    let slug = slugify(&title);
-    if slug.is_empty() {
-        return Ok(
-            (StatusCode::BAD_REQUEST, "Title must contain letters or numbers").into_response(),
-        );
-    }
-
-    let parent_pages = ContentPageDao::find_by_path(&state.pool, &page_names).await?;
-    match parent_pages.last() {
-        Some(lp) => {
-            let mut cp = ContentPageDao::create(
-                &state.pool,
-                Some(lp.page_id),
-                slug.clone(),
-                None,
-                String::new(),
-                None,
-            )
-            .await?;
-            cp.page_title = Some(title);
-            // Inherit-on-create (DB.3): a new child defaults to its parent's
-            // gate. Belt AND suspenders — the ancestor scan already hides the
-            // subtree, and this stamp additionally covers children born AFTER
-            // the gate on any future listing surface that queries child rows
-            // directly. Children created BEFORE a parent was gated keep their
-            // own min_role (deliberate: the ancestor scan is the enforcement;
-            // there is no retroactive downward propagation).
-            cp.min_role = lp.min_role.clone();
-            cp.update(&state.pool).await?;
-
-            Ok(htmx_redirect(&format!("/pages/{page_path}/{slug}?edit=1"))?)
+/// Create a child (or top-level, EMPTY `parent_path`) page from a title, then land
+/// the author on it in edit mode — the shared body of both create handlers. All
+/// the domain work (slug derivation, the empty-title guard, inherit-on-create)
+/// lives in `create_page`; this just maps the outcome to an HTMX response.
+async fn create_and_redirect(
+    state: &AppState,
+    parent_path: &[&str],
+    title: &str,
+) -> Result<Response, AppError> {
+    match create_page(&state.pool, parent_path, title).await {
+        Ok(w) => Ok(htmx_redirect(&format!("{}?edit=1", w.pages_url()))?),
+        Err(PageWriteError::EmptyTitle) => Ok((
+            StatusCode::BAD_REQUEST,
+            "Title must contain letters or numbers",
+        )
+            .into_response()),
+        Err(PageWriteError::NotFound) => {
+            Ok((StatusCode::NOT_FOUND, "No such parent page").into_response())
         }
-        None => Ok((StatusCode::NOT_FOUND, "No such parent page").into_response()),
+        Err(PageWriteError::Internal(e)) => Err(e.into()),
     }
 }
