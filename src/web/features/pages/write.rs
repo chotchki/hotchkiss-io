@@ -13,7 +13,7 @@ use crate::db::dao::content_pages::ContentPageDao;
 use crate::db::dao::roles::MinRole;
 use crate::web::features::media::resolve_cover_media_id;
 use crate::web::markdown::links::rewrite_site_links;
-use crate::web::util::slug::slugify;
+use crate::web::util::slug::Slug;
 
 /// The typed result of a page write — the entity the handlers used to DISCARD
 /// (they redirected/refreshed and dropped the DAO, so even the new slug had to be
@@ -83,10 +83,7 @@ pub async fn create_page(
     title: &str,
 ) -> Result<WrittenPage, PageWriteError> {
     let title = title.trim().to_string();
-    let slug = slugify(&title);
-    if slug.is_empty() {
-        return Err(PageWriteError::EmptyTitle);
-    }
+    let slug = Slug::new(&title).ok_or(PageWriteError::EmptyTitle)?;
 
     let (parent_id, inherited_min_role, mut segments) = if parent_path.is_empty() {
         (None, None, Vec::new())
@@ -102,14 +99,15 @@ pub async fn create_page(
         )
     };
 
-    let mut cp = ContentPageDao::create(pool, parent_id, slug.clone(), None, String::new(), None)
-        .await
-        .map_err(PageWriteError::Internal)?;
+    let mut cp =
+        ContentPageDao::create(pool, parent_id, slug.as_str().to_string(), None, String::new(), None)
+            .await
+            .map_err(PageWriteError::Internal)?;
     cp.page_title = Some(title);
     cp.min_role = inherited_min_role;
     cp.update(pool).await.map_err(PageWriteError::Internal)?;
 
-    segments.push(slug);
+    segments.push(slug.into_string());
     Ok(WrittenPage::from_dao(&cp, segments))
 }
 

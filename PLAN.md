@@ -108,7 +108,7 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] DJ.0 - Phase exit: content-model domain values are newtypes (MinRole/ids/Slug/MediaRef/PagePath) threaded through DAOs + PageWrite + MCP + web; duplicated min_role decode centralized; tests green
 - [x] DJ.1 - MinRole/Visibility (Option<Role>) — one fail-closed decode + one SQL CASE replacing the duplicated min_role_rank in content_pages + media; thread through PageUpdate + MCP + PutPageForm
 - [ ] DJ.2 - PageId / MediaId (i64 newtypes) through the DAOs + call sites
-- [ ] DJ.3 - Slug (validated page_name; slugify returns it) + PagePath (find_by_path takes it)
+- [x] DJ.3 - Slug (validated page_name; slugify returns it) + PagePath (find_by_path takes it)
 - [ ] DJ.4 - MediaRef / UrlKey newtypes reconciled with the existing MediaReference enum (one parse path)
 - [ ] DJ.5 - Retype the MCP tool structs + the web PutPageForm boundaries onto the newtypes (serde-transparent + validating deserialize)
 - [ ] DJ.6 - Tests + CLAUDE.md + design-doc delta

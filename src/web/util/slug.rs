@@ -20,6 +20,35 @@ pub fn slugify(input: &str) -> String {
     out
 }
 
+/// A validated URL slug — non-empty BY CONSTRUCTION (built from a title via
+/// `slugify`). A `Slug` in a signature means the empty-slug check already happened:
+/// there's no `""` slug value to guard against downstream, because the empty-title
+/// guard IS `Slug::new` returning `None`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Slug(String);
+
+impl Slug {
+    /// Slugify a title; `None` if it collapses to empty (no alphanumerics).
+    pub fn new(title: &str) -> Option<Slug> {
+        let s = slugify(title);
+        (!s.is_empty()).then_some(Slug(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl std::fmt::Display for Slug {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -37,5 +66,15 @@ mod tests {
         assert_eq!(slugify("--Edge--"), "edge");
         assert_eq!(slugify(""), "");
         assert_eq!(slugify("!!!"), "");
+    }
+
+    #[test]
+    fn slug_new_validates_non_empty() {
+        assert_eq!(Slug::new("Hello World").unwrap().as_str(), "hello-world");
+        assert!(Slug::new("").is_none());
+        assert!(
+            Slug::new("!!!").is_none(),
+            "a title with no alphanumerics has no slug"
+        );
     }
 }
