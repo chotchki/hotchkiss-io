@@ -7,6 +7,7 @@ pub mod home;
 pub mod library;
 pub mod listing;
 pub mod login;
+pub mod mcp;
 pub mod media;
 pub mod not_found;
 pub mod pages;

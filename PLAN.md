@@ -92,6 +92,17 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] DG.3 - Up-next affordance: on page open, highlight/scroll to the last-listened volume (per-ref saved positions decide it)
 - [ ] DG.4 - Tests + CLAUDE.md delta + real-phone validation: screen-off auto-advance, lock-screen volume skip, series authoring convention documented
 - [x] DG.5 - Audio embed: cover-art + title header replaces the download button
+## Phase DI - MCP publishing + multi-frontend responder
+- [ ] DI.0 - Phase exit: MCP publishing + multi-frontend write responder, shipped + dogfooded
+- [x] DI.1 - rmcp spike + build-vs-buy gate (stateless streamable-http at /mcp; h2 host-validation)
+- [ ] DI.2 - Extract PageWrite service → typed WrittenPage; refactor handlers (content plane)
+- [ ] DI.3 - Multi-frontend write responder: StateDirective + ClientKind (HTMX | native 303 | JSON)
+- [ ] DI.4 - Mount /mcp nest + auth hardening (flat-403 require_admin, allowed_hosts, exclusions)
+- [ ] DI.5 - Read tools: list_pages, get_page, list_media
+- [ ] DI.6 - Write tools: create_page, update_page, delete_page (via PageWrite)
+- [ ] DI.7 - Action tools + media lane: publish/unpublish/feature_page, media_upload_recipe
+- [ ] DI.8 - Tests: PageWrite + directive renders (unit); /mcp JSON-RPC + Accept-negotiation + auth (integration)
+- [ ] DI.9 - Docs (CLAUDE.md delta) + deploy beta + dogfood from Claude Code
 
 ## Backlog (not yet phased)
 

@@ -61,6 +61,9 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
     let refresh_state = app_state.clone();
     // Greylist enforcement (Phase CX) needs the challenge key + the active-set snapshot.
     let greylist_state = app_state.clone();
+    // MCP publishing server (Phase DI, spike): the streamable-http service needs the
+    // state at construction; clone before app_state is moved into `.with_state`.
+    let mcp_state = app_state.clone();
     let router = Router::new()
         .route("/", get(show_home))
         .nest("/login", login_router())
@@ -75,6 +78,14 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
         .nest("/admin", admin_router())
         // Public media (Phase BZ): byte serve route + the embed swap target.
         .nest("/media", crate::web::features::media::media_router())
+        // MCP publishing server (Phase DI, spike): rmcp streamable-http tower Service,
+        // stateless + JSON. Auth rides the global stack — api_key_auth injects an
+        // Admin identity from a `hio_…` Bearer key and require_admin_for_mutations
+        // gates the POST. See docs/mcp-publishing-design.md.
+        .nest_service(
+            "/mcp",
+            crate::web::features::mcp::mcp_service(mcp_state),
+        )
         // Greylist bot-toll challenge (Phase CX): the interstitial + its endpoints.
         // Public GETs; the enforcement middleware exempts /challenge/* so a greylisted
         // client can actually reach the toll to solve it.
