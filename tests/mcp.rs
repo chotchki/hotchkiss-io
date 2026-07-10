@@ -144,6 +144,32 @@ async fn mcp_rejects_unauthenticated_post() {
     );
 }
 
+/// A valid but NON-admin API key can't reach a tool call — the one global authz
+/// path (require_admin_for_mutations) gates every POST to Admin, so a Registered
+/// key resolves to a Registered identity and 403s. Mutations get permission checks.
+#[tokio::test]
+async fn mcp_rejects_a_non_admin_key() {
+    let server = spawn_test_server().await.expect("test server");
+    let key = server
+        .seed_registered_api_key("mcp-registered")
+        .await
+        .expect("registered key");
+    let client = reqwest::Client::new();
+
+    let resp = post_mcp(
+        &client,
+        &server.url("/mcp"),
+        Some(&key),
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+    )
+    .await;
+    assert_eq!(
+        resp.status(),
+        403,
+        "a valid non-admin key must be gated by require_admin_for_mutations"
+    );
+}
+
 /// DI.5: the read tools apply the caller's visibility gate via the shared
 /// `is_visible_to`. An Admin viewer is gate-exempt, so it SEES a Family-gated page —
 /// which also proves the `api_key_auth`-injected identity carries through rmcp into

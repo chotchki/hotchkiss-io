@@ -68,6 +68,22 @@ impl TestServer {
         Ok(key)
     }
 
+    /// Seed a NON-admin (Registered) user and mint its API key; returns the plaintext.
+    /// Bootstraps a throwaway admin first so this user isn't auto-promoted (the first
+    /// user → Admin). For asserting an admin-gated route rejects a valid non-admin key.
+    pub async fn seed_registered_api_key(&self, label: &str) -> Result<String> {
+        self.seed_admin_api_key("bootstrap-admin").await?; // take the first-user-Admin slot
+        let mut user = UserDao {
+            display_name: "registered-tester".to_string(),
+            id: Uuid::now_v7(),
+            keys: sqlx::types::Json(vec![]),
+            role: Role::Registered,
+        };
+        user.create(&self.pool).await?; // second user → stays Registered
+        let (key, _) = ApiKeyDao::create(&self.pool, &user.id, label).await?;
+        Ok(key)
+    }
+
     /// Seed a top-level content page. Returns the created page so the caller can
     /// use its id. (A fresh migrated DB already has the seeded `login`/`projects`
     /// special pages, so `/` redirects even before this is called.)

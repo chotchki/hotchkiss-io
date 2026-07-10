@@ -101,7 +101,7 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [x] DI.5 - Read tools: list_pages, get_page, list_media
 - [x] DI.6 - Write tools: create_page, update_page, delete_page (via PageWrite)
 - [x] DI.7 - Action tools + media lane: publish/unpublish/feature_page, media_upload_recipe
-- [ ] DI.8 - Tests: PageWrite + directive renders (unit); /mcp JSON-RPC + Accept-negotiation + auth (integration)
+- [x] DI.8 - Tests: PageWrite + directive renders (unit); /mcp JSON-RPC + Accept-negotiation + auth (integration)
 - [ ] DI.9 - Docs (CLAUDE.md delta) + deploy beta + dogfood from Claude Code
 ## Phase DJ - Newtype pass across the content model
 - [ ] DJ.0 - Phase exit: content-model domain values are newtypes (MinRole/ids/Slug/MediaRef/PagePath) threaded through DAOs + PageWrite + MCP + web; duplicated min_role decode centralized; tests green
