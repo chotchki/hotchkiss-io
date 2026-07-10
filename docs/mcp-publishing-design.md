@@ -27,25 +27,20 @@ direction: down
 client: "Claude Code\n(Bearer hio_… key)" {shape: oval}
 
 stack: Global ServiceBuilder stack {
-  log: "request_log\n(/mcp EXCLUDED)" {shape: rectangle}
+  log: "request_log\n(/mcp LOGGED + greylisted)" {shape: rectangle}
   apikey: "api_key_auth\ninjects Authenticated(Admin)" {shape: rectangle}
-  authz: "require_admin_for_mutations\n(POST needs Admin → passes)" {shape: rectangle}
+  authz: "require_admin_for_mutations\n(POST → Admin; GET public → 405)" {shape: rectangle}
   log -> apikey -> authz
 }
 
-nest: "/mcp nest" {
-  guard: "require_admin guard\n(covers GET too;\nflat 403 on miss)" {shape: rectangle}
-  svc: "rmcp StreamableHttpService\nstateless + json_response" {shape: rectangle}
-  guard -> svc
-}
-
+svc: "/mcp: rmcp StreamableHttpService\nstateless + json_response" {shape: rectangle}
 pagewrite: "PageWrite service\n(slug · link-rewrite · date · cover ·\nmin_role decode · two-write)" {shape: rectangle}
 dao: "ContentPageDao / MediaDao" {shape: rectangle}
 
 client -> stack.log
-stack.authz -> nest.guard
-nest.svc -> pagewrite: "write tools"
-nest.svc -> dao: "read tools"
+stack.authz -> svc: "Admin-only\nPOST tool calls"
+svc -> pagewrite: "write tools"
+svc -> dao: "read tools\n(is_visible_to)"
 pagewrite -> dao
 ```
 
@@ -54,9 +49,9 @@ pagewrite -> dao
 - **Crate: `rmcp` 2.2** (the official `modelcontextprotocol/rust-sdk`), features `server` + `macros` + `transport-streamable-http-server`, plus `schemars = "1.0"` for tool input schemas. It targets **axum ^0.8** — we're already on axum 0.8.1, so it drops in with no version bridge. Tools are declared with the `#[tool_router]` / `#[tool(description=…)]` / `#[tool_handler]` macros; each tool's input schema is auto-derived from a `#[derive(Deserialize, JsonSchema)]` request struct wrapped in `Parameters<T>`.
 - **`StreamableHttpService` is a tower `Service`**, so it mounts as `Router::new().nest_service("/mcp", service)` merged into `create_router`'s composition — same shape as every other nest. Because the whole composed router is wrapped by the global `ServiceBuilder` AFTER composition, `/mcp` inherits the full stack (request-log, catch-panic, trace, session, api_key_auth, refresh_session_role, greylist, authz, compression) with no per-route wiring.
 - **Run it STATELESS with `json_response: true` — both set EXPLICITLY.** The DI.1 spike found the defaults are the OPPOSITE of what the early (blog-derived) research claimed: `StreamableHttpServerConfig::default()` is `stateful_mode: true` / `json_response: false`, so we call `.with_stateful_mode(false).with_json_response(true)` (the config is `#[non_exhaustive]` — builder methods, not a struct literal). Stateless means no `Mcp-Session-Id` bookkeeping and every POST self-contained — rmcp synthesizes the init context per request (`peer_info_for_stateless_request`), so a bare `tools/call` needs NO prior `initialize` handshake — exactly right for one operator. `json_response: true` makes tool calls come back as a single JSON body instead of an SSE frame — load-bearing: we NEVER open a `text/event-stream`, sidestepping the CompressionLayer-buffers-SSE footgun entirely. We give up server→client push (progress, `tools/list_changed`, elicitation) — none of which a "publish my post" tool needs. `LocalSessionManager::default()` is still passed as the manager arg; it's inert in stateless mode.
-- **Host validation: OWN it via `request_host`, disable rmcp's (spike-resolved).** rmcp bakes in the spec's DNS-rebinding Host/Origin validation, defaulting `allowed_hosts` to LOOPBACK ONLY (a `Host: hotchkiss.io` request is rejected out of the box). The h2 question that gated DI.1 — does it read the `:authority` or only the `Host` header (this site serves HTTP/2, where there is NO `Host` header, which is why `web/util/host::request_host` exists) — the spike answered from rmcp's source: `parse_host_header` DOES fall back to `uri.authority()` when `Host` is absent, and its own comment names `axum::Router::nest` dropping the synthesized `Host` as the exact reason. So rmcp is already h2-correct. But the single-source posture is cleaner: `disable_allowed_hosts()` (an empty list = allow-all in rmcp) and enforce the host in OUR `/mcp` guard via `request_host` — the h2-`:authority`-correct helper the sitemap/feed/robots already trust — allowing `site_host` (+ beta). ONE host-validation implementation, not two. (The spike currently `disable_allowed_hosts()` with no guard yet; DI.4 adds the `request_host` check.)
-- **The `/mcp` nest carries its own `require_admin` guard.** The global `require_admin_for_mutations` gates POST (and passes it for an Admin key — confirmed: api_key_auth runs OUTER, injects `Authenticated(Admin)`, the authz layer's `is_admin()` fallback passes with no allowlist entry) but leaves GET PUBLIC site-wide. rmcp's transport uses GET for the SSE channel; in stateless+json_response that GET does nothing useful, but defense-in-depth says gate it. A small nest-level `require_admin` covers GET+POST uniformly and — critically — returns a FLAT 403 (see § One auth path), unlike the `/admin` nest's HTML-redirecting guard which would confuse a machine client.
-- **`/mcp` is EXCLUDED from `request_log`.** It's machine traffic — an agent running `tools/call` in a loop would pollute the access log and the analytics Humans/Bots signal, same reasoning that already excludes `/admin/analytics`, `/media/file`, and `/challenge`. One line in the log-middleware exclusion set.
+- **Host validation: DISABLED — the Bearer-Admin gate IS the boundary (DI.4 decision).** rmcp's `allowed_hosts` (default loopback) exists to block DNS-REBINDING: a malicious web page making a BROWSER hit a local server with the victim's AMBIENT credentials (cookies). `/mcp` has NO ambient auth — it's reached by a non-browser client (Claude Code) carrying an explicit `Authorization: Bearer hio_…` header an attacker's page can neither forge nor replay from a victim's browser. So DNS rebinding doesn't apply, and host validation would defend nothing the Admin-key gate doesn't already. We `disable_allowed_hosts()` and let the auth gate BE the boundary — which also sidesteps the h2-`:authority`-survives-`nest` question entirely (moot when the check is off). (rmcp IS h2-correct if we ever want the check back — the DI.1 spike confirmed `parse_host_header` falls back to `uri.authority()` when the `Host` header is absent, the exact `axum::nest`-drops-the-synthesized-`Host` case `request_host` was built for.)
+- **No `/mcp` auth guard — the global authz layer is the ONE path (chris's rule).** `require_admin_for_mutations` already gates every POST (and all tool calls are POSTs) to Admin regardless of client — api_key_auth runs OUTER, injects `Authenticated(Admin)`, the authz layer's `is_admin()` fallback passes with no allowlist entry; a non-Admin/no-key POST gets its flat 403 (no `WWW-Authenticate` → Claude Code clean-fails). A bespoke nest guard would just duplicate that. GET `/mcp` stays public at the global layer but harmless (stateless rmcp → 405, no SSE channel). See § Tool authorization.
+- **`/mcp` is LOGGED + greylisted (a public attack surface).** It is NOT excluded from `request_log` and NOT in the greylist exempt-prefixes: chris wants `/mcp` abuse VISIBLE in the log + feeding the detection sweep (an IP probing `/mcp` can earn a greylist), and a greylisted unauthenticated IP hitting `/mcp` gets the 429 toll (a valid Admin key bypasses — the enforcement waves through any authenticated identity). Legit agent traffic is authenticated + low-volume (discrete tool calls, not media streaming), so it doesn't swamp the Humans/Bots signal.
 
 ## One auth path — reuse `api_key_auth`, don't invent a second token
 
@@ -132,6 +127,15 @@ Read tools so the agent can see before it writes, write tools that mirror the ed
 
 The visibility / schedule / cover / featured controls are BOTH fields on `update_page` (the canonical PUT) and discrete action tools — deliberately, because the editor works the same way (the PUT form AND the buttons both exist). A single general `create_page`/`update_page` pair keeps the surface small; if an agent fumbles `parent_path` in practice, dedicated `create_blog_post` / `create_project` convenience wrappers are a trivial add (they'd just pin the parent).
 
+## Tool authorization — the tools go THROUGH the site's gates, not around them
+
+Ratified requirement (chris): the MCP tools must OBEY the site's auth model, never bypass it. Three rules, and they mirror the web app one-for-one.
+
+- **ONE authz path gates it — the global `require_admin_for_mutations`.** No bespoke `/mcp` guard (chris's rule: auth is client-agnostic, one path). Every MCP tool call — initialize / tools/list / tools/call, read AND write — is a POST, and the global layer requires an Admin for every non-safe method, so a non-Admin key or no key gets that layer's flat 403 (no `WWW-Authenticate` → Claude Code clean-fails, no OAuth chase). `GET /mcp` is public at that layer but HARMLESS: stateless rmcp answers a GET with 405 (it offers no SSE channel), exposing nothing — not a tool list, not data (tools/list is a POST). The single global layer covers every meaningful operation; the DI.3 responder's `ClientKind` branches are RESPONSE rendering, never auth.
+- **Reads honor the visibility gates.** `list_pages`/`get_page`/`list_media` derive the caller's role from the authenticated identity (the `api_key_auth`-injected `SessionData`, read from rmcp's request `Parts`) and apply the SAME `is_visible_to(viewer)` / media `min_role` gate the web read paths use — never a raw `SELECT *`. Because `/mcp` is Admin-gated the viewer is Admin today, so the agent sees scheduled + gated content exactly as the admin web view does; but the gate is applied BY CONSTRUCTION, so relaxing `/mcp` to a lower tier later (a Family member's agent reading their own library) just works — the reads already filter correctly. A fail-closed default (missing identity → `Anonymous`) means a wiring slip HIDES content, never leaks it.
+- **Mutations require the permission.** Every write tool sits behind that Admin gate — a non-Admin can't reach one, matching the web editor (Admin-only). No per-handler authz is skipped; the write tools call the same `PageWrite` service the editor does, so the min_role decode / cover / link-rewrite policy is identical.
+- **The agent can DEFINE gates.** `create_page`/`update_page` take a `min_role` arg (`Public`/`Registered`/`Family`/`Admin`) that flows through `PageWrite`'s fail-closed decode (unknown → KEEP, never loosen), so the agent can publish gated content — an Admin-only draft, a Family-only library page. Media gating (`media.min_role`, Phase DC) is set at UPLOAD; the reference-only media tools SURFACE an item's gate but don't change it (that stays the web `/admin/media/{id}/visibility` control until a media-management tool is added).
+
 ## Media — two lanes, neither is binary-over-MCP
 
 Media stays reference-first because binary transport over MCP is a bad fit (structured JSON args → base64 inflates ~33% and buffers the whole file in the JSON-RPC message, defeating the streaming upload path that exists precisely so multi-GB media is disk-bound not RAM-bound).
@@ -165,10 +169,10 @@ The prod→beta snapshot scrubs `crypto_keys` EXCEPT id 2 — and id 3 is the AP
 
 ## Interactions decided elsewhere
 
-- **`/mcp` excluded from `request_log`** — machine traffic; mirrors the `/admin/analytics` / `/media/file` / `/challenge` self-exclusions. Keeps the Humans/Bots analytics signal clean.
-- **Greylist** — an authenticated Admin key BYPASSES the toll (the greylist middleware waves through any authenticated identity, and api_key_auth injects it OUTER), so no exemption is functionally required. Optional-defensive: add `/mcp` as an exact exempt path if we want an unauthenticated probe from a greylisted IP to fail as a clean 403 rather than a 429 PoW page a machine can't solve.
+- **`/mcp` is LOGGED, not excluded** (chris's call) — a public attack surface, so log it to SEE abuse + feed the greylist detection sweep. Unlike the `/admin/analytics` / `/media/file` / `/challenge` self-exclusions, `/mcp` isn't self-feeding and its legit traffic is authenticated + low-volume.
+- **Greylist COVERS `/mcp`** — deliberately NOT in the exempt-prefixes, so a greylisted IP hitting `/mcp` without a valid key gets the 429 toll (correct — that's abuse), while a valid Admin key bypasses it (the enforcement waves through any authenticated identity, and api_key_auth injects it OUTER). With the logging above, an IP that probes `/mcp` both shows up as abuse AND can be greylisted by the sweep. **The toll is a JS proof-of-work page, and an MCP client has no JS engine** — so a greylisted NON-BROWSER client (`Accept: application/json`) gets a machine-readable 429 NOTICE instead of the unsolvable HTML interstitial: it names the greylist and tells the human behind the client to authenticate (a key bypasses the toll) or open a browser to solve it (`greylist_challenge::greylist_json_notice`, reusing DI.3's `ClientKind` classifier). A browser still gets the real interstitial.
 - **The `PageWrite` extraction touches the existing page handlers** — behavior-preserving, pinned by the current integration suite plus new service-level unit tests. Any behavior change there is a bug, not a feature.
-- **`site_host`** (the WebAuthn rp-id, `hotchkiss.io` on prod AND beta) is the source for both `rewrite_site_links` and rmcp's `allowed_hosts` — one canonical host value, already on `AppState`.
+- **`site_host`** (the WebAuthn rp-id, `hotchkiss.io` on prod AND beta) is the source for `rewrite_site_links` (and would source rmcp's `allowed_hosts` if host validation were ever re-enabled) — one canonical host value, already on `AppState`.
 
 ## Phasing (DI, on ratification)
 
@@ -178,7 +182,7 @@ Slice B: MCP ships AND the write handlers get the multi-frontend responder (plan
 - **DI.1** — Spike + build-vs-buy gate: pin `rmcp` 2.2 + `schemars` 1.0, stand up a bare `StreamableHttpService` (stateless, `json_response`) nested at `/mcp`, and DETERMINE rmcp's Host/Origin validation behavior over HTTP/2 (`:authority` vs `Host`). Decide rmcp vs hand-roll on the result. Bare `initialize` / `tools/list` reachable with an Admin key; flat 403 without.
 - **DI.2** — Extract the `PageWrite` service (create-and-fill orchestration: slug, `rewrite_site_links`, datetime parse, cover 3-way resolve, `min_role` decode, inherit-on-create, two-write, publish/unpublish/feature setters) returning a typed `WrittenPage`; refactor the existing handlers onto it (behavior-preserving, pinned by tests + new unit tests). [content plane]
 - **DI.3** — The multi-frontend write responder: `StateDirective` (Navigate / Refresh / Swap{target,reselect} / Event{name,payload} / None) + `ClientKind` (Htmx / NativeBrowser / Json) rendered off one `(directive, WrittenPage)` — HX-* headers + partial | native `303 Location` + HTML | JSON envelope + data. Refactor the write handlers (put/post/delete/publish/unpublish/feature) onto it; HTMX byte-identical, `Accept: application/json` returns `WrittenPage` + a directive envelope, a no-JS `<form>` POST gets a native 303. [directive + presentation planes]
-- **DI.4** — Mount + auth hardening: `/mcp` nest with its own flat-403 `require_admin` guard (GET coverage), `allowed_hosts` from `site_host` (+ beta), `request_log` exclusion, CompressionLayer `text/event-stream` exclusion (defensive), h2-host handling per DI.1.
+- **DI.4** — Mount + auth: `/mcp` rides the ONE global authz path (`require_admin_for_mutations` gates the POST tool calls; NO bespoke nest guard — chris's rule). Host validation disabled (Bearer-Admin is the boundary). `/mcp` LOGGED + greylistable (public attack surface, not exempt). CompressionLayer is fine as-is (json_response, no SSE).
 - **DI.5** — Read tools: `list_pages`, `get_page`, `list_media` (reuse the DI.3 JSON render of the domain result).
 - **DI.6** — Write tools: `create_page`, `update_page`, `delete_page` (via `PageWrite`; tool results reuse `WrittenPage`'s JSON render; special-page + confirm guards).
 - **DI.7** — Action tools + media lane: `publish_page`, `unpublish_page`, `feature_page`, `media_upload_recipe`.

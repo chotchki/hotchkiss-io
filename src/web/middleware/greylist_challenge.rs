@@ -1,20 +1,24 @@
 //! Greylist enforcement (CX.5): toll a greylisted IP unless it's exempt, cleared, or an
 //! authenticated user. Reads the in-memory snapshot (no DB on the hot path). Layered INNER to
 //! `refresh_session_role` so `SessionData` reflects the live role / API-key identity.
+//!
+//! A non-browser (JSON) client — an MCP client, an API caller — gets a machine-readable greylist
+//! notice instead of the JS proof-of-work interstitial it has no engine to solve (Phase DI).
 
 use std::net::SocketAddr;
 
 use axum::{
     extract::{ConnectInfo, Request, State},
-    http::{header, HeaderMap},
+    http::{header, HeaderMap, StatusCode},
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
 };
 use sqlx::types::chrono::Utc;
 
 use crate::greylist::challenge::verify_clearance;
 use crate::web::app_state::AppState;
 use crate::web::features::challenge::{render_interstitial, CLEARANCE_COOKIE};
+use crate::web::responder::ClientKind;
 use crate::web::session::SessionData;
 
 /// Marker inserted on a tolled `429` response so the (outer) request-log middleware stamps
@@ -93,15 +97,37 @@ pub async fn greylist_challenge(
         return next.run(req).await;
     }
 
-    // Toll them: serve the interstitial; redirect target = the URL they were trying to reach.
+    // Toll them. The interstitial is a JS proof-of-work page — a NON-BROWSER client (an MCP
+    // client, an API caller: anything sending `Accept: application/json`) has no JS engine and
+    // can't solve it, so serving the HTML is useless. Give it a clear, machine-readable notice
+    // instead; a browser still gets the real interstitial (redirect target = the URL it was
+    // trying to reach). Either way the `Challenged` marker forces the log to stamp challenged +
+    // is_bot.
     let redir = req
         .uri()
         .path_and_query()
         .map(|pq| pq.as_str().to_string())
         .unwrap_or_else(|| "/".to_string());
-    let mut resp = render_interstitial(&redir);
+    let mut resp = if ClientKind::from_headers(req.headers()) == ClientKind::Json {
+        greylist_json_notice()
+    } else {
+        render_interstitial(&redir)
+    };
     resp.extensions_mut().insert(Challenged);
     resp
+}
+
+/// The machine-readable toll for a non-browser (JSON) client — it can't solve the PoW, so tell it
+/// plainly why it's blocked and how a human behind it can proceed (authenticate, or use a browser).
+fn greylist_json_notice() -> Response {
+    let body = serde_json::json!({
+        "error": "greylisted",
+        "message": "This IP is greylisted for abusive traffic. The proof-of-work challenge to clear \
+                    the toll requires a JavaScript-capable browser — an automated client can't pass \
+                    it. Authenticate with an API key (Authorization: Bearer hio_…) to bypass the \
+                    toll, or open the site in a browser and complete the challenge.",
+    });
+    (StatusCode::TOO_MANY_REQUESTS, axum::Json(body)).into_response()
 }
 
 #[cfg(test)]
@@ -123,6 +149,16 @@ mod tests {
         assert!(
             !is_exempt_path("/media/file/abc"),
             "big content stays behind the toll"
+        );
+    }
+
+    #[test]
+    fn json_notice_is_a_429_json_body_naming_the_greylist() {
+        let r = greylist_json_notice();
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            r.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/json"
         );
     }
 

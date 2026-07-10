@@ -30,6 +30,44 @@ async fn greylisted_ip_gets_the_toll() {
     assert!(r.text().await.unwrap().contains("Dimes not accepted"));
 }
 
+/// Phase DI: the toll is a JS proof-of-work page. A non-browser client (an MCP client / an API
+/// caller sending `Accept: application/json`) has no JS engine to solve it, so it gets a clear
+/// machine-readable 429 notice instead of the unsolvable HTML interstitial.
+#[tokio::test]
+async fn a_json_client_gets_a_machine_readable_notice_not_the_pow_page() {
+    let s = spawn_test_server().await.unwrap();
+    s.greylist.insert("127.0.0.1");
+
+    // A browser (Accept: text/html) still gets the HTML proof-of-work interstitial.
+    let html = reqwest::Client::new()
+        .get(format!("{}/", s.base_url))
+        .header("Accept", "text/html")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(html.status(), 429);
+    assert!(
+        html.text().await.unwrap().contains("Dimes not accepted"),
+        "a browser gets the PoW page"
+    );
+
+    // A JSON client gets a clear greylist notice it can actually parse.
+    let json = reqwest::Client::new()
+        .get(format!("{}/", s.base_url))
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(json.status(), 429);
+    assert_eq!(json.headers().get("content-type").unwrap(), "application/json");
+    let v: serde_json::Value = json.json().await.unwrap();
+    assert_eq!(v["error"], "greylisted");
+    assert!(
+        v["message"].as_str().unwrap().contains("browser"),
+        "the notice tells the human behind the client how to proceed"
+    );
+}
+
 #[tokio::test]
 async fn exempt_paths_pass_but_content_is_tolled() {
     let s = spawn_test_server().await.unwrap();

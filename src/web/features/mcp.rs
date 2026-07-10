@@ -3,7 +3,18 @@
 //! SDK integrates with axum 0.8 + `AppState` and round-trips a JSON-RPC
 //! `tools/call`. Auth is the EXISTING stack: `api_key_auth` (an Admin `hio_…`
 //! Bearer key) or an Admin session, gated by the global `require_admin_for_mutations`
-//! (POST is admin-only by default) — this module adds no auth of its own yet.
+//! — the ONE client-agnostic authz path (chris's rule): every MCP tool call is a
+//! POST, which that layer requires an Admin for, so there is NO per-nest auth
+//! guard. GET /mcp is public there but harmless (stateless rmcp answers a GET with
+//! 405 — no SSE channel — leaking nothing). Reads additionally honor the per-viewer
+//! visibility gates via the shared `is_visible_to` (the read tools) — content
+//! filtering, not authz.
+//!
+//! `/mcp` is a PUBLIC attack surface, so it's deliberately LOGGED (`request_log`)
+//! and SUBJECT TO GREYLISTING (not in the greylist exempt-prefixes): abuse is
+//! visible + defended. A greylisted unauthenticated IP hitting `/mcp` gets the 429
+//! toll; a valid Admin key bypasses it (authenticated), and the detection sweep can
+//! greylist an IP that probes `/mcp`.
 //!
 //! Config is stateless + `json_response` on purpose: no `Mcp-Session-Id`
 //! bookkeeping and no `text/event-stream`, so the global `CompressionLayer` can't

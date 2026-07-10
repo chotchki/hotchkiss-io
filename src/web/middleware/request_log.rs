@@ -54,6 +54,11 @@ pub async fn log_requests(State(pool): State<SqlitePool>, req: Request, next: Ne
     // Humans audience + top-paths signal (covers/responsive images already spray this path on
     // every page view). Honest cost: no byte-route analytics. The embed/302/content routes
     // still log, so listens are visible as page views.
+    // NOTE: /mcp (the Phase DI MCP server) is deliberately NOT excluded — it's a public
+    // attack surface, and chris wants /mcp abuse visible in the log + feeding the greylist
+    // detection sweep (an IP probing /mcp can earn a greylist). Legit agent traffic is
+    // authenticated + low-volume (discrete tool calls, not media streaming), so it doesn't
+    // swamp the signal.
     #[cfg(debug_assertions)]
     let skip = path.starts_with("/tower-livereload")
         || path.starts_with("/admin/logs")
