@@ -122,6 +122,7 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [x] DL.6 - Daily coordinator task — detached loop like backup.rs (never in try_join!, matches + logs every fallible step); dark-launch safe on scrubbed beta
 - [x] DL.7 - Admin surface /admin/dead-links (admin-gated GET via the /admin nest) — broken links grouped by page with status + last-checked + edit link; Run-scan-now button (release-safe, no debug seam)
 - [x] DL.8 - Docs — CLAUDE.md delta + PLAN sweep to PLAN_ARCHIVE
+- [x] DL.9 - Dogfood fixes: Accept-header content-negotiation (crates.io served a false 404 to a no-Accept request) + a manual Ignore/dismiss for links the checker can't verify (a browser auto-recheck is CORS-blocked; migration 0030 `link_check.ignored`)
 
 ## Backlog (not yet phased)
 

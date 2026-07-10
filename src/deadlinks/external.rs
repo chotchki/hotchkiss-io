@@ -69,7 +69,16 @@ impl ReqwestChecker {
     }
 
     async fn send(&self, method: reqwest::Method, url: &str) -> Result<u16, reqwest::Error> {
-        let mut req = self.client.request(method.clone(), url);
+        // A browser-like Accept is load-bearing: content-negotiating hosts serve a
+        // bot/API 404 to a request that doesn't advertise text/html (crates.io does
+        // exactly this — 404 to us, 200 to a browser), so without it a live link
+        // reads as a false "dead". Server-rendered sites stay accurate (a real miss
+        // still 404s); a client-rendered SPA degrades to always-200, which is the
+        // documented "assume ok" honest-limit (far less noisy than a false dead).
+        let mut req = self.client.request(method.clone(), url).header(
+            reqwest::header::ACCEPT,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        );
         if method == reqwest::Method::GET {
             // Ask for one byte — we only want the status, not the body.
             req = req.header(reqwest::header::RANGE, "bytes=0-0");

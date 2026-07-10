@@ -100,6 +100,9 @@ pub struct DeadLinksTemplate {
     pub total_tracked: i64,
     pub ok_count: i64,
     pub groups: Vec<DeadLinkPageGroup>,
+    /// Manually-dismissed links (DL.9) — shown collapsed so a mistaken dismiss is
+    /// recoverable via un-ignore.
+    pub ignored: Vec<DeadLinkItem>,
 }
 
 pub async fn show_dead_links(
@@ -138,6 +141,11 @@ pub async fn show_dead_links(
     let confirmed = rows.iter().filter(|r| r.is_confirmed_dead()).count();
     let failing = rows.iter().filter(|r| r.is_failing()).count();
     let review = rows.iter().filter(|r| r.needs_review()).count();
+    let ignored: Vec<DeadLinkItem> = LinkCheckDao::ignored_rows(&state.pool)
+        .await?
+        .iter()
+        .map(item_from)
+        .collect();
     let (total_tracked, ok_count) = LinkCheckDao::counts(&state.pool).await?;
     let last_checked = LinkCheckDao::last_checked(&state.pool)
         .await?
@@ -155,6 +163,7 @@ pub async fn show_dead_links(
         total_tracked,
         ok_count,
         groups,
+        ignored,
     })
     .into_response())
 }
@@ -193,6 +202,28 @@ pub async fn recheck(
         Utc::now(),
     )
     .await?;
+    Ok(htmx_refresh())
+}
+
+/// `POST /admin/dead-links/ignore` — dismiss a link the checker can't verify but
+/// you've confirmed by hand (a content-negotiating SPA, an IP/login-walled host).
+/// A browser-side auto-recheck is CORS-blocked, so YOUR judgment is the check. The
+/// daily scan keeps recording it; it just drops out of the problem buckets.
+pub async fn ignore(
+    State(state): State<AppState>,
+    Form(form): Form<RecheckForm>,
+) -> Result<Response, AppError> {
+    LinkCheckDao::set_ignored(&state.pool, form.url.trim(), true).await?;
+    Ok(htmx_refresh())
+}
+
+/// `POST /admin/dead-links/unignore` — un-dismiss a link, so it re-enters the
+/// problem buckets on the next view (a recoverable mistake).
+pub async fn unignore(
+    State(state): State<AppState>,
+    Form(form): Form<RecheckForm>,
+) -> Result<Response, AppError> {
+    LinkCheckDao::set_ignored(&state.pool, form.url.trim(), false).await?;
     Ok(htmx_refresh())
 }
 

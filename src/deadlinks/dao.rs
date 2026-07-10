@@ -35,6 +35,9 @@ pub struct LinkCheckRow {
     pub first_failed_at: Option<DateTime<Utc>>,
     pub last_ok_at: Option<DateTime<Utc>>,
     pub last_checked_at: DateTime<Utc>,
+    /// Manually dismissed (DL.9) — the scan still records it, but the admin view
+    /// suppresses it from the problem buckets. Preserved across scans by `next_state`.
+    pub ignored: bool,
 }
 
 impl LinkCheckRow {
@@ -115,6 +118,8 @@ pub fn next_state(
         first_failed_at,
         last_ok_at,
         last_checked_at: now,
+        // The manual dismiss survives a re-scan (only set_ignored flips it).
+        ignored: prev.map(|p| p.ignored).unwrap_or(false),
     }
 }
 
@@ -131,7 +136,8 @@ impl LinkCheckDao {
                    consecutive_failures as "consecutive_failures!: i64",
                    first_failed_at as "first_failed_at: DateTime<Utc>",
                    last_ok_at as "last_ok_at: DateTime<Utc>",
-                   last_checked_at as "last_checked_at!: DateTime<Utc>"
+                   last_checked_at as "last_checked_at!: DateTime<Utc>",
+                   ignored as "ignored!: bool"
             FROM link_check WHERE url = ?1
             "#,
             url
@@ -147,12 +153,12 @@ impl LinkCheckDao {
             r#"
             INSERT INTO link_check
                 (url, kind, last_class, last_status, detail,
-                 consecutive_failures, first_failed_at, last_ok_at, last_checked_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 consecutive_failures, first_failed_at, last_ok_at, last_checked_at, ignored)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             ON CONFLICT(url) DO UPDATE SET
                 kind = ?2, last_class = ?3, last_status = ?4, detail = ?5,
                 consecutive_failures = ?6, first_failed_at = ?7,
-                last_ok_at = ?8, last_checked_at = ?9
+                last_ok_at = ?8, last_checked_at = ?9, ignored = ?10
             "#,
             row.url,
             row.kind,
@@ -163,6 +169,7 @@ impl LinkCheckDao {
             row.first_failed_at,
             row.last_ok_at,
             row.last_checked_at,
+            row.ignored,
         )
         .execute(executor)
         .await?;
@@ -196,8 +203,8 @@ impl LinkCheckDao {
         Ok(next)
     }
 
-    /// Every non-ok row, worst-streak first — the admin view buckets these in Rust
-    /// (confirmed-dead / failing / needs-review).
+    /// Every non-ok, non-ignored row, worst-streak first — the admin view buckets
+    /// these in Rust (confirmed-dead / failing / needs-review).
     pub async fn problem_rows(executor: impl SqliteExecutor<'_>) -> Result<Vec<LinkCheckRow>> {
         let rows = query_as!(
             LinkCheckRow,
@@ -208,15 +215,52 @@ impl LinkCheckDao {
                    consecutive_failures as "consecutive_failures!: i64",
                    first_failed_at as "first_failed_at: DateTime<Utc>",
                    last_ok_at as "last_ok_at: DateTime<Utc>",
-                   last_checked_at as "last_checked_at!: DateTime<Utc>"
+                   last_checked_at as "last_checked_at!: DateTime<Utc>",
+                   ignored as "ignored!: bool"
             FROM link_check
-            WHERE last_class != 'ok'
+            WHERE last_class != 'ok' AND ignored = 0
             ORDER BY consecutive_failures DESC, url ASC
             "#
         )
         .fetch_all(executor)
         .await?;
         Ok(rows)
+    }
+
+    /// Manually-ignored rows (the "dismissed" list — shown collapsed so a mistaken
+    /// dismiss is recoverable via un-ignore).
+    pub async fn ignored_rows(executor: impl SqliteExecutor<'_>) -> Result<Vec<LinkCheckRow>> {
+        let rows = query_as!(
+            LinkCheckRow,
+            r#"
+            SELECT url, kind, last_class,
+                   last_status as "last_status: i64",
+                   detail,
+                   consecutive_failures as "consecutive_failures!: i64",
+                   first_failed_at as "first_failed_at: DateTime<Utc>",
+                   last_ok_at as "last_ok_at: DateTime<Utc>",
+                   last_checked_at as "last_checked_at!: DateTime<Utc>",
+                   ignored as "ignored!: bool"
+            FROM link_check
+            WHERE ignored = 1
+            ORDER BY url ASC
+            "#
+        )
+        .fetch_all(executor)
+        .await?;
+        Ok(rows)
+    }
+
+    /// Flip the manual-ignore flag for one url (a no-op if the url isn't tracked).
+    pub async fn set_ignored(
+        executor: impl SqliteExecutor<'_>,
+        url: &str,
+        ignored: bool,
+    ) -> Result<()> {
+        query!("UPDATE link_check SET ignored = ?2 WHERE url = ?1", url, ignored)
+            .execute(executor)
+            .await?;
+        Ok(())
     }
 
     /// Total distinct urls tracked + how many are currently ok (for the header).
@@ -408,10 +452,40 @@ mod tests {
             first_failed_at: None,
             last_ok_at: None,
             last_checked_at: at(0), // ancient
+            ignored: false,
         }).await.unwrap();
         let pruned = LinkCheckDao::prune_orphans(&pool, RETAIN_DAYS).await.unwrap();
         assert_eq!(pruned, 1, "only the un-referenced ancient row prunes");
         assert!(LinkCheckDao::get(&pool, "https://a.example/").await.unwrap().is_some());
         assert!(LinkCheckDao::get(&pool, "https://orphan.example/").await.unwrap().is_none());
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn ignore_hides_from_problems_and_survives_a_rescan(pool: SqlitePool) {
+        let url = "https://spa.example/crate";
+        LinkCheckDao::record(&pool, url, LinkKind::External, CheckClass::Dead, Some(404), "HTTP 404", at(0))
+            .await
+            .unwrap();
+        assert_eq!(LinkCheckDao::problem_rows(&pool).await.unwrap().len(), 1);
+
+        // Dismiss it → out of problems, into the ignored list.
+        LinkCheckDao::set_ignored(&pool, url, true).await.unwrap();
+        assert!(LinkCheckDao::problem_rows(&pool).await.unwrap().is_empty());
+        assert_eq!(LinkCheckDao::ignored_rows(&pool).await.unwrap().len(), 1);
+
+        // A later scan re-records it (still dead) — the ignore MUST survive.
+        LinkCheckDao::record(&pool, url, LinkKind::External, CheckClass::Dead, Some(404), "HTTP 404", at(DAY))
+            .await
+            .unwrap();
+        assert!(
+            LinkCheckDao::get(&pool, url).await.unwrap().unwrap().ignored,
+            "the dismiss must survive a re-scan"
+        );
+        assert!(LinkCheckDao::problem_rows(&pool).await.unwrap().is_empty());
+
+        // Un-ignore → back in the problem list.
+        LinkCheckDao::set_ignored(&pool, url, false).await.unwrap();
+        assert_eq!(LinkCheckDao::problem_rows(&pool).await.unwrap().len(), 1);
+        assert!(LinkCheckDao::ignored_rows(&pool).await.unwrap().is_empty());
     }
 }

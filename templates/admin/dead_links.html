@@ -64,11 +64,18 @@
                     <td class="py-2 pr-4 text-navy/70 break-all">{{ item.status }}</td>
                     <td class="py-2 pr-4 text-right text-navy/70">{{ item.streak }}</td>
                     <td class="py-2 pr-4 text-navy/70 whitespace-nowrap">{{ item.last_checked }}</td>
-                    <td class="py-2 text-right">
-                        <form hx-post="/admin/dead-links/recheck">
+                    <td class="py-2 text-right whitespace-nowrap">
+                        <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" title="Open the link in a new tab to check it by hand"
+                            class="text-xs text-navy border border-navy/40 rounded px-2 py-1 hover:bg-navy hover:text-div-grey uppercase inline-block">Open</a>
+                        <form class="inline" hx-post="/admin/dead-links/recheck">
                             <input type="hidden" name="url" value="{{ item.url }}" />
                             <button type="submit" title="Re-check this one link now"
                                 class="text-xs text-navy border border-navy/40 rounded px-2 py-1 hover:bg-navy hover:text-div-grey uppercase">Re-check</button>
+                        </form>
+                        <form class="inline" hx-post="/admin/dead-links/ignore">
+                            <input type="hidden" name="url" value="{{ item.url }}" />
+                            <button type="submit" title="Dismiss — you've confirmed this by hand (a checker can't verify a browser-only link)"
+                                class="text-xs text-navy/60 border border-navy/30 rounded px-2 py-1 hover:bg-navy/70 hover:text-div-grey uppercase">Ignore</button>
                         </form>
                     </td>
                 </tr>
@@ -77,6 +84,33 @@
         </div>
     </div>
     {% endfor %}
+    {% endif %}
+
+    {% if !ignored.is_empty() %}
+    <details class="mt-8">
+        <summary class="font-display text-navy uppercase cursor-pointer">Ignored ({{ ignored.len() }})</summary>
+        <p class="text-xs text-navy/60 mt-1 mb-2">Links you've dismissed by hand — a checker can't verify them (a
+            browser-only SPA, an IP/login-walled host), but you confirmed they work. The daily scan still tracks them.</p>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                {% for item in ignored %}
+                <tr class="border-b border-navy/10">
+                    <td class="py-2 pr-4"><span class="font-mono text-navy/70 break-all">{{ item.url }}</span></td>
+                    <td class="py-2 pr-4 text-navy/50 break-all">{{ item.status }}</td>
+                    <td class="py-2 text-right whitespace-nowrap">
+                        <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer"
+                            class="text-xs text-navy border border-navy/40 rounded px-2 py-1 hover:bg-navy hover:text-div-grey uppercase inline-block">Open</a>
+                        <form class="inline" hx-post="/admin/dead-links/unignore">
+                            <input type="hidden" name="url" value="{{ item.url }}" />
+                            <button type="submit" title="Un-dismiss — put it back in the problem list"
+                                class="text-xs text-navy border border-navy/40 rounded px-2 py-1 hover:bg-navy hover:text-div-grey uppercase">Un-ignore</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+    </details>
     {% endif %}
 </div>
 {% endblock %}

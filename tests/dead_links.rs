@@ -132,3 +132,66 @@ async fn run_scan_and_recheck_are_admin_gated() {
             .unwrap();
     assert_eq!(class.as_deref(), Some("ok"), "recheck recorded /blog as ok");
 }
+
+#[tokio::test]
+async fn ignore_dismisses_a_link_then_unignore_restores_it() {
+    // DL.9: a link the checker can't verify (an SPA that always 200s, an IP/login
+    // wall) but the operator confirmed by hand can be dismissed. Browser auto-recheck
+    // is CORS-blocked, so the human's judgment is the check.
+    let server = spawn_test_server().await.expect("spawn");
+    let page = server.seed_content_page("SPA Post", "# SPA\n\n[x](https://spa.example/thing)").await.unwrap();
+    sqlx::query(
+        "INSERT INTO link_check (url, kind, last_class, last_status, detail, consecutive_failures, last_checked_at) \
+         VALUES ('https://spa.example/thing', 'external', 'dead', 404, 'HTTP 404', 3, datetime('now'))",
+    )
+    .execute(&server.pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO link_ref (page_id, url) VALUES (?1, 'https://spa.example/thing')")
+        .bind(page.page_id)
+        .execute(&server.pool)
+        .await
+        .unwrap();
+
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+    let body = || async {
+        admin.get(server.url("/admin/dead-links")).send().await.unwrap().text().await.unwrap()
+    };
+
+    // Before: it's a confirmed-dead problem (the problem list is non-empty).
+    let before = body().await;
+    assert!(!before.contains("No broken links"), "shows as a problem first: {before}");
+    assert!(before.contains("https://spa.example/thing"), "the url is listed: {before}");
+
+    // Dismiss it.
+    let r = admin
+        .post(server.url("/admin/dead-links/ignore"))
+        .form(&[("url", "https://spa.example/thing")])
+        .send()
+        .await
+        .unwrap();
+    assert!(r.status().is_success());
+    let ignored: bool =
+        sqlx::query_scalar("SELECT ignored FROM link_check WHERE url = 'https://spa.example/thing'")
+            .fetch_one(&server.pool)
+            .await
+            .unwrap();
+    assert!(ignored, "the row is flagged ignored");
+    let after = body().await;
+    assert!(after.contains("Ignored ("), "moves into the Ignored section: {after}");
+    assert!(
+        after.contains("No broken links"),
+        "the only problem is now dismissed → empty problem state: {after}"
+    );
+
+    // Un-ignore restores it to the problem list.
+    admin
+        .post(server.url("/admin/dead-links/unignore"))
+        .form(&[("url", "https://spa.example/thing")])
+        .send()
+        .await
+        .unwrap();
+    let restored = body().await;
+    assert!(!restored.contains("No broken links"), "back in the problem list after un-ignore: {restored}");
+}

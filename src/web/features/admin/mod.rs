@@ -77,5 +77,7 @@ pub fn admin_router() -> Router<AppState> {
         .route("/dead-links", get(dead_links::show_dead_links))
         .route("/dead-links/run-scan", post(dead_links::run_scan))
         .route("/dead-links/recheck", post(dead_links::recheck))
+        .route("/dead-links/ignore", post(dead_links::ignore))
+        .route("/dead-links/unignore", post(dead_links::unignore))
         .layer(from_fn(require_admin))
 }
