@@ -99,7 +99,7 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [x] DI.3 - Multi-frontend write responder: StateDirective + ClientKind (HTMX | native 303 | JSON)
 - [x] DI.4 - Mount /mcp + centralized auth (one global authz path; /mcp logged + greylistable; JSON greylist notice)
 - [x] DI.5 - Read tools: list_pages, get_page, list_media
-- [ ] DI.6 - Write tools: create_page, update_page, delete_page (via PageWrite)
+- [x] DI.6 - Write tools: create_page, update_page, delete_page (via PageWrite)
 - [ ] DI.7 - Action tools + media lane: publish/unpublish/feature_page, media_upload_recipe
 - [ ] DI.8 - Tests: PageWrite + directive renders (unit); /mcp JSON-RPC + Accept-negotiation + auth (integration)
 - [ ] DI.9 - Docs (CLAUDE.md delta) + deploy beta + dogfood from Claude Code

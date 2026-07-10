@@ -178,3 +178,72 @@ async fn read_tools_honor_the_gate_as_the_admin_viewer() {
     let body = tool_call(&client, &url, &key, "get_page", json!({ "path": "blog/gated-post" })).await;
     assert!(body.contains("Secret Words"), "get_page returns the content: {body}");
 }
+
+/// DI.6: the write tools round-trip create → get → partial-update → delete through the
+/// shared PageWrite service. A partial update must NOT wipe unmentioned fields (the gate).
+#[tokio::test]
+async fn write_tools_create_update_delete_a_page() {
+    let server = spawn_test_server().await.expect("test server");
+    let key = server
+        .seed_admin_api_key("mcp-write")
+        .await
+        .expect("admin key");
+    let client = reqwest::Client::new();
+    let url = server.url("/mcp");
+
+    // Create a blog post with content + a Family gate in one call.
+    let body = tool_call(
+        &client,
+        &url,
+        &key,
+        "create_page",
+        json!({
+            "parent_path": "blog",
+            "title": "Agent Post",
+            "markdown": "# Agent Post\n\nfrom the agent",
+            "min_role": "Family"
+        }),
+    )
+    .await;
+    assert!(body.contains("blog/agent-post"), "create returns the path: {body}");
+
+    let body = tool_call(&client, &url, &key, "get_page", json!({ "path": "blog/agent-post" })).await;
+    assert!(body.contains("from the agent"), "content set: {body}");
+    assert!(body.contains("Family"), "gate set: {body}");
+
+    // PARTIAL update: change only the markdown — the Family gate must persist.
+    tool_call(
+        &client,
+        &url,
+        &key,
+        "update_page",
+        json!({ "path": "blog/agent-post", "markdown": "# Agent Post\n\nEDITED" }),
+    )
+    .await;
+    let body = tool_call(&client, &url, &key, "get_page", json!({ "path": "blog/agent-post" })).await;
+    assert!(body.contains("EDITED"), "markdown updated: {body}");
+    assert!(body.contains("Family"), "the gate PERSISTED across a partial update: {body}");
+
+    // delete without confirm is refused.
+    let refused = tool_call(
+        &client,
+        &url,
+        &key,
+        "delete_page",
+        json!({ "path": "blog/agent-post", "confirm": false }),
+    )
+    .await;
+    assert!(refused.contains("confirm"), "delete without confirm is refused: {refused}");
+
+    // delete with confirm removes it.
+    tool_call(
+        &client,
+        &url,
+        &key,
+        "delete_page",
+        json!({ "path": "blog/agent-post", "confirm": true }),
+    )
+    .await;
+    let gone = tool_call(&client, &url, &key, "get_page", json!({ "path": "blog/agent-post" })).await;
+    assert!(gone.contains("not found"), "the page is gone: {gone}");
+}

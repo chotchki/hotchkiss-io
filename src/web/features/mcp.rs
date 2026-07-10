@@ -39,6 +39,7 @@ use crate::db::dao::content_pages::ContentPageDao;
 use crate::db::dao::media::MediaDao;
 use crate::db::dao::roles::Role;
 use crate::web::app_state::AppState;
+use crate::web::features::pages::write::{self, PageUpdate, PageWriteError, WrittenPage};
 use crate::web::session::SessionData;
 
 /// The MCP handler. Holds `AppState` so tools can reach the pool / site_host /
@@ -167,6 +168,147 @@ pub struct ListPagesResult {
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct ListMediaResult {
     pub media: Vec<MediaSummary>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CreatePageParams {
+    /// Where to create it: "blog" for a post, "projects" for a project, "" / absent for a top-level page, or any node path.
+    #[serde(default)]
+    pub parent_path: Option<String>,
+    /// The human title; the URL slug is derived from it.
+    pub title: String,
+    /// Optional page body (markdown).
+    #[serde(default)]
+    pub markdown: Option<String>,
+    /// Optional comma-separated category tags (add "featured" to pin on the home page).
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Visibility gate: "Public" / "Registered" / "Family" / "Admin". Omit to inherit the parent's gate.
+    #[serde(default)]
+    pub min_role: Option<String>,
+    /// Optional post date (UTC "YYYY-MM-DDTHH:MM[:SS]"). A future date = a scheduled draft.
+    #[serde(default)]
+    pub creation_date: Option<String>,
+    /// Optional cover: a media ref (from list_media) or a copyable `/media/...` form.
+    #[serde(default)]
+    pub cover_ref: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdatePageParams {
+    /// The page's tree path, e.g. "blog/my-post".
+    pub path: String,
+    /// New title (omit to keep the current one).
+    #[serde(default)]
+    pub title: Option<String>,
+    /// New markdown body (omit to keep).
+    #[serde(default)]
+    pub markdown: Option<String>,
+    /// New comma-separated category tags (omit to keep; add/remove "featured" to pin/unpin).
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Visibility gate: "Public" clears it, a role sets it, omit keeps it (never silently loosens).
+    #[serde(default)]
+    pub min_role: Option<String>,
+    /// New post date ("YYYY-MM-DDTHH:MM[:SS]"; omit to keep). A future date schedules it.
+    #[serde(default)]
+    pub creation_date: Option<String>,
+    /// Cover: omit to KEEP the current cover, "" to CLEAR it, a media ref to SET it.
+    #[serde(default)]
+    pub cover_ref: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DeletePageParams {
+    /// The page's tree path.
+    pub path: String,
+    /// Must be true — delete is destructive.
+    pub confirm: bool,
+}
+
+/// A create/update tool's result — the page's identity after the write.
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub struct PageWriteResult {
+    pub path: String,
+    pub slug: String,
+    /// The `/pages/<path>` URL.
+    pub url: String,
+    pub title: String,
+    pub min_role: Option<String>,
+    pub scheduled: bool,
+    pub featured: bool,
+}
+
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub struct DeleteResult {
+    pub deleted: String,
+}
+
+/// Fields a create/update tool can set, merged over the CURRENT page (a partial
+/// update) before the full-replace `write::update_page`.
+struct WriteFields {
+    title: Option<String>,
+    markdown: Option<String>,
+    category: Option<String>,
+    min_role: Option<String>,
+    creation_date: Option<String>,
+    cover_ref: Option<String>,
+}
+
+fn write_result(w: WrittenPage) -> PageWriteResult {
+    PageWriteResult {
+        path: w.path_segments.join("/"),
+        url: w.pages_url(),
+        slug: w.slug,
+        title: w.title,
+        min_role: w.min_role,
+        scheduled: w.scheduled,
+        featured: w.featured,
+    }
+}
+
+fn map_write_err(e: PageWriteError) -> ErrorData {
+    match e {
+        PageWriteError::EmptyTitle => {
+            ErrorData::invalid_params("title must contain letters or numbers", None)
+        }
+        PageWriteError::NotFound => ErrorData::resource_not_found("page or parent not found", None),
+        PageWriteError::Internal(e) => ErrorData::internal_error(e.to_string(), None),
+    }
+}
+
+/// Merge `f` over the current page at `path` and write it — partial-update semantics
+/// (absent fields keep their current value) over `write::update_page`'s full replace.
+/// cover_ref: absent = keep the current cover, "" = clear, a ref = set.
+async fn apply_page_update(
+    state: &AppState,
+    path: &[&str],
+    f: WriteFields,
+) -> Result<PageWriteResult, ErrorData> {
+    let chain = ContentPageDao::find_by_path(&state.pool, path)
+        .await
+        .map_err(internal)?;
+    let lp = chain
+        .last()
+        .ok_or_else(|| ErrorData::resource_not_found("page not found", None))?;
+    let cover_ref = match f.cover_ref {
+        None => crate::web::features::media::cover_ref_for(&state.pool, lp.page_id).await,
+        Some(s) if s.trim().is_empty() => None,
+        Some(s) => Some(s),
+    };
+    let input = PageUpdate {
+        title: f.title.or_else(|| lp.page_title.clone()),
+        category: f.category.or_else(|| lp.page_category.clone()),
+        markdown: f.markdown.unwrap_or_else(|| lp.page_markdown.clone()),
+        order: lp.page_order,
+        creation_date: f.creation_date,
+        min_role: f.min_role,
+        cover_ref,
+    };
+    let w = write::update_page(&state.pool, &state.site_host, path, input)
+        .await
+        .map_err(map_write_err)?;
+    Ok(write_result(w))
 }
 
 #[tool_router]
@@ -306,6 +448,97 @@ impl McpServer {
             .collect();
         Ok(Json(ListMediaResult { media: out }))
     }
+
+    #[tool(
+        description = "Create a page under parent_path (empty = top-level) from a title (the slug is derived). Optionally set markdown / min_role / creation_date / category / cover_ref in the same call. Inherits the parent's visibility gate unless min_role is given. Returns the new page's path + url."
+    )]
+    async fn create_page(
+        &self,
+        Parameters(p): Parameters<CreatePageParams>,
+    ) -> Result<Json<PageWriteResult>, ErrorData> {
+        // The write is authorized by the transport (/mcp is Admin-gated); the tool
+        // reuses the same PageWrite service the editor does, so slug / link-rewrite /
+        // min_role / inherit-on-create policy is identical.
+        let parent: Vec<&str> = p
+            .parent_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.split('/').collect())
+            .unwrap_or_default();
+        let created = write::create_page(&self.state.pool, &parent, &p.title)
+            .await
+            .map_err(map_write_err)?;
+
+        // Title-only create → done. Any content field → fill it in via a merge-update.
+        let has_content = p.markdown.is_some()
+            || p.min_role.is_some()
+            || p.creation_date.is_some()
+            || p.category.is_some()
+            || p.cover_ref.is_some();
+        if !has_content {
+            return Ok(Json(write_result(created)));
+        }
+        let segs: Vec<&str> = created.path_segments.iter().map(String::as_str).collect();
+        let fields = WriteFields {
+            title: Some(created.title.clone()),
+            markdown: p.markdown,
+            category: p.category,
+            min_role: p.min_role,
+            creation_date: p.creation_date,
+            cover_ref: p.cover_ref,
+        };
+        Ok(Json(apply_page_update(&self.state, &segs, fields).await?))
+    }
+
+    #[tool(
+        description = "Update a page by path — a PARTIAL update: only the fields you pass change, the rest keep their current value. cover_ref: omit to keep, \"\" to clear, a media ref to set. min_role: \"Public\" clears the gate, a role sets it, omit keeps it."
+    )]
+    async fn update_page(
+        &self,
+        Parameters(p): Parameters<UpdatePageParams>,
+    ) -> Result<Json<PageWriteResult>, ErrorData> {
+        let segs: Vec<&str> = p.path.split('/').filter(|s| !s.is_empty()).collect();
+        let fields = WriteFields {
+            title: p.title,
+            markdown: p.markdown,
+            category: p.category,
+            min_role: p.min_role,
+            creation_date: p.creation_date,
+            cover_ref: p.cover_ref,
+        };
+        Ok(Json(apply_page_update(&self.state, &segs, fields).await?))
+    }
+
+    #[tool(
+        description = "Delete a page by path. Requires confirm=true (destructive). Special pages (blog / projects / resume / library) cannot be deleted."
+    )]
+    async fn delete_page(
+        &self,
+        Parameters(DeletePageParams { path, confirm }): Parameters<DeletePageParams>,
+    ) -> Result<Json<DeleteResult>, ErrorData> {
+        if !confirm {
+            return Err(ErrorData::invalid_params(
+                "set confirm=true to delete a page",
+                None,
+            ));
+        }
+        let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        let chain = ContentPageDao::find_by_path(&self.state.pool, &segs)
+            .await
+            .map_err(internal)?;
+        let lp = chain
+            .last()
+            .ok_or_else(|| ErrorData::resource_not_found("page not found", None))?;
+        if lp.special_page {
+            return Err(ErrorData::invalid_params(
+                "special pages cannot be deleted",
+                None,
+            ));
+        }
+        lp.delete(&self.state.pool).await.map_err(internal)?;
+        Ok(Json(DeleteResult { deleted: segs.join("/") }))
+    }
 }
 
 // `router = self.tool_router` makes the handler read the stored router instead of
@@ -318,8 +551,12 @@ impl ServerHandler for McpServer {
         // enable tools so a client sees the tool surface on initialize.
         let mut info = ServerInfo::default();
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
-        info.instructions =
-            Some("hotchkiss.io publishing (DI.1 spike). Currently only `ping`.".to_string());
+        info.instructions = Some(
+            "hotchkiss.io publishing server. Read: list_pages, get_page, list_media. Write: \
+             create_page, update_page, delete_page. All Admin-gated; reads honor the visibility \
+             gate, and create/update take a min_role to gate content."
+                .to_string(),
+        );
         info
     }
 }
