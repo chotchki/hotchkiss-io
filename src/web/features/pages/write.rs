@@ -10,6 +10,7 @@ use sqlx::SqlitePool;
 use sqlx::types::chrono::{DateTime, NaiveDateTime, Utc};
 
 use crate::db::dao::content_pages::ContentPageDao;
+use crate::db::dao::roles::MinRole;
 use crate::web::features::media::resolve_cover_media_id;
 use crate::web::markdown::links::rewrite_site_links;
 use crate::web::util::slug::slugify;
@@ -167,11 +168,9 @@ pub async fn update_page(
     if let Some(dt) = input.creation_date.as_deref().and_then(parse_local_datetime) {
         lp.page_creation_date = dt;
     }
-    match input.min_role.as_deref() {
-        Some("Public") => lp.min_role = None,
-        Some(v @ ("Registered" | "Family" | "Admin")) => lp.min_role = Some(v.to_string()),
-        _ => {}
-    }
+    lp.min_role = MinRole::from_stored(lp.min_role.as_deref())
+        .apply_write(input.min_role.as_deref())
+        .to_stored();
     lp.update(pool).await.map_err(PageWriteError::Internal)?;
 
     // Cover is a separate column `update()` doesn't touch; skip entirely on an

@@ -6,7 +6,7 @@ use sqlx::{
     SqliteExecutor,
 };
 
-use super::roles::Role;
+use super::roles::{MinRole, Role};
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct ContentPageDao {
@@ -583,7 +583,7 @@ impl ContentPageDao {
     ///    special page's own `min_role` is what gates its nav tab + redirect.
     pub fn is_visible_to(&self, viewer: Role) -> bool {
         let published = self.special_page || viewer == Role::Admin || !self.is_scheduled();
-        published && viewer.rank() >= self.min_role_rank()
+        published && MinRole::from_stored(self.min_role.as_deref()).is_visible_to(viewer)
     }
 
     /// Fail-closed decode of `min_role`, the exact Rust twin of the SQL CASE in
@@ -603,12 +603,7 @@ impl ContentPageDao {
     /// badge / DC inheritance consumers must go through the decode, or a
     /// garbage value renders as public while gating as Admin-only.
     pub fn min_role_rank(&self) -> u8 {
-        match self.min_role.as_deref() {
-            None => 0,
-            Some("Registered") => 1,
-            Some("Family") => 2,
-            Some(_) => Role::Admin.rank(),
-        }
+        MinRole::from_stored(self.min_role.as_deref()).rank()
     }
 
     /// The NAV variant of the visibility gate (DB.4) — lives HERE beside
@@ -620,7 +615,8 @@ impl ContentPageDao {
     /// the nav is unbadged and a draft tab would look live (admin previews by
     /// direct URL instead).
     pub fn is_nav_visible_to(&self, viewer: Role) -> bool {
-        (self.special_page || !self.is_scheduled()) && viewer.rank() >= self.min_role_rank()
+        (self.special_page || !self.is_scheduled())
+            && MinRole::from_stored(self.min_role.as_deref()).is_visible_to(viewer)
     }
 
     /// The badge / editor-select label for this page's visibility, derived
@@ -628,12 +624,7 @@ impl ContentPageDao {
     /// reads as "Admin-only" instead of rendering its own text while gating as
     /// admin-only. `None` = public (no badge).
     pub fn visibility_label(&self) -> Option<&'static str> {
-        match self.min_role_rank() {
-            0 => None,
-            1 => Some("Registered"),
-            2 => Some("Family"),
-            _ => Some("Admin-only"),
-        }
+        MinRole::from_stored(self.min_role.as_deref()).label()
     }
 
     /// The post date formatted for an `<input type="datetime-local" step="1">` —

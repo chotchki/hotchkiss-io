@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use sqlx::{prelude::FromRow, query, query_as, SqliteExecutor};
 
-use super::roles::Role;
+use super::roles::{MinRole, Role};
 
 /// What a media item IS — drives the render-time dispatch (image → `<img>`,
 /// video → `<video>` multi-source, stl → `<object class="stl-view">`, file → a
@@ -70,29 +70,19 @@ impl MediaDao {
     /// `find_by_url_key_with_required_rank`. Unknown non-NULL values rank as
     /// TOP-of-ladder (`Role::Admin.rank()`), never public.
     pub fn min_role_rank(&self) -> u8 {
-        match self.min_role.as_deref() {
-            None => 0,
-            Some("Registered") => 1,
-            Some("Family") => 2,
-            Some(_) => Role::Admin.rank(),
-        }
+        MinRole::from_stored(self.min_role.as_deref()).rank()
     }
 
     /// May `viewer` fetch this item's bytes / 302 / embed? Media has no
     /// scheduling axis — the gate is the role clause alone.
     pub fn is_visible_to(&self, viewer: Role) -> bool {
-        viewer.rank() >= self.min_role_rank()
+        MinRole::from_stored(self.min_role.as_deref()).is_visible_to(viewer)
     }
 
     /// The library badge / selector label, from the fail-closed decode (a
     /// garbage value reads as "Admin-only", never as its own text).
     pub fn visibility_label(&self) -> Option<&'static str> {
-        match self.min_role_rank() {
-            0 => None,
-            1 => Some("Registered"),
-            2 => Some("Family"),
-            _ => Some("Admin-only"),
-        }
+        MinRole::from_stored(self.min_role.as_deref()).label()
     }
 
     #[allow(clippy::too_many_arguments)]
