@@ -29,3 +29,12 @@ The content model passes domain values as bare `String` / `i64`, and the meaning
 ## Phasing (DJ)
 
 One task per type family, each threaded end to end (DAO → service → boundary) so the type actually flows rather than being unwrapped at the edge. `MinRole` first (it centralizes the security-critical decode and unblocks the rest); the MCP + web boundaries retype last, once the interior types exist. The DI structs written with strings get retyped in DJ.5 — deliberately deferred from DI so the pass is uniform, not piecemeal.
+
+## Resolution (DJ shipped)
+
+- **`MinRole`** ✓ (DJ.1) — one fail-closed decode + one SQL CASE, both DAOs delegate, `Role::iter()` test pins CASE↔`rank()`.
+- **`Slug`** ✓ (DJ.3) — `Slug::new` = slugify-then-non-empty, the create-boundary empty-title guard.
+- **`PagePath`** ✓ (DJ.3).
+- **`MediaRef` / `UrlKey`** ✓ (DJ.4) — borrowed newtypes in `web/util/media_ref.rs`; `parse_cover_reference` is the ONE canonical parse (its `MediaReference::{Ref,UrlKey}` variants carry them), `UrlKey::parse` IS the 64-hex `is_sha256_hex` gate, `serve_media_file` carries the invariant by type. Adversarially verified (completeness + fail-closed + no-unintended-behavior-change all clean). DAOs/`Path<String>`/generation deliberately left on `&str` (the 400-vs-404 oracle rule keeps extractors untyped). One follow-up in backlog: route `deadlinks/internal.rs`'s `/media/` resolve through the same parse.
+- **MCP + web boundary retype** ✓ (DJ.5) — `#[serde(deny_unknown_fields)]` + validating deserialize.
+- **`PageId` / `MediaId`** — **DEFERRED to backlog** (2026-07-10). i64 id-newtypes are high-churn (every DAO signature + call site) and low-payoff (ids rarely get mixed, no duplicated decode to centralize) — the one inventory item whose ROI didn't clear the bar. The `MinRole`/`Slug`/`MediaRef`/`UrlKey` types caught real confusion or centralized a security decode; plain ids don't.

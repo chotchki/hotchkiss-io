@@ -19,7 +19,7 @@ use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
 use crate::db::dao::media::{MediaDao, MediaKind, MediaVariantDao};
-use crate::media::is_sha256_hex;
+use crate::web::util::media_ref::UrlKey;
 use crate::web::app_state::AppState;
 use crate::web::session::SessionData;
 
@@ -75,17 +75,18 @@ async fn serve_media_file(
     Path(url_key): Path<String>,
     req: Request,
 ) -> Response {
-    // The token is 64 lowercase hex (HMAC-SHA256) — gate the format so a junk
-    // path can't reach the store, and a miss looks identical to a non-existent
-    // file (no oracle).
-    if !is_sha256_hex(&url_key) {
+    // The token is 64 lowercase hex (HMAC-SHA256) — the `UrlKey` newtype IS that
+    // format gate (DJ.4), so a junk path can't reach the store and the type carries
+    // the invariant to the DAO call below. A malformed key looks identical to a
+    // non-existent file (no oracle).
+    let Some(key) = UrlKey::parse(&url_key) else {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
-    }
+    };
     // One query resolves the variant AND the strictest-wins gate rank across
     // every item sharing this url_key (DC.2 — see the DAO doc for why the
     // LIMIT-1 owner alone could leak on deduped bytes).
     let (variant, required_rank) =
-        match MediaVariantDao::find_by_url_key_with_required_rank(&state.pool, &url_key).await {
+        match MediaVariantDao::find_by_url_key_with_required_rank(&state.pool, key.as_str()).await {
             Ok(Some(v)) => v,
             Ok(None) => return (StatusCode::NOT_FOUND, "Not found").into_response(),
             Err(e) => {
@@ -606,12 +607,12 @@ pub(crate) async fn resolve_cover_media_id(
 ) -> Option<i64> {
     use crate::web::util::media_ref::{parse_cover_reference, MediaReference};
     match parse_cover_reference(raw)? {
-        MediaReference::Ref(r) => MediaDao::find_by_ref(pool, r)
+        MediaReference::Ref(r) => MediaDao::find_by_ref(pool, r.as_str())
             .await
             .ok()
             .flatten()
             .map(|m| m.media_id),
-        MediaReference::UrlKey(k) => MediaVariantDao::find_by_url_key(pool, k)
+        MediaReference::UrlKey(k) => MediaVariantDao::find_by_url_key(pool, k.as_str())
             .await
             .ok()
             .flatten()

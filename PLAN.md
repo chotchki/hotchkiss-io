@@ -102,14 +102,14 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [x] DI.6 - Write tools: create_page, update_page, delete_page (via PageWrite)
 - [x] DI.7 - Action tools + media lane: publish/unpublish/feature_page, media_upload_recipe
 - [x] DI.8 - Tests: PageWrite + directive renders (unit); /mcp JSON-RPC + Accept-negotiation + auth (integration)
-- [ ] DI.9 - Docs (CLAUDE.md delta) + deploy beta + dogfood from Claude Code
+- [x] DI.9 - Docs (CLAUDE.md delta) + deploy beta + dogfood from Claude Code
 - [x] DI.10 - list_media is admin-only — media enumeration is an admin capability, not viewer-gated
 ## Phase DJ - Newtype pass across the content model
-- [ ] DJ.0 - Phase exit: content-model domain values are newtypes (MinRole/ids/Slug/MediaRef/PagePath) threaded through DAOs + PageWrite + MCP + web; duplicated min_role decode centralized; tests green
+- [x] DJ.0 - Phase exit: content-model domain values are newtypes (MinRole/Slug/PagePath/MediaRef/UrlKey) threaded through DAOs + PageWrite + MCP + web; duplicated min_role decode centralized; tests green (DJ.2 ids deferred to backlog — high-churn/low-payoff)
 - [x] DJ.1 - MinRole/Visibility (Option<Role>) — one fail-closed decode + one SQL CASE replacing the duplicated min_role_rank in content_pages + media; thread through PageUpdate + MCP + PutPageForm
-- [ ] DJ.2 - PageId / MediaId (i64 newtypes) through the DAOs + call sites
+- [>] DJ.2 - PageId / MediaId (i64 newtypes) through the DAOs + call sites
 - [x] DJ.3 - Slug (validated page_name; slugify returns it) + PagePath (find_by_path takes it)
-- [ ] DJ.4 - MediaRef / UrlKey newtypes reconciled with the existing MediaReference enum (one parse path)
+- [x] DJ.4 - MediaRef / UrlKey newtypes reconciled with the existing MediaReference enum (one parse path)
 - [x] DJ.5 - Retype the MCP tool structs + the web PutPageForm boundaries onto the newtypes (serde-transparent + validating deserialize)
 - [x] DJ.6 - Tests + CLAUDE.md + design-doc delta
 ## Phase DL - Daily dead-link checker
@@ -159,3 +159,5 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - **Backlog: client-side source hash (File API) → pre-flight dedup + integrity** — added 2026-06-29.
 - CR.4 - Trim redundant scans (measure-gated): fold count_since into audience_counts.all + combine any queries where one windowed scan yields multiple aggregates; only if the diagnostic still shows it matters after CR.1-CR.3 *(deferred from phase `CR` on 2026-07-01)*
 - **Add Cross-Origin-Resource-Policy to the media byte route so the isolated editor can fetch models** — deferred from CW.4 on 2026-07-03.
+- DJ.2 - PageId / MediaId (i64 newtypes) through the DAOs + call sites *(deferred from phase `DJ` on 2026-07-10)*
+- **Route `deadlinks/internal.rs`'s `/media/` resolve through the canonical `media_ref::parse_cover_reference`** — added 2026-07-10 (DJ.4 follow-up). The dead-link internal resolver has its own `strip_prefix("/media/embed/"|"/media/"|"/media/file/")` → `find_by_ref`/`find_by_url_key` shape, independent of the one canonical media-token parse DJ.4 established. Consolidating it is a real DRY win (one parse path for every `/media/*` URL), but it's a link-CHECK path (not hot/security) and its shape differs (it handles `/media/embed/` + roots the whole path), so it was scoped OUT of DJ.4 to keep that refactor's blast radius to `media_ref.rs` + two spots. Low priority.

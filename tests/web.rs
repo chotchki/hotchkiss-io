@@ -3269,7 +3269,9 @@ async fn setting_a_cover_accepts_the_copyable_media_forms() {
     .await
     .unwrap()
     .get("media_id");
-    let url_key = "coverurlkeyhmac";
+    // A real 64-lowercase-hex url_key — what media_url_key emits, and what the DJ.4
+    // UrlKey newtype gate requires (a non-hex /media/file/<key> paste is rejected).
+    let url_key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     sqlx::query(
         "INSERT INTO media_variant (media_id, sha256, url_key, mime, bytes, width)
          VALUES (?1, 'sha', ?2, 'image/avif', 100, 480)",
