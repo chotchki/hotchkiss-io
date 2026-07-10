@@ -477,14 +477,24 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         Parameters(ListMediaParams { query }): Parameters<ListMediaParams>,
     ) -> Result<Json<ListMediaResult>, ErrorData> {
-        let viewer = viewer_role(&parts);
+        // Enumerating the media library is an ADMIN capability, NOT viewer-gated like
+        // the page reads: the opaque media_ref exists precisely so a non-admin CAN'T
+        // enumerate media (unlike pages, which are browsable). So this tool is
+        // admin-ONLY — even if /mcp is relaxed to a lower tier later, media
+        // enumeration stays behind the admin role (/mcp is Admin-gated today, so this
+        // is the belt-and-suspenders that keeps the "relax later" design safe).
+        if viewer_role(&parts) != Role::Admin {
+            return Err(ErrorData::invalid_request(
+                "listing media requires the Admin role",
+                None,
+            ));
+        }
         let q = query.as_deref().map(str::to_lowercase);
         let all = MediaDao::find_all(&self.state.pool)
             .await
             .map_err(internal)?;
         let out = all
             .into_iter()
-            .filter(|m| m.is_visible_to(viewer))
             .filter(|m| {
                 q.as_deref()
                     .is_none_or(|q| m.title.as_deref().unwrap_or("").to_lowercase().contains(q))

@@ -103,6 +103,7 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [x] DI.7 - Action tools + media lane: publish/unpublish/feature_page, media_upload_recipe
 - [x] DI.8 - Tests: PageWrite + directive renders (unit); /mcp JSON-RPC + Accept-negotiation + auth (integration)
 - [ ] DI.9 - Docs (CLAUDE.md delta) + deploy beta + dogfood from Claude Code
+- [x] DI.10 - list_media is admin-only — media enumeration is an admin capability, not viewer-gated
 ## Phase DJ - Newtype pass across the content model
 - [ ] DJ.0 - Phase exit: content-model domain values are newtypes (MinRole/ids/Slug/MediaRef/PagePath) threaded through DAOs + PageWrite + MCP + web; duplicated min_role decode centralized; tests green
 - [ ] DJ.1 - MinRole/Visibility (Option<Role>) — one fail-closed decode + one SQL CASE replacing the duplicated min_role_rank in content_pages + media; thread through PageUpdate + MCP + PutPageForm

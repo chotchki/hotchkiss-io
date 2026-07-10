@@ -320,3 +320,27 @@ async fn media_upload_recipe_gives_a_curl() {
     assert!(body.contains("/admin/media/upload"), "targets the upload endpoint: {body}");
     assert!(body.contains("curl"), "it's a curl: {body}");
 }
+
+/// DI.10: list_media enumerates the media library for an Admin. It's admin-ONLY (the
+/// non-admin path is unreachable — the transport 403s a non-admin before the tool,
+/// see `mcp_rejects_a_non_admin_key`); enumeration is an admin capability, not
+/// viewer-gated like the page reads.
+#[tokio::test]
+async fn list_media_enumerates_for_admin() {
+    let server = spawn_test_server().await.expect("test server");
+    let key = server
+        .seed_admin_api_key("mcp-media")
+        .await
+        .expect("admin key");
+    sqlx::query(
+        "INSERT INTO media (media_ref, kind, title) VALUES ('0190bbbb-cccc-dddd-eeee-ffffffffffff', 'Image', 'A Cover Image')",
+    )
+    .execute(&server.pool)
+    .await
+    .unwrap();
+
+    let client = reqwest::Client::new();
+    let body = tool_call(&client, &server.url("/mcp"), &key, "list_media", json!({})).await;
+    assert!(body.contains("A Cover Image"), "admin enumerates the media: {body}");
+    assert!(body.contains("0190bbbb"), "the media_ref is returned: {body}");
+}
