@@ -42,15 +42,15 @@ async fn favicon_and_apple_icon_served_at_root() {
 async fn analytics_requires_admin() {
     let server = spawn_test_server().await.expect("spawn");
 
-    // anonymous → 403
+    // anonymous → 401 (missing identity, DK.2)
     let resp = client()
         .get(server.url("/admin/analytics"))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
-    // logged in but only Registered → still 403
+    // logged in but only Registered → still 403 (authenticated but insufficient)
     let registered = client();
     let resp = registered
         .post(server.url("/test/login?role=Registered"))
@@ -273,13 +273,13 @@ async fn ip_detail_admin_gated_and_validates() {
     // 200 empty-state; a garbage segment is a clean 400 (never a 500 / DB probe).
     let server = spawn_test_server().await.expect("spawn");
 
-    // anonymous → 403 (the /admin require_admin nest)
+    // anonymous → 401 (missing identity; the /admin require_admin nest, DK.2)
     let resp = client()
         .get(server.url("/admin/analytics/ip/1.2.3.4"))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
     let admin = client();
     admin
@@ -310,13 +310,14 @@ async fn ip_detail_admin_gated_and_validates() {
 async fn admin_pages_editor_requires_admin() {
     let server = spawn_test_server().await.expect("spawn");
 
-    // anonymous → 403 (GET is public site-wide, but /admin is require_admin-gated)
+    // anonymous → 401 (GET is public site-wide, but /admin is require_admin-gated;
+    // missing identity → 401, DK.2)
     let resp = client()
         .get(server.url("/admin/pages"))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
     // Admin → 200, the dedicated page-management view renders
     let admin = client();
@@ -343,14 +344,15 @@ async fn admin_pages_editor_requires_admin() {
 async fn reorder_pages_requires_admin() {
     let server = spawn_test_server().await.expect("spawn");
 
-    // anonymous POST → 403 (non-GET requires admin; reorder is not in the allowlist)
+    // anonymous POST → 401 (non-GET requires admin; reorder is not in the allowlist;
+    // missing identity → 401, DK.2)
     let resp = client()
         .post(server.url("/admin/pages/reorder"))
         .form(&[("page_id", "1")])
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
     // Admin → 200; the seeded special pages (ids 1,2) reorder cleanly
     let admin = client();
@@ -416,9 +418,10 @@ async fn request_log_middleware_records_requests() {
 async fn logs_requires_admin_and_renders(/* Phase CO */) {
     let server = spawn_test_server().await.expect("spawn");
 
-    // anonymous → 403 (GET is public site-wide, but /admin is require_admin-gated)
+    // anonymous → 401 (GET is public site-wide, but /admin is require_admin-gated;
+    // missing identity → 401, DK.2)
     let resp = client().get(server.url("/admin/logs")).send().await.unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
     // Admin → 200, and the viewer renders (heading + the level-filter chips). The
     // log dir doesn't exist in the test harness, so this exercises the empty tail.
@@ -945,7 +948,7 @@ async fn only_admin_can_mutate_pages() {
         .unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::FORBIDDEN,
+        StatusCode::UNAUTHORIZED,
         "anon must not create top-level pages"
     );
     let resp = anon
@@ -956,7 +959,7 @@ async fn only_admin_can_mutate_pages() {
         .unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::FORBIDDEN,
+        StatusCode::UNAUTHORIZED,
         "anon must not overwrite pages"
     );
     let resp = anon
@@ -966,7 +969,7 @@ async fn only_admin_can_mutate_pages() {
         .unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::FORBIDDEN,
+        StatusCode::UNAUTHORIZED,
         "anon must not delete pages"
     );
 
@@ -1161,7 +1164,7 @@ async fn mutation_layer_gates_all_nests_and_allows_auth_ceremony() {
         .unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::FORBIDDEN,
+        StatusCode::UNAUTHORIZED,
         "anon attachment delete must be blocked by the layer"
     );
 
@@ -1175,7 +1178,7 @@ async fn mutation_layer_gates_all_nests_and_allows_auth_ceremony() {
         .unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::FORBIDDEN,
+        StatusCode::UNAUTHORIZED,
         "anon PATCH preview must be blocked by the layer"
     );
 
@@ -1196,13 +1199,20 @@ async fn mutation_layer_gates_all_nests_and_allows_auth_ceremony() {
     );
 }
 
-/// The auth 403 is a styled "How about NO!" page on a full-page navigation (e.g.
-/// hitting an admin page after the session died), with a login link.
+/// The 403 for an authenticated-but-INSUFFICIENT viewer (DK.2) is a styled "How
+/// about NO!" page on a full-page navigation, with a login link. (A MISSING
+/// identity gets the 401 page — see `unauthorized_full_nav_renders_styled_page`.)
 #[tokio::test]
 async fn forbidden_full_nav_renders_styled_page() {
     let server = spawn_test_server().await.expect("spawn");
-    let anon = client();
-    let resp = anon
+    // Registered = authenticated but not admin → the insufficient-identity 403.
+    let registered = client();
+    registered
+        .post(server.url("/test/login?role=Registered"))
+        .send()
+        .await
+        .unwrap();
+    let resp = registered
         .get(server.url("/admin/analytics"))
         .send()
         .await
@@ -1213,10 +1223,29 @@ async fn forbidden_full_nav_renders_styled_page() {
     assert!(body.contains("/login"), "403 offers a login link: {body}");
 }
 
-/// An HTMX mutation that 403s (session died mid-edit) gets an HX-Redirect to
-/// /login instead of a full HTML doc swapped into a fragment target.
+/// The 401 for a MISSING identity (DK.2) is a styled "Who goes there?" page on a
+/// full-page navigation, with a login link — distinct from the insufficient-viewer
+/// 403 above.
 #[tokio::test]
-async fn forbidden_htmx_request_gets_hx_redirect() {
+async fn unauthorized_full_nav_renders_styled_page() {
+    let server = spawn_test_server().await.expect("spawn");
+    let anon = client();
+    let resp = anon
+        .get(server.url("/admin/analytics"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("Who goes there?"), "styled 401 page: {body}");
+    assert!(body.contains("/login"), "401 offers a login link: {body}");
+}
+
+/// An anonymous HTMX mutation (session died mid-edit → MISSING identity) gets a
+/// 401 (DK.2) with an HX-Redirect to /login instead of a full HTML doc swapped
+/// into a fragment target.
+#[tokio::test]
+async fn unauthorized_htmx_request_gets_hx_redirect() {
     let server = spawn_test_server().await.expect("spawn");
     let anon = client();
     let resp = anon
@@ -1226,18 +1255,18 @@ async fn forbidden_htmx_request_gets_hx_redirect() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(
         resp.headers()
             .get("HX-Redirect")
             .and_then(|v| v.to_str().ok()),
         Some("/login"),
-        "an HTMX mutation 403 redirects to login"
+        "an HTMX mutation 401 redirects to login"
     );
 }
 
 /// Phase CA: an `Authorization: Bearer hio_…` API key authenticates as its user,
-/// so the fail-closed layer lets a mutation through; anon + bogus keys still 403.
+/// so the fail-closed layer lets a mutation through; anon + bogus keys 401 (DK.2).
 #[tokio::test]
 async fn api_key_authenticates_a_mutation() {
     let server = spawn_test_server().await.expect("spawn");
@@ -1251,7 +1280,11 @@ async fn api_key_authenticates_a_mutation() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN, "anon mutation blocked");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "anon mutation blocked (missing identity → 401)"
+    );
 
     // Same mutation WITH the key → the layer lets it through (reaches the handler,
     // which 404s on the missing parent — the point is it is NOT the 403).
@@ -1278,8 +1311,8 @@ async fn api_key_authenticates_a_mutation() {
         .unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::FORBIDDEN,
-        "a bogus key is not authorized"
+        StatusCode::UNAUTHORIZED,
+        "a bogus key injects no identity → 401"
     );
 }
 
@@ -1540,14 +1573,14 @@ async fn media_upload_serve_and_embed_vertical() {
 
     let server = spawn_test_server().await.expect("spawn");
 
-    // Management is admin-gated: anonymous GET + upload → 403.
+    // Management is admin-gated: anonymous GET + upload → 401 (missing identity, DK.2).
     assert_eq!(
         client().get(server.url("/admin/media")).send().await.unwrap().status(),
-        StatusCode::FORBIDDEN
+        StatusCode::UNAUTHORIZED
     );
     assert_eq!(
         client().post(server.url("/admin/media/upload")).send().await.unwrap().status(),
-        StatusCode::FORBIDDEN
+        StatusCode::UNAUTHORIZED
     );
 
     // Admin uploads a real image (the committed cat AVIF).
@@ -2235,11 +2268,11 @@ async fn deleted_user_loses_access_on_live_session() {
         .await
         .unwrap();
 
-    // The middleware downgrades a deleted user to Anonymous → 403.
+    // The middleware downgrades a deleted user to Anonymous → 401 (missing identity, DK.2).
     let denied = admin.get(server.url("/admin/analytics")).send().await.unwrap();
     assert_eq!(
         denied.status(),
-        StatusCode::FORBIDDEN,
+        StatusCode::UNAUTHORIZED,
         "a deleted user must lose access on their live session"
     );
 }
@@ -2289,10 +2322,10 @@ async fn admin_users_list_requires_admin() {
     let server = spawn_test_server().await.expect("spawn");
     server.seed_user("alice", "Registered").await.unwrap();
 
-    // Anonymous → 403.
+    // Anonymous → 401 (missing identity, DK.2).
     assert_eq!(
         client().get(server.url("/admin/users")).send().await.unwrap().status(),
-        StatusCode::FORBIDDEN
+        StatusCode::UNAUTHORIZED
     );
 
     // Registered → 403.
@@ -3373,10 +3406,10 @@ async fn pinning_features_a_page_on_the_landing() {
     );
     assert!(!editor.contains("Unpin"), "button reads 'Pin' (not 'Unpin') before featuring");
 
-    // A non-admin cannot pin (fail-closed non-GET layer → 403).
+    // An anonymous caller cannot pin (fail-closed non-GET layer → 401, missing identity).
     let anon = client();
     let r = anon.post(server.url(&format!("/admin/pages/{page_id}/feature"))).send().await.unwrap();
-    assert_eq!(r.status(), StatusCode::FORBIDDEN, "anonymous pin must be forbidden");
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED, "anonymous pin must be unauthorized");
 
     let category = || async {
         sqlx::query("SELECT page_category FROM content_pages WHERE page_id = ?1")
@@ -3762,4 +3795,88 @@ async fn library_admin_authoring_loop_creates_gated_pages() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+/// DK.2: the auth split at the ONE global layer — a MISSING identity gets 401, an
+/// authenticated-but-INSUFFICIENT identity gets 403 — and the 401 carries NO
+/// `WWW-Authenticate` header (which would pop a browser basic-auth dialog AND
+/// trigger an MCP client's OAuth discovery — the chase the DI design avoids).
+#[tokio::test]
+async fn auth_split_401_missing_403_insufficient_no_www_authenticate() {
+    let server = spawn_test_server().await.expect("spawn");
+
+    // Missing identity → 401, and crucially NO WWW-Authenticate challenge.
+    let anon = client()
+        .post(server.url("/admin/pages/reorder"))
+        .form(&[("page_id", "1")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anon.status(), StatusCode::UNAUTHORIZED, "missing identity → 401");
+    assert!(
+        anon.headers().get("WWW-Authenticate").is_none(),
+        "the 401 must NOT advertise a challenge (no OAuth chase / basic-auth popup)"
+    );
+
+    // Authenticated but insufficient (Registered) → 403.
+    let registered = client();
+    registered
+        .post(server.url("/test/login?role=Registered"))
+        .send()
+        .await
+        .unwrap();
+    let insufficient = registered
+        .post(server.url("/admin/pages/reorder"))
+        .form(&[("page_id", "1")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        insufficient.status(),
+        StatusCode::FORBIDDEN,
+        "authenticated but insufficient → 403"
+    );
+}
+
+/// DK.1: a duplicate slug under the same parent is a 409 with an actionable
+/// message over the editor's HTTP path — never the raw SQLite constraint text.
+#[tokio::test]
+async fn duplicate_slug_create_returns_409_over_http() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    // First create under /blog succeeds.
+    let ok = admin
+        .post(server.url("/pages/blog"))
+        .form(&[("page_title", "Dup HTTP Post")])
+        .send()
+        .await
+        .unwrap();
+    // A native (non-HTMX) create is a 303 redirect to the new page in edit mode;
+    // `client()` doesn't follow redirects, so accept the redirect as success.
+    assert!(
+        ok.status().is_redirection() || ok.status().is_success(),
+        "first create ok: {}",
+        ok.status()
+    );
+
+    // Same title → same slug → the UNIQUE(parent, slug) clash → 409, not a 500.
+    let clash = admin
+        .post(server.url("/pages/blog"))
+        .form(&[("page_title", "Dup HTTP Post")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(clash.status(), StatusCode::CONFLICT, "a slug clash is a 409");
+    let body = clash.text().await.unwrap();
+    assert!(body.contains("already exists"), "actionable message: {body}");
+    assert!(
+        !body.contains("UNIQUE") && !body.contains("content_pages"),
+        "the raw SQLite constraint must not leak: {body}"
+    );
 }

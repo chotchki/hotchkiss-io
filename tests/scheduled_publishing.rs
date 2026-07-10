@@ -329,7 +329,8 @@ async fn publish_now_and_unpublish_buttons_flip_visibility() {
         "after Unpublish the page is a hidden draft again"
     );
 
-    // The publish/unpublish endpoints are admin-gated.
+    // The publish/unpublish endpoints are admin-gated; anonymous → 401 (missing
+    // identity, DK.2).
     assert_eq!(
         client()
             .post(server.url(&format!("/admin/pages/{}/publish", page.page_id)))
@@ -337,7 +338,7 @@ async fn publish_now_and_unpublish_buttons_flip_visibility() {
             .await
             .unwrap()
             .status(),
-        StatusCode::FORBIDDEN,
+        StatusCode::UNAUTHORIZED,
         "publish_now must be admin-gated"
     );
 }

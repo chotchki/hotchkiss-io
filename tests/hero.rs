@@ -77,9 +77,12 @@ async fn page_with_cover_renders_a_hero() {
     let j: serde_json::Value = resp.json().await.unwrap();
     let media_ref = j["media_ref"].as_str().expect("media_ref in response").to_string();
 
-    // Set it as the page's cover through the editor save path.
+    // Set it as the page's cover through the editor save path. The editor is htmx,
+    // so send HX-Request — the DI.3 responder returns a native 303 (not a 200) to a
+    // no-JS form, and this simulates the real editor faithfully.
     let resp = admin
         .put(server.url("/pages/HeroPage"))
+        .header("HX-Request", "true")
         .form(&[
             ("page_category", ""),
             ("page_markdown", "# Hero Page\n\nbody"),

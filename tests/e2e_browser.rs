@@ -302,7 +302,7 @@ async fn admin_create_page_server_slugifies_title() {
 }
 
 #[tokio::test]
-async fn anonymous_forbidden_from_admin_dashboard() {
+async fn anonymous_unauthorized_from_admin_dashboard() {
     let _e2e = e2e_lock().await;
     let server: TestServer = spawn_test_server().await.expect("spawn harness");
     let (mut browser, handle, profile) = launch().await;
@@ -312,11 +312,11 @@ async fn anonymous_forbidden_from_admin_dashboard() {
         .await
         .expect("goto /admin/analytics");
     let html = page.content().await.expect("page content");
-    // A full-page (non-HTMX) nav to a gated route renders the styled 403 page
-    // (Phase 50) — "How about NO!" — not the old plain "Admin only" string.
+    // A full-page (non-HTMX) anonymous nav to a gated route renders the styled 401
+    // page (DK.2) — "Who goes there?" (missing identity), not a bare status.
     assert!(
-        html.contains("How about NO"),
-        "anonymous request should hit the styled 403 page; first 300 chars: {}",
+        html.contains("Who goes there"),
+        "anonymous request should hit the styled 401 page; first 300 chars: {}",
         &html[..html.len().min(300)]
     );
 

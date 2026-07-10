@@ -1,7 +1,7 @@
 use axum::{extract::Request, http::Method, middleware::Next, response::Response};
 
 use crate::db::dao::roles::Role;
-use crate::web::error_page::forbidden_response;
+use crate::web::error_page::{forbidden_response, unauthorized_response};
 use crate::web::session::SessionData;
 
 /// Fail-closed, site-wide authorization (Phase E). The site's default is
@@ -58,10 +58,15 @@ pub async fn require_admin_for_mutations(
         return next.run(req).await;
     }
 
+    // Missing identity → 401 (who are you?); authenticated but insufficient → 403
+    // (DK.2). No `WWW-Authenticate` on the 401 — it would trigger an MCP client's
+    // OAuth discovery and a browser basic-auth prompt.
     if session_data.auth_state.is_admin() {
         next.run(req).await
-    } else {
+    } else if session_data.auth_state.is_authenticated() {
         forbidden_response(req.headers())
+    } else {
+        unauthorized_response(req.headers())
     }
 }
 

@@ -63,3 +63,23 @@ pub fn forbidden_response(headers: &HeaderMap) -> Response {
     }
     .into_response_with(StatusCode::FORBIDDEN)
 }
+
+/// The styled 401 for a MISSING identity (no session, no valid API key) — vs
+/// `forbidden_response`'s 403 for an authenticated-but-INSUFFICIENT caller (DK.2).
+/// Deliberately carries NO `WWW-Authenticate`: that would pop a browser basic-auth
+/// dialog AND trigger an MCP client's OAuth discovery (the DI design avoids the
+/// chase). An HTMX mutation after the session died gets `HX-Redirect` to /login.
+pub fn unauthorized_response(headers: &HeaderMap) -> Response {
+    if headers.contains_key("HX-Request") {
+        return (StatusCode::UNAUTHORIZED, [("HX-Redirect", "/login")]).into_response();
+    }
+    ErrorPageTemplate {
+        icon: "hand",
+        heading: "Who goes there?".to_string(),
+        subtext: "You need to be logged in to do that.".to_string(),
+        link_href: "/login".to_string(),
+        link_label: "Log in".to_string(),
+        trace_id: None,
+    }
+    .into_response_with(StatusCode::UNAUTHORIZED)
+}

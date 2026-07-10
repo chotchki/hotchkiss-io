@@ -1,7 +1,8 @@
 //! DI.1 spike coverage — the MCP server mounted at `/mcp` (rmcp streamable-http,
 //! stateless + JSON) round-trips a JSON-RPC `initialize` / `tools/list` /
 //! `tools/call` over a real Admin `hio_…` Bearer key through the whole middleware
-//! stack, and an unauthenticated POST is gated (403) by `require_admin_for_mutations`.
+//! stack, and an unauthenticated POST is gated (401 — missing identity, DK.2) by
+//! `require_admin_for_mutations`.
 //! This is the functional half of the build-vs-buy verdict (the h2 host-validation
 //! half is settled in the design doc from rmcp's source).
 
@@ -139,8 +140,8 @@ async fn mcp_rejects_unauthenticated_post() {
     .await;
     assert_eq!(
         resp.status(),
-        403,
-        "an unauthenticated POST /mcp must be gated by require_admin_for_mutations"
+        401,
+        "an unauthenticated POST /mcp is missing identity → 401 (DK.2), gated by require_admin_for_mutations"
     );
 }
 
@@ -365,5 +366,52 @@ async fn a_typoed_argument_key_is_a_hard_error() {
     assert!(
         body.contains("unknown field") || body.contains("path"),
         "a typo'd arg key must surface an error naming the field: {body}"
+    );
+}
+
+/// DK.1 / dogfood item 1: a duplicate slug under the same parent returns an
+/// ACTIONABLE invalid_params (-32602) — "a page with slug '…' already exists
+/// under blog" — NEVER the raw SQLite `UNIQUE constraint` / `content_pages` text.
+#[tokio::test]
+async fn duplicate_slug_create_is_actionable_not_a_leaked_constraint() {
+    let server = spawn_test_server().await.expect("test server");
+    let key = server.seed_admin_api_key("mcp-dup").await.expect("admin key");
+    let client = reqwest::Client::new();
+    let url = server.url("/mcp");
+
+    // First create succeeds.
+    let ok = tool_call(
+        &client,
+        &url,
+        &key,
+        "create_page",
+        json!({ "parent_path": "blog", "title": "Dup Post" }),
+    )
+    .await;
+    assert!(ok.contains("blog/dup-post"), "first create returns the path: {ok}");
+
+    // Same title under the same parent → same slug → the UNIQUE(parent, slug) clash.
+    let clash = tool_call(
+        &client,
+        &url,
+        &key,
+        "create_page",
+        json!({ "parent_path": "blog", "title": "Dup Post" }),
+    )
+    .await;
+    assert!(
+        clash.contains("already exists") && clash.contains("dup-post"),
+        "the clash is an actionable message naming the slug: {clash}"
+    );
+    assert!(clash.contains("blog"), "it names the parent: {clash}");
+    // The raw SQLite schema/constraint text must NEVER leak.
+    assert!(
+        !clash.contains("UNIQUE") && !clash.contains("content_pages"),
+        "the raw SQLite constraint must not leak: {clash}"
+    );
+    // -32602 invalid_params (an actionable client error), not -32603 internal_error.
+    assert!(
+        clash.contains("-32602"),
+        "it's invalid_params, not internal_error: {clash}"
     );
 }

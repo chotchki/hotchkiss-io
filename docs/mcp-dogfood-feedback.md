@@ -21,3 +21,9 @@ Ranked feedback from chris's OTHER project driving the live `/mcp` (v1.5.1) to p
 - **DK.1** — duplicate-slug create → `-32602` actionable message (`"a page with this slug already exists under <parent>"`); catch the UNIQUE violation, never leak the `content_pages.*` schema. A test.
 - **DK.2** — auth response semantics: at the ONE global layer, `401` for a MISSING identity vs `403` for an insufficient one (site-wide, not `/mcp`-special), WITHOUT `WWW-Authenticate` (no OAuth chase). A test.
 - (item 2, `deny_unknown_fields`, folds into DJ.5.)
+
+## Resolution (shipped v1.5.2)
+
+- **DK.1 ✓** — `PageWrite::create_page` downcasts the create error to a `sqlx` UNIQUE violation (`is_unique_violation`) → `PageWriteError::DuplicateSlug{slug,parent}`, mapped to `-32602` "a page with slug '…' already exists under <parent>" over MCP and a **409** over the editor HTTP path. The raw `content_pages` constraint text never crosses the boundary. Tests: `duplicate_slug_create_is_actionable_not_a_leaked_constraint` (mcp), `duplicate_slug_create_returns_409_over_http` (web).
+- **DK.2 ✓** — the global `require_admin_for_mutations` + the `/admin` `require_admin` layer both split the deny: Anonymous (missing) → `401` `unauthorized_response` ("Who goes there?"), authenticated-insufficient → `403` `forbidden_response` ("How about NO!"). The 401 carries NO `WWW-Authenticate` (chosen deliberately per item 3 — no OAuth chase, no basic-auth popup). Site-wide, one path. Tests: `auth_split_401_missing_403_insufficient_no_www_authenticate` (+ the styled-page / htmx-redirect / e2e coverage split into 401-vs-403 variants).
+- **item 2 ✓** — `deny_unknown_fields` shipped in DJ.5 (`a_typoed_argument_key_is_a_hard_error`).

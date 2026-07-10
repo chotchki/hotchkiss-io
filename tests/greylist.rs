@@ -213,13 +213,14 @@ async fn admin_pin_and_release_manage_the_greylist() {
 async fn admin_greylist_rejects_bad_ip_and_gates_anonymous() {
     let s = spawn_test_server().await.unwrap();
 
-    // Anonymous can't see the panel (the /admin require_admin layer).
+    // Anonymous can't see the panel (the /admin require_admin layer); missing
+    // identity → 401 (DK.2).
     assert_eq!(
         reqwest::get(format!("{}/admin/greylist", s.base_url))
             .await
             .unwrap()
             .status(),
-        403
+        401
     );
 
     let c = client();

@@ -278,9 +278,13 @@ pub async fn put_page_path(
         Ok(w) => Ok(WriteOutcome::refresh(Some(w)).into_response(client)),
         Err(PageWriteError::NotFound) => Ok((StatusCode::NOT_FOUND, "No such page").into_response()),
         Err(PageWriteError::Internal(e)) => Err(e.into()),
-        // update_page never slugs a title, so EmptyTitle can't occur here.
+        // update_page never slugs a title nor creates, so neither EmptyTitle nor
+        // DuplicateSlug can occur here.
         Err(PageWriteError::EmptyTitle) => {
             Err(anyhow::anyhow!("update_page returned an unexpected EmptyTitle").into())
+        }
+        Err(PageWriteError::DuplicateSlug { .. }) => {
+            Err(anyhow::anyhow!("update_page returned an unexpected DuplicateSlug").into())
         }
     }
 }
@@ -334,6 +338,13 @@ async fn create_and_redirect(
         Err(PageWriteError::NotFound) => {
             Ok((StatusCode::NOT_FOUND, "No such parent page").into_response())
         }
+        // DK.1: a slug collision under this parent → 409, actionable message, and
+        // NEVER the raw `content_pages` constraint text.
+        Err(PageWriteError::DuplicateSlug { slug, parent }) => Ok((
+            StatusCode::CONFLICT,
+            format!("A page with slug '{slug}' already exists under {parent}"),
+        )
+            .into_response()),
         Err(PageWriteError::Internal(e)) => Err(e.into()),
     }
 }

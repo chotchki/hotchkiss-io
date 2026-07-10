@@ -306,6 +306,11 @@ fn map_write_err(e: PageWriteError) -> ErrorData {
             ErrorData::invalid_params("title must contain letters or numbers", None)
         }
         PageWriteError::NotFound => ErrorData::resource_not_found("page or parent not found", None),
+        // DK.1: an actionable invalid_params, NOT the leaked SQLite constraint.
+        PageWriteError::DuplicateSlug { slug, parent } => ErrorData::invalid_params(
+            format!("a page with slug '{slug}' already exists under {parent}"),
+            None,
+        ),
         PageWriteError::Internal(e) => ErrorData::internal_error(e.to_string(), None),
     }
 }

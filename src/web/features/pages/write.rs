@@ -59,8 +59,21 @@ pub enum PageWriteError {
     EmptyTitle,
     /// The page (update) or the parent (create) path didn't resolve.
     NotFound,
+    /// A create hit the `UNIQUE(parent_page_id, page_name)` constraint — a page
+    /// with this slug already exists under `parent` (DK.1). Actionable, and it
+    /// never leaks the raw SQLite constraint text to an MCP/HTTP caller.
+    DuplicateSlug { slug: String, parent: String },
     /// A database / transform failure.
     Internal(anyhow::Error),
+}
+
+/// True when `e` (an `anyhow`-wrapped DAO error) is a SQLite UNIQUE-constraint
+/// violation. The create path uses it to turn the raw `content_pages` constraint
+/// into an actionable `DuplicateSlug` instead of a 500 with leaked schema text.
+fn is_unique_violation(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<sqlx::Error>()
+        .and_then(sqlx::Error::as_database_error)
+        .is_some_and(|db| db.is_unique_violation())
 }
 
 /// Parse a `datetime-local` value (`YYYY-MM-DDTHH:MM[:SS]`) as a UTC instant. The
@@ -102,7 +115,20 @@ pub async fn create_page(
     let mut cp =
         ContentPageDao::create(pool, parent_id, slug.as_str().to_string(), None, String::new(), None)
             .await
-            .map_err(PageWriteError::Internal)?;
+            .map_err(|e| {
+                if is_unique_violation(&e) {
+                    PageWriteError::DuplicateSlug {
+                        slug: slug.as_str().to_string(),
+                        parent: if parent_path.is_empty() {
+                            "the top level".to_string()
+                        } else {
+                            parent_path.join("/")
+                        },
+                    }
+                } else {
+                    PageWriteError::Internal(e)
+                }
+            })?;
     cp.page_title = Some(title);
     cp.min_role = inherited_min_role;
     cp.update(pool).await.map_err(PageWriteError::Internal)?;
