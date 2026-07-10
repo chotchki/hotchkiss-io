@@ -43,11 +43,15 @@ impl ServiceCoordinator {
         // Phase CX: the shared in-memory greylist snapshot, threaded into BOTH the detection
         // sweep (writer) and AppState (reader) so request-path enforcement never hits the DB.
         let greylist_set = crate::greylist::active_set::GreylistSet::new();
+        // Phase DL: the shared dead-link scanner handle, threaded into BOTH the daily
+        // scan loop and AppState (the "Run scan now" button + status), same pattern.
+        let dead_links = crate::deadlinks::DeadLinkScanState::new();
         let endpoints_provider_service = EndpointsProviderService::create(
             settings.clone(),
             pool.clone(),
             greylist_set.clone(),
             resolver.clone(),
+            dead_links.clone(),
         )
         .await?;
 
@@ -66,6 +70,14 @@ impl ServiceCoordinator {
         // the ACME resolver for FCrDNS crawler verification, and refreshes the shared snapshot
         // the enforcement middleware reads.
         crate::greylist::sweep::spawn(pool.clone(), resolver.clone(), greylist_set);
+
+        // Phase DL: the daily dead-link scan. Detached interval loop (NOT in the
+        // try_join!) — a failed pass logs and retries next tick, never takes the app
+        // down. Resolves internal links in-DB, checks external over HTTP with per-host
+        // politeness, and shares the single-flight handle with the admin trigger. The
+        // scan's site_host is the registrable rp_id (same as AppState.site_host), so a
+        // same-site absolute link folds to internal on beta as well as prod.
+        crate::deadlinks::spawn(pool.clone(), settings.webauthn_rp_id.clone(), dead_links);
 
         Ok(Self {
             ip_provider_service,

@@ -813,3 +813,13 @@ Design + rationale (the decisions, the honest limits): [docs/greylist-challenge-
 - [x] DD.6 - Tests (probe KAT for an m4b fixture, embed arm, chapters JSON) + CLAUDE.md delta
 
 
+---
+
+## 2026-07-10
+
+## Phase DK - MCP dogfood feedback
+- [x] DK.0 - Phase exit: dogfood feedback addressed — actionable dup-slug error (-32602 not a leaked SQLite constraint) + deliberate 401/403 auth semantics + own serverInfo identity (not rmcp default); deny_unknown_fields folded into DJ.5; positives preserved
+- [x] DK.1 - Duplicate-slug create returns -32602 (a page with this slug already exists under <parent>) — catch the UNIQUE violation; never leak content_pages schema
+- [x] DK.2 - Auth semantics — 401 missing-identity vs 403 insufficient at the ONE global layer (site-wide not /mcp-special) WITHOUT WWW-Authenticate (no OAuth chase); tests
+- [x] DK.3 - serverInfo identity — stamp our own name/version so the MCP server stops reporting as the rmcp 2.2.0 SDK default in client logs/UIs (the 401-no-WWW-Authenticate item is already intentional — no change)
+

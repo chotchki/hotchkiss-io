@@ -34,6 +34,9 @@ pub struct TestServer {
     /// The same in-memory greylist snapshot the server enforces against — tests seed it via
     /// `server.greylist.insert("127.0.0.1")` to simulate a greylisted client.
     pub greylist: crate::greylist::active_set::GreylistSet,
+    /// The dead-link scanner's shared handle (Phase DL) — tests inspect its status /
+    /// single-flight state.
+    pub dead_links: crate::deadlinks::DeadLinkScanState,
     server: JoinHandle<()>,
     _db: TempDb,
 }
@@ -260,6 +263,7 @@ pub async fn spawn_test_server() -> Result<TestServer> {
     session_store.migrate().await?;
 
     let greylist = crate::greylist::active_set::GreylistSet::new();
+    let dead_links = crate::deadlinks::DeadLinkScanState::new();
     let app_state = AppState {
         pool: pool.clone(),
         session_store,
@@ -278,6 +282,7 @@ pub async fn spawn_test_server() -> Result<TestServer> {
             Default::default(),
             Default::default(),
         ),
+        dead_links: dead_links.clone(),
     };
     let router = create_router(app_state).await?;
 
@@ -294,6 +299,7 @@ pub async fn spawn_test_server() -> Result<TestServer> {
         port,
         pool,
         greylist,
+        dead_links,
         server,
         _db: TempDb(db_path),
     })

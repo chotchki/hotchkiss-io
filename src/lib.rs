@@ -10,6 +10,7 @@ use crate::web::router::BUILD_TIME_CACHE_BUST;
 use crate::{coordinator::service_coordinator::ServiceCoordinator, settings::Settings};
 mod coordinator;
 mod db;
+mod deadlinks;
 mod greylist;
 mod media;
 mod settings;

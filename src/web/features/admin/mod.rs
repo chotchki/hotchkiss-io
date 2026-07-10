@@ -9,6 +9,7 @@ use crate::web::{app_state::AppState, middleware::require_admin::require_admin};
 
 pub mod analytics;
 pub mod api_keys;
+pub mod dead_links;
 pub mod greylist;
 pub mod logs;
 pub mod media;
@@ -72,5 +73,9 @@ pub fn admin_router() -> Router<AppState> {
         .route("/greylist/pin", post(greylist::pin_ip))
         .route("/greylist/run-sweep", post(greylist::run_sweep))
         .route("/greylist/{ip}/release", post(greylist::release_ip))
+        // Dead-link checker (Phase DL): the report, a full re-scan, a per-link re-check.
+        .route("/dead-links", get(dead_links::show_dead_links))
+        .route("/dead-links/run-scan", post(dead_links::run_scan))
+        .route("/dead-links/recheck", post(dead_links::recheck))
         .layer(from_fn(require_admin))
 }

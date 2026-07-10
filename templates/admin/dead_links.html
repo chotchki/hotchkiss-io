@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Dead links{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <div class="flex flex-row items-center justify-between mb-4">
+        <h1 class="text-2xl font-display text-navy">Dead links</h1>
+        <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/analytics">← Analytics</a>
+    </div>
+    <p class="text-sm text-navy/70 mb-4">
+        Rotted links in your content, grouped by the page that cites them. Internal links are checked
+        against the database (existence, not visibility — a gated page isn't dead); external links are
+        checked over HTTP and only marked <strong>Confirmed dead</strong> after several consecutive
+        daily failures, so a one-off blip doesn't cry wolf. Last scanned: <strong>{{ last_checked }}</strong>
+        (UTC){% if running %} · <span class="text-navy">scan running…</span>{% endif %}.
+    </p>
+
+    <div class="flex flex-row flex-wrap items-center gap-4 mb-6">
+        <form hx-post="/admin/dead-links/run-scan">
+            <button type="submit" title="Run a full scan now instead of waiting for the daily pass"
+                class="text-sm text-navy border border-navy/40 rounded px-3 py-1 hover:bg-navy hover:text-div-grey uppercase font-display">Run
+                scan now</button>
+        </form>
+        <div class="text-sm text-navy/70 flex flex-row flex-wrap gap-3">
+            <span><strong class="text-red-700">{{ confirmed }}</strong> confirmed dead</span>
+            <span><strong>{{ failing }}</strong> failing</span>
+            <span><strong>{{ review }}</strong> to review</span>
+            <span class="text-navy/50">{{ ok_count }}/{{ total_tracked }} links ok</span>
+        </div>
+    </div>
+
+    {% if groups.is_empty() %}
+    <p class="text-navy/60 text-sm">No broken links — every link in your content resolved on the last scan.
+        {% if last_checked == "never" %}(No scan has run yet; hit “Run scan now”.){% endif %}
+    </p>
+    {% else %}
+    {% for g in groups %}
+    <div class="mb-6">
+        <div class="flex flex-row items-baseline justify-between border-b border-navy/20 pb-1 mb-2">
+            <h2 class="font-display text-navy">{{ g.title }}</h2>
+            <a class="text-xs text-navy underline hover:text-navy/70 whitespace-nowrap" href="{{ g.edit_url }}">Edit
+                page →</a>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <tr class="text-left border-b border-navy/20">
+                    <th class="py-2 pr-4"></th>
+                    <th class="py-2 pr-4">Link</th>
+                    <th class="py-2 pr-4">Status</th>
+                    <th class="py-2 pr-4 text-right">Fails</th>
+                    <th class="py-2 pr-4">Checked (UTC)</th>
+                    <th class="py-2"></th>
+                </tr>
+                {% for item in g.items %}
+                <tr class="border-b border-navy/10">
+                    <td class="py-2 pr-4 whitespace-nowrap">
+                        <span class="px-1.5 py-0.5 rounded-sm uppercase text-xs font-display {{ item.bucket.badge_class() }}">{{
+                            item.bucket.label() }}</span>
+                    </td>
+                    <td class="py-2 pr-4">
+                        <span class="font-mono text-navy break-all">{{ item.url }}</span>
+                        <span class="ml-1 text-navy/40 text-xs uppercase">{{ item.kind }}</span>
+                    </td>
+                    <td class="py-2 pr-4 text-navy/70 break-all">{{ item.status }}</td>
+                    <td class="py-2 pr-4 text-right text-navy/70">{{ item.streak }}</td>
+                    <td class="py-2 pr-4 text-navy/70 whitespace-nowrap">{{ item.last_checked }}</td>
+                    <td class="py-2 text-right">
+                        <form hx-post="/admin/dead-links/recheck">
+                            <input type="hidden" name="url" value="{{ item.url }}" />
+                            <button type="submit" title="Re-check this one link now"
+                                class="text-xs text-navy border border-navy/40 rounded px-2 py-1 hover:bg-navy hover:text-div-grey uppercase">Re-check</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+</div>
+{% endblock %}

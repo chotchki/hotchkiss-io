@@ -46,6 +46,8 @@ url = "2.5.4"
 
 #Async
 tokio = { version = "1.41.1", features = ["full"] }
+# for_each_concurrent — bounded-concurrency host checks in the dead-link scan (Phase DL)
+futures = "0.3.32"
 tokio-util = "0.7"
 
 #Certificate Setup
@@ -150,7 +152,6 @@ objc2-foundation = { version = "0.3.1", features = [
 
 [dev-dependencies]
 chromiumoxide = "0.9.1"
-futures = "0.3.32"
 ios-inspect = { git = "https://github.com/chotchki/ios-inspect", branch = "main" }
 tempfile = "3"
 tracing-test = { version = "0.2.5", features = ["no-env-filter"] }

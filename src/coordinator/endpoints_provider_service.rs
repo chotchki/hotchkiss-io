@@ -43,6 +43,7 @@ pub struct EndpointsProviderService {
     media_store: MediaStore,
     greylist: GreylistSet,
     resolver: hickory_resolver::TokioAsyncResolver,
+    dead_links: crate::deadlinks::DeadLinkScanState,
 }
 
 impl EndpointsProviderService {
@@ -51,6 +52,7 @@ impl EndpointsProviderService {
         pool: SqlitePool,
         greylist: GreylistSet,
         resolver: hickory_resolver::TokioAsyncResolver,
+        dead_links: crate::deadlinks::DeadLinkScanState,
     ) -> Result<Self> {
         let session_store = SqliteStore::new(pool.clone());
         session_store.migrate().await?;
@@ -87,6 +89,7 @@ impl EndpointsProviderService {
             media_store,
             greylist,
             resolver,
+            dead_links,
         })
     }
 
@@ -113,6 +116,7 @@ impl EndpointsProviderService {
             challenge: crate::greylist::ChallengeState::load(&self.pool).await?,
             greylist: self.greylist.clone(),
             resolver: self.resolver.clone(),
+            dead_links: self.dead_links.clone(),
         };
 
         let http_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.http_port);

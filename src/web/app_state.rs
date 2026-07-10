@@ -31,4 +31,8 @@ pub struct AppState {
     /// The DNS resolver (shared with the ACME path). Only used by the admin "Run sweep now"
     /// action (Phase CX) to run a detection pass on demand, with FCrDNS crawler verification.
     pub resolver: hickory_resolver::TokioAsyncResolver,
+    /// The dead-link scanner's shared runtime handle (Phase DL): the single-flight
+    /// guard + last-run status the `/admin/dead-links` page shows and the "Run scan
+    /// now" button triggers. Shared with the detached daily scan loop.
+    pub dead_links: crate::deadlinks::DeadLinkScanState,
 }
