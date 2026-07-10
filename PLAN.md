@@ -92,37 +92,6 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] DG.3 - Up-next affordance: on page open, highlight/scroll to the last-listened volume (per-ref saved positions decide it)
 - [ ] DG.4 - Tests + CLAUDE.md delta + real-phone validation: screen-off auto-advance, lock-screen volume skip, series authoring convention documented
 - [x] DG.5 - Audio embed: cover-art + title header replaces the download button
-## Phase DI - MCP publishing + multi-frontend responder
-- [ ] DI.0 - Phase exit: MCP publishing + multi-frontend write responder, shipped + dogfooded
-- [x] DI.1 - rmcp spike + build-vs-buy gate (stateless streamable-http at /mcp; h2 host-validation)
-- [x] DI.2 - Extract PageWrite service → typed WrittenPage; refactor handlers (content plane)
-- [x] DI.3 - Multi-frontend write responder: StateDirective + ClientKind (HTMX | native 303 | JSON)
-- [x] DI.4 - Mount /mcp + centralized auth (one global authz path; /mcp logged + greylistable; JSON greylist notice)
-- [x] DI.5 - Read tools: list_pages, get_page, list_media
-- [x] DI.6 - Write tools: create_page, update_page, delete_page (via PageWrite)
-- [x] DI.7 - Action tools + media lane: publish/unpublish/feature_page, media_upload_recipe
-- [x] DI.8 - Tests: PageWrite + directive renders (unit); /mcp JSON-RPC + Accept-negotiation + auth (integration)
-- [x] DI.9 - Docs (CLAUDE.md delta) + deploy beta + dogfood from Claude Code
-- [x] DI.10 - list_media is admin-only — media enumeration is an admin capability, not viewer-gated
-## Phase DJ - Newtype pass across the content model
-- [x] DJ.0 - Phase exit: content-model domain values are newtypes (MinRole/Slug/PagePath/MediaRef/UrlKey) threaded through DAOs + PageWrite + MCP + web; duplicated min_role decode centralized; tests green (DJ.2 ids deferred to backlog — high-churn/low-payoff)
-- [x] DJ.1 - MinRole/Visibility (Option<Role>) — one fail-closed decode + one SQL CASE replacing the duplicated min_role_rank in content_pages + media; thread through PageUpdate + MCP + PutPageForm
-- [>] DJ.2 - PageId / MediaId (i64 newtypes) through the DAOs + call sites
-- [x] DJ.3 - Slug (validated page_name; slugify returns it) + PagePath (find_by_path takes it)
-- [x] DJ.4 - MediaRef / UrlKey newtypes reconciled with the existing MediaReference enum (one parse path)
-- [x] DJ.5 - Retype the MCP tool structs + the web PutPageForm boundaries onto the newtypes (serde-transparent + validating deserialize)
-- [x] DJ.6 - Tests + CLAUDE.md + design-doc delta
-## Phase DL - Daily dead-link checker
-- [x] DL.0 - Phase exit: a daily scan flags dead links in site content on an admin page — internal links checked structurally, external over HTTP with confirm-before-alarm, detached task can't take the app down
-- [x] DL.1 - Design doc — scope (internal structural vs external HTTP), transient-vs-confirmed-dead policy, politeness + concurrency caps, dead_links schema, admin surface (docs/dead-link-checker-design.md)
-- [x] DL.2 - Link extraction over the markdown AST — extract_links(markdown) -> [{url, kind}] covering nested list/table/heading/image/link nodes (reuse the transformer BFS walk); unit tests
-- [x] DL.3 - Internal resolver (no HTTP) — resolve /pages, /blog, /projects, /resume, /media/<ref>, /media/file/<key> against the DB + route table; catches the /projects/<slug> dead-shape class (Phase CD)
-- [x] DL.4 - External checker — HEAD->GET fallback, timeout, redirect-follow, concurrency cap + per-host politeness, identifying User-Agent; classify dead (404/410/DNS) vs transient (timeout/429/5xx)
-- [x] DL.5 - Persistence + confirm-before-alarm — dead_links table (migration), dedup checks by URL, require N consecutive daily failures before 'confirmed' so a transient blip doesn't cry wolf
-- [x] DL.6 - Daily coordinator task — detached loop like backup.rs (never in try_join!, matches + logs every fallible step); dark-launch safe on scrubbed beta
-- [x] DL.7 - Admin surface /admin/dead-links (admin-gated GET via the /admin nest) — broken links grouped by page with status + last-checked + edit link; Run-scan-now button (release-safe, no debug seam)
-- [x] DL.8 - Docs — CLAUDE.md delta + PLAN sweep to PLAN_ARCHIVE
-- [x] DL.9 - Dogfood fixes: Accept-header content-negotiation (crates.io served a false 404 to a no-Accept request) + a manual Ignore/dismiss for links the checker can't verify (a browser auto-recheck is CORS-blocked; migration 0030 `link_check.ignored`)
 
 ## Backlog (not yet phased)
 
