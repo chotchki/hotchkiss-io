@@ -54,6 +54,7 @@ pub struct McpServer {
 
 /// `ping` input. The schema is derived (schemars) and surfaced in `tools/list`.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PingParams {
     /// Optional message to echo back; defaults to "pong".
     #[serde(default)]
@@ -95,6 +96,7 @@ fn child_path(parent_path: Option<&str>, slug: &str) -> String {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ListPagesParams {
     /// Parent page path, e.g. "blog" / "projects" / "projects/sub". Empty or absent = top-level pages.
     #[serde(default)]
@@ -120,6 +122,7 @@ pub struct PageSummary {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct GetPageParams {
     /// The page's tree path, e.g. "blog/my-post" or "projects/skylander".
     pub path: String,
@@ -141,6 +144,7 @@ pub struct PageDetail {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ListMediaParams {
     /// Optional case-insensitive filter on the media title.
     #[serde(default)]
@@ -173,6 +177,7 @@ pub struct ListMediaResult {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CreatePageParams {
     /// Where to create it: "blog" for a post, "projects" for a project, "" / absent for a top-level page, or any node path.
     #[serde(default)]
@@ -197,6 +202,7 @@ pub struct CreatePageParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UpdatePageParams {
     /// The page's tree path, e.g. "blog/my-post".
     pub path: String,
@@ -221,6 +227,7 @@ pub struct UpdatePageParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DeletePageParams {
     /// The page's tree path.
     pub path: String,
@@ -247,12 +254,14 @@ pub struct DeleteResult {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PagePathParam {
     /// The page's tree path, e.g. "blog/my-post".
     pub path: String,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FeaturePageParams {
     /// The page's tree path.
     pub path: String,

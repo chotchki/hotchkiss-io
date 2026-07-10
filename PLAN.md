@@ -110,7 +110,7 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] DJ.2 - PageId / MediaId (i64 newtypes) through the DAOs + call sites
 - [x] DJ.3 - Slug (validated page_name; slugify returns it) + PagePath (find_by_path takes it)
 - [ ] DJ.4 - MediaRef / UrlKey newtypes reconciled with the existing MediaReference enum (one parse path)
-- [ ] DJ.5 - Retype the MCP tool structs + the web PutPageForm boundaries onto the newtypes (serde-transparent + validating deserialize)
+- [x] DJ.5 - Retype the MCP tool structs + the web PutPageForm boundaries onto the newtypes (serde-transparent + validating deserialize)
 - [ ] DJ.6 - Tests + CLAUDE.md + design-doc delta
 ## Phase DK - MCP dogfood feedback
 - [ ] DK.0 - Phase exit: dogfood feedback addressed — actionable dup-slug error (-32602 not a leaked SQLite constraint) + deliberate 401/403 auth semantics; deny_unknown_fields folded into DJ.5; positives preserved

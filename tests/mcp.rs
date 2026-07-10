@@ -344,3 +344,26 @@ async fn list_media_enumerates_for_admin() {
     assert!(body.contains("A Cover Image"), "admin enumerates the media: {body}");
     assert!(body.contains("0190bbbb"), "the media_ref is returned: {body}");
 }
+
+/// DJ.5 / dogfood item 2: a typo'd argument key is a HARD error (deny_unknown_fields),
+/// not a silently-wrong answer. `list_pages` takes `parent_path`; a typo'd `path`
+/// must be rejected, not treated as an empty (top-level) listing.
+#[tokio::test]
+async fn a_typoed_argument_key_is_a_hard_error() {
+    let server = spawn_test_server().await.expect("test server");
+    let key = server
+        .seed_admin_api_key("mcp-strict")
+        .await
+        .expect("admin key");
+    let client = reqwest::Client::new();
+
+    let body = tool_call(&client, &server.url("/mcp"), &key, "list_pages", json!({ "path": "blog" })).await;
+    assert!(
+        !body.contains("\"pages\""),
+        "the wrong-key call must NOT silently return a page list: {body}"
+    );
+    assert!(
+        body.contains("unknown field") || body.contains("path"),
+        "a typo'd arg key must surface an error naming the field: {body}"
+    );
+}
