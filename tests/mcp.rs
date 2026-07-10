@@ -26,6 +26,30 @@ async fn post_mcp(
     req.send().await.expect("request sent")
 }
 
+/// Call a tool by name and return the raw JSON-RPC response body (asserts 200).
+async fn tool_call(
+    client: &reqwest::Client,
+    url: &str,
+    key: &str,
+    name: &str,
+    arguments: Value,
+) -> String {
+    let r = post_mcp(
+        client,
+        url,
+        Some(key),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": { "name": name, "arguments": arguments }
+        }),
+    )
+    .await;
+    assert_eq!(r.status(), 200, "tool call {name} should 200");
+    r.text().await.unwrap()
+}
+
 #[tokio::test]
 async fn mcp_round_trips_initialize_list_and_call_over_bearer() {
     let server = spawn_test_server().await.expect("test server");
@@ -118,4 +142,39 @@ async fn mcp_rejects_unauthenticated_post() {
         403,
         "an unauthenticated POST /mcp must be gated by require_admin_for_mutations"
     );
+}
+
+/// DI.5: the read tools apply the caller's visibility gate via the shared
+/// `is_visible_to`. An Admin viewer is gate-exempt, so it SEES a Family-gated page —
+/// which also proves the `api_key_auth`-injected identity carries through rmcp into
+/// the tool (a broken derivation → Anonymous → the gated page would be hidden).
+#[tokio::test]
+async fn read_tools_honor_the_gate_as_the_admin_viewer() {
+    let server = spawn_test_server().await.expect("test server");
+    let key = server
+        .seed_admin_api_key("mcp-read")
+        .await
+        .expect("admin key");
+    server.seed_blog_post("public-post", "# Public").await.unwrap();
+    server
+        .seed_blog_post("gated-post", "# Secret Words")
+        .await
+        .unwrap();
+    sqlx::query("UPDATE content_pages SET min_role = 'Family' WHERE page_name = 'gated-post'")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+
+    let client = reqwest::Client::new();
+    let url = server.url("/mcp");
+
+    let body = tool_call(&client, &url, &key, "list_pages", json!({ "parent_path": "blog" })).await;
+    assert!(body.contains("public-post"), "public post listed: {body}");
+    assert!(
+        body.contains("gated-post"),
+        "an Admin viewer sees the gated page — proves the identity carries through: {body}"
+    );
+
+    let body = tool_call(&client, &url, &key, "get_page", json!({ "path": "blog/gated-post" })).await;
+    assert!(body.contains("Secret Words"), "get_page returns the content: {body}");
 }
