@@ -111,11 +111,21 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [x] DJ.3 - Slug (validated page_name; slugify returns it) + PagePath (find_by_path takes it)
 - [ ] DJ.4 - MediaRef / UrlKey newtypes reconciled with the existing MediaReference enum (one parse path)
 - [x] DJ.5 - Retype the MCP tool structs + the web PutPageForm boundaries onto the newtypes (serde-transparent + validating deserialize)
-- [ ] DJ.6 - Tests + CLAUDE.md + design-doc delta
+- [x] DJ.6 - Tests + CLAUDE.md + design-doc delta
 ## Phase DK - MCP dogfood feedback
-- [ ] DK.0 - Phase exit: dogfood feedback addressed — actionable dup-slug error (-32602 not a leaked SQLite constraint) + deliberate 401/403 auth semantics; deny_unknown_fields folded into DJ.5; positives preserved
+- [x] DK.0 - Phase exit: dogfood feedback addressed — actionable dup-slug error (-32602 not a leaked SQLite constraint) + deliberate 401/403 auth semantics; deny_unknown_fields folded into DJ.5; positives preserved
 - [x] DK.1 - Duplicate-slug create returns -32602 (a page with this slug already exists under <parent>) — catch the UNIQUE violation; never leak content_pages schema
 - [x] DK.2 - Auth semantics — 401 missing-identity vs 403 insufficient at the ONE global layer (site-wide not /mcp-special) WITHOUT WWW-Authenticate (no OAuth chase); tests
+## Phase DL - Daily dead-link checker
+- [ ] DL.0 - Phase exit: a daily scan flags dead links in site content on an admin page — internal links checked structurally, external over HTTP with confirm-before-alarm, detached task can't take the app down
+- [ ] DL.1 - Design doc — scope (internal structural vs external HTTP), transient-vs-confirmed-dead policy, politeness + concurrency caps, dead_links schema, admin surface (docs/dead-link-checker-design.md)
+- [ ] DL.2 - Link extraction over the markdown AST — extract_links(markdown) -> [{url, kind}] covering nested list/table/heading/image/link nodes (reuse the transformer BFS walk); unit tests
+- [ ] DL.3 - Internal resolver (no HTTP) — resolve /pages, /blog, /projects, /resume, /media/<ref>, /media/file/<key> against the DB + route table; catches the /projects/<slug> dead-shape class (Phase CD)
+- [ ] DL.4 - External checker — HEAD->GET fallback, timeout, redirect-follow, concurrency cap + per-host politeness, identifying User-Agent; classify dead (404/410/DNS) vs transient (timeout/429/5xx)
+- [ ] DL.5 - Persistence + confirm-before-alarm — dead_links table (migration), dedup checks by URL, require N consecutive daily failures before 'confirmed' so a transient blip doesn't cry wolf
+- [ ] DL.6 - Daily coordinator task — detached loop like backup.rs (never in try_join!, matches + logs every fallible step); dark-launch safe on scrubbed beta
+- [ ] DL.7 - Admin surface /admin/dead-links (admin-gated GET via the /admin nest) — broken links grouped by page with status + last-checked + edit link; Run-scan-now button (release-safe, no debug seam)
+- [ ] DL.8 - Docs — CLAUDE.md delta + PLAN sweep to PLAN_ARCHIVE
 
 ## Backlog (not yet phased)
 
