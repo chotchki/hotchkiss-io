@@ -113,9 +113,10 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [x] DJ.5 - Retype the MCP tool structs + the web PutPageForm boundaries onto the newtypes (serde-transparent + validating deserialize)
 - [x] DJ.6 - Tests + CLAUDE.md + design-doc delta
 ## Phase DK - MCP dogfood feedback
-- [x] DK.0 - Phase exit: dogfood feedback addressed — actionable dup-slug error (-32602 not a leaked SQLite constraint) + deliberate 401/403 auth semantics; deny_unknown_fields folded into DJ.5; positives preserved
+- [x] DK.0 - Phase exit: dogfood feedback addressed — actionable dup-slug error (-32602 not a leaked SQLite constraint) + deliberate 401/403 auth semantics + own serverInfo identity (not rmcp default); deny_unknown_fields folded into DJ.5; positives preserved
 - [x] DK.1 - Duplicate-slug create returns -32602 (a page with this slug already exists under <parent>) — catch the UNIQUE violation; never leak content_pages schema
 - [x] DK.2 - Auth semantics — 401 missing-identity vs 403 insufficient at the ONE global layer (site-wide not /mcp-special) WITHOUT WWW-Authenticate (no OAuth chase); tests
+- [x] DK.3 - serverInfo identity — stamp our own name/version so the MCP server stops reporting as the rmcp 2.2.0 SDK default in client logs/UIs (the 401-no-WWW-Authenticate item is already intentional — no change)
 ## Phase DL - Daily dead-link checker
 - [ ] DL.0 - Phase exit: a daily scan flags dead links in site content on an admin page — internal links checked structurally, external over HTTP with confirm-before-alarm, detached task can't take the app down
 - [ ] DL.1 - Design doc — scope (internal structural vs external HTTP), transient-vs-confirmed-dead policy, politeness + concurrency caps, dead_links schema, admin surface (docs/dead-link-checker-design.md)

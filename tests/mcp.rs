@@ -88,6 +88,19 @@ async fn mcp_round_trips_initialize_list_and_call_over_bearer() {
         init_body.contains("capabilities") && init_body.contains("protocolVersion"),
         "initialize result should carry capabilities + protocolVersion: {init_body}"
     );
+    // DK.3: serverInfo carries OUR identity, not the rmcp SDK default ("rmcp 2.2.0").
+    assert!(
+        init_body.contains("hotchkiss-io"),
+        "serverInfo must carry our name, not the rmcp default: {init_body}"
+    );
+    assert!(
+        init_body.contains(env!("CARGO_PKG_VERSION")),
+        "serverInfo must carry our crate version: {init_body}"
+    );
+    assert!(
+        !init_body.contains("rmcp"),
+        "serverInfo must NOT leak the rmcp SDK identity: {init_body}"
+    );
 
     // tools/list — the ping tool must be advertised (schemars-derived schema).
     let list = post_mcp(

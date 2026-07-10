@@ -696,6 +696,14 @@ impl ServerHandler for McpServer {
         // rather than struct-literal it. The default advertises no capabilities;
         // enable tools so a client sees the tool surface on initialize.
         let mut info = ServerInfo::default();
+        // DK.3: default `Implementation` is `from_build_env()`, which resolves at
+        // RMCP's compile time → the server identifies as "rmcp 2.2.0" (the SDK's
+        // own name/version) in client logs + MCP-client UIs, indistinguishable from
+        // any other rmcp server. Stamp OUR identity (mutate the non-exhaustive
+        // default's public fields; version tracks the crate so it bumps per release).
+        info.server_info.name = "hotchkiss-io".to_string();
+        info.server_info.version = env!("CARGO_PKG_VERSION").to_string();
+        info.server_info.title = Some("hotchkiss.io publishing".to_string());
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
         info.instructions = Some(
             "hotchkiss.io publishing server. Read: list_pages, get_page, list_media. Write: \
