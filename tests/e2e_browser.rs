@@ -690,6 +690,19 @@ async fn editor_boots_in_browser() {
         .and_then(|r| r.into_value().ok())
         .unwrap_or(false);
 
+    // CW.10 (scroll-fix): at LOAD the page must stay at the TOP — site header visible,
+    // tool NOT pinned. The app focuses its canvas and the browser would scroll it into
+    // view (jumping past the header); the preventScroll + reset guards keep it at top.
+    // Give the boot-time reset nudges (ready + 50/300ms) a beat to settle, then check.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let initial_scroll_y: f64 = page
+        .evaluate("window.scrollY")
+        .await
+        .ok()
+        .and_then(|r| r.into_value().ok())
+        .unwrap_or(-1.0);
+    let starts_at_top = (0.0..5.0).contains(&initial_scroll_y);
+
     // CW.10 sticky behavior: scroll to the bottom, then the tool region must be PINNED
     // at the top (rect.top ~ 0) while the site nav has scrolled up out of view
     // (rect.top < 0) — the "header slides away, tool takes over the screen" UX.
@@ -729,8 +742,8 @@ async fn editor_boots_in_browser() {
         }
     }
     // On any failure, dump the whole log so the CI output shows what happened.
-    if !booted || !subresource_failures.is_empty() || !fatal_wasm.is_empty() || !canvas_present || !cross_origin_isolated || !nav_present || !tool_pinned || !nav_scrolled_away {
-        eprintln!("--- editor boot diagnostics: {} log entries (stage_top={stage_top}, nav_top={nav_top}) ---", logs.len());
+    if !booted || !subresource_failures.is_empty() || !fatal_wasm.is_empty() || !canvas_present || !cross_origin_isolated || !nav_present || !starts_at_top || !tool_pinned || !nav_scrolled_away {
+        eprintln!("--- editor boot diagnostics: {} log entries (initial_scroll_y={initial_scroll_y}, stage_top={stage_top}, nav_top={nav_top}) ---", logs.len());
         for (src, lvl, text, url) in &logs {
             eprintln!("[{src:?}/{lvl:?}] {text} {}", url.as_deref().unwrap_or(""));
         }
@@ -752,6 +765,10 @@ async fn editor_boots_in_browser() {
         "the editor context is not cross-origin isolated (COOP/COEP did not take in the browser)"
     );
     assert!(nav_present, "the real site nav (CW.10) did not render on the editor page");
+    assert!(
+        starts_at_top,
+        "on load the page did not stay at the top — the tool auto-scrolled past the site header (initial_scroll_y={initial_scroll_y}, want ~0)"
+    );
     assert!(
         tool_pinned,
         "after scrolling, the tool region is not pinned to the top (stage_top={stage_top}, want ~0)"

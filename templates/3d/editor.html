@@ -107,6 +107,28 @@
         const hide = () => splash && splash.classList.add('hide');
         document.addEventListener('fab-gui:ready', hide, { once: true });
         setTimeout(hide, 30000);
+
+        // Keep the page at the TOP on load so the site header shows and the tool only pins on
+        // SCROLL. The app focuses its canvas for keyboard input, and the browser scrolls a focused
+        // element into view — which would jump the page past the header at load. Two guards, set
+        // BEFORE init() runs the app: (1) force preventScroll on the canvas's own focus so focusing
+        // it never scrolls the page (it still receives keyboard); (2) belt-and-suspenders, snap back
+        // to the top through boot (the focus can land a beat after first paint). Both stop well
+        // before any real user scroll, so the sticky pin-on-scroll still works.
+        if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+        const canvas = document.getElementById('fab-gui');
+        if (canvas) {
+            const nativeFocus = canvas.focus.bind(canvas);
+            canvas.focus = (opts) => nativeFocus(Object.assign({}, opts || {}, { preventScroll: true }));
+        }
+        const keepTop = () => window.scrollTo(0, 0);
+        keepTop();
+        document.addEventListener('fab-gui:ready', () => {
+            keepTop();
+            setTimeout(keepTop, 50);
+            setTimeout(keepTop, 300);
+        }, { once: true });
+
         import init from '{{ glue_url }}';
         init().catch(e => {
             if (!`${e}`.includes('Using exceptions for control flow')) console.error('fab-gui init:', e);
