@@ -703,9 +703,9 @@ async fn editor_boots_in_browser() {
         .unwrap_or(-1.0);
     let starts_at_top = (0.0..5.0).contains(&initial_scroll_y);
 
-    // CW.10 sticky behavior: scroll to the bottom, then the tool region must be PINNED
+    // CW.10 scroll behavior: scroll to the bottom, then the tool region must be PINNED
     // at the top (rect.top ~ 0) while the site nav has scrolled up out of view
-    // (rect.top < 0) — the "header slides away, tool takes over the screen" UX.
+    // (rect.top < 0) — the "header scroll-snaps away, tool takes over the screen" UX.
     page.evaluate("window.scrollTo(0, document.body.scrollHeight)").await.ok();
     tokio::time::sleep(Duration::from_millis(300)).await;
     let stage_top: f64 = page

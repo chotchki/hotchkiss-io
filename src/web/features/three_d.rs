@@ -166,12 +166,12 @@ const FAB_GUI_VERSION: &str = env!("FAB_GUI_VERSION");
 
 /// The editor page, rendered UNDER the real site nav (CW.10). `templates/3d/editor.html`
 /// owns the markup — the normal site header (jumbotron + nav partials, shared with
-/// base.html) in document flow up top, then a `position: sticky` full-viewport tool
-/// region: scroll down and the header slides up out of view while the fab-gui canvas
-/// PINS at top:0 and fills the screen (the app draws its own MODEL/PARTS/EXPORT bar at
-/// the canvas top, so it reads as the tool's sticky toolbar). The `<canvas id="fab-gui">`
-/// MUST exist before `init()` (the app binds to it; `fit_canvas_to_parent` tracks
-/// `#stage`), and the boot splash lifts on the app's `fab-gui:ready` event.
+/// base.html) in document flow up top, then a full-viewport tool region. CSS
+/// scroll-snap gives two rest states (header at top / tool full-screen) so a scroll
+/// jumps straight from one to the other, never the clipped middle where the tool's
+/// bottom status bar sat below the fold. The `<canvas id="fab-gui">` MUST exist before
+/// `init()` (the app binds to it; `fit_canvas_to_parent` tracks `#stage`), and the
+/// boot splash lifts on the app's `fab-gui:ready` event.
 #[derive(Template)]
 #[template(path = "3d/editor.html")]
 struct EditorTemplate {
