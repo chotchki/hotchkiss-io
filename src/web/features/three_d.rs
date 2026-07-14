@@ -164,97 +164,56 @@ struct FabGui;
 /// in the PATH because the glue drops the query when resolving the wasm relatively.
 const FAB_GUI_VERSION: &str = env!("FAB_GUI_VERSION");
 
-/// The editor's top-level document — the site OWNS it (the bundle ships an
-/// `index.reference.html` to crib from). Framed as a FLEX COLUMN: a real site header
-/// (navy/gold, the ← 3D back link) on top, the canvas filling the region below — the
-/// header owns navigation, the app draws its own tab-bar inside the canvas, no
-/// overlap (fab-gui reads only `data-base`; `data-inset-top` is gone). Load-bearing
-/// pieces from the reference: the `<canvas id="fab-gui">` MUST exist before `init()`
-/// — the app binds to it (missing = panic) and `fit_canvas_to_parent` tracks its
-/// parent (`#stage`) — and `init().catch` swallows winit's "control flow" exit
-/// exception (it would otherwise read as a crash). A BOOT SPLASH covers the ~8.7 MiB
-/// download and lifts on the `fab-gui:ready` document event (a 30s fallback reveals
-/// the canvas anyway, so a boot failure still surfaces its own error). Absolute
-/// import path so the glue's `import.meta.url` resolves the wasm under `/3d/editor/`.
-/// COOP/COEP live on THIS document (per the contract — future wasm-threads headroom;
-/// the bundle is single-threaded today).
-const EDITOR_HTML: &str = r#"<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>fab — 3D slicer/placer · Christopher Hotchkiss</title>
-<style>
-  :root{--navy:#1a2b4a;--navy-2:#24365a;--gold:#ffc935}
-  html,body{margin:0;height:100%;overflow:hidden;background:var(--navy);
-            font:14px/1.4 system-ui,sans-serif;color:#e8ecf4}
-  #shell{display:flex;flex-direction:column;height:100%}
-  header{flex:0 0 auto;display:flex;align-items:center;gap:.75rem;height:44px;
-         padding:0 .75rem;background:var(--navy);border-bottom:2px solid var(--gold)}
-  header a.back{color:var(--gold);text-decoration:none;font-weight:600}
-  header a.back:hover{text-decoration:underline}
-  header .title{font-weight:600;letter-spacing:.02em}
-  /* the tool region — the canvas fills it; fit_canvas_to_parent tracks THIS box.
-     min-height:0 lets the flex child shrink instead of overflowing the column. */
-  #stage{flex:1 1 auto;position:relative;min-height:0}
-  canvas{display:block;width:100%;height:100%}
-  #splash{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
-          justify-content:center;gap:1rem;background:var(--navy);color:var(--gold);
-          transition:opacity .3s;z-index:5}
-  #splash.hide{opacity:0;pointer-events:none}
-  #splash .ring{width:38px;height:38px;border:4px solid var(--navy-2);border-top-color:var(--gold);
-                border-radius:50%;animation:spin 1s linear infinite}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  #splash .msg{font-weight:600;letter-spacing:.03em}
-</style>
-</head>
-<body>
-<div id="shell">
-  <header>
-    <a class="back" href="/3d">&larr; 3D</a>
-    <span class="title">Slicer / Placer</span>
-  </header>
-  <div id="stage">
-    <!-- data-base: where the bundle is MOUNTED — the app resolves lazy geom/ + libs.json
-         fetches against THIS, not the document URL (which drops the versioned dir -> 404). -->
-    <canvas id="fab-gui" data-base="__BASE__"></canvas>
-    <div id="splash"><div class="ring"></div><div class="msg">Loading the slicer&hellip;</div></div>
-  </div>
-</div>
-<script type="module">
-  // fab-gui fires `fab-gui:ready` (a document CustomEvent) once its first frame paints — drop the
-  // splash then. Fallback timeout so a boot failure still reveals the canvas + its own error.
-  const splash = document.getElementById('splash');
-  const hide = () => splash && splash.classList.add('hide');
-  document.addEventListener('fab-gui:ready', hide, { once: true });
-  setTimeout(hide, 30000);
-  import init from '__GLUE_URL__';
-  init().catch(e => {
-    if (!`${e}`.includes('Using exceptions for control flow')) console.error('fab-gui init:', e);
-  });
-</script>
-</body>
-</html>
-"#;
+/// The editor page, rendered UNDER the real site nav (CW.10). `templates/3d/editor.html`
+/// owns the markup — the normal site header (jumbotron + nav partials, shared with
+/// base.html) in document flow up top, then a `position: sticky` full-viewport tool
+/// region: scroll down and the header slides up out of view while the fab-gui canvas
+/// PINS at top:0 and fills the screen (the app draws its own MODEL/PARTS/EXPORT bar at
+/// the canvas top, so it reads as the tool's sticky toolbar). The `<canvas id="fab-gui">`
+/// MUST exist before `init()` (the app binds to it; `fit_canvas_to_parent` tracks
+/// `#stage`), and the boot splash lifts on the app's `fab-gui:ready` event.
+#[derive(Template)]
+#[template(path = "3d/editor.html")]
+struct EditorTemplate {
+    top_bar: TopBar,
+    auth_state: AuthenticationState,
+    /// The version-pathed mount dir (`/3d/editor/<ver>/`) — `data-base`, so the app
+    /// resolves lazy `geom/` + `libs.json` fetches against it, not the document URL.
+    base: String,
+    /// `<base>fab_gui.js` — the ES-module glue the document imports.
+    glue_url: String,
+}
 
 /// COOP+COEP-carrying editor document. Isolation is scoped to `/3d/editor*`; the
 /// rest of the site (content pages, media embeds, the model gallery) is never
-/// cross-origin isolated.
-async fn editor_document() -> Response {
+/// cross-origin isolated. Every asset the page pulls (main.css, the nav's inline
+/// icons, self-hosted fonts) is SAME-ORIGIN, so it survives COEP:require-corp.
+async fn editor_document(
+    State(state): State<AppState>,
+    session_data: SessionData,
+) -> Result<Response, AppError> {
     // The bundle's mount base — reused for the glue import AND `data-base` (the app
     // resolves lazy geom/ + libs.json fetches against it, not the document URL).
     // Version in the path so it cache-busts + stays consistent.
+    let viewer = session_data.auth_state.role();
     let base = format!("/3d/editor/{FAB_GUI_VERSION}/");
-    let html = EDITOR_HTML
-        .replace("__BASE__", &base)
-        .replace("__GLUE_URL__", &format!("{base}fab_gui.js"));
-    Response::builder()
+    let glue_url = format!("{base}fab_gui.js");
+    let template = EditorTemplate {
+        top_bar: TopBar::create(&state.pool, "3d", viewer).await?,
+        auth_state: session_data.auth_state,
+        base,
+        glue_url,
+    };
+    let html = template
+        .render()
+        .map_err(|e| anyhow!("rendering the editor template: {e}"))?;
+    Ok(Response::builder()
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header("cross-origin-opener-policy", "same-origin")
         .header("cross-origin-embedder-policy", "require-corp")
         .header(header::CACHE_CONTROL, "no-cache")
         .body(Body::from(html))
-        .expect("static editor document is a valid response")
+        .expect("editor document is a valid response"))
 }
 
 /// Serve ANY file from the version-pathed bundle tree (`fab_gui.js`, the wasm, the

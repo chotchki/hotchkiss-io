@@ -67,6 +67,7 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 
 - [x] CW.8 - Migrate editor bundle fab-web → fab-gui: rename + drop OpenSCAD side-module + boot-splash/flex-column reframe + safe-by-construction wasm drop; pin web-v0.12.0
 - [x] CW.9 - Build + test against the published web-v0.12.0: confirm the version pin matches the real tag; cargo test the editor suite (incl. the geom identity guard); boot /3d/editor — tool renders + splash lifts on fab-gui:ready
+- [ ] CW.10 - Editor under the real site nav: full site header that scrolls away, sticky full-viewport fab-gui tool pinned on scroll (reuse nav partials, COOP/COEP retained)
 ## Phase DE - The family Library section
 
 - [ ] DE.0 - Phase exit: family members use the Library tab end-to-end (first real audiobook live on prod); everyone else sees only the sign-in gate on code-defined routes

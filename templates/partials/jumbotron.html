@@ -1,0 +1,27 @@
+{# The site banner landmark — headshot + name + tagline. Shared by base.html
+   (every content page) and the /3d/editor tool page (Phase CW.10), so it lives
+   in one partial. Needs `top_bar`/`auth_state` in scope only transitively (it uses
+   neither directly, but sits beside the nav partial that does). #}
+<!-- Jumbotron image — the site banner landmark -->
+<header class="mb-2 py-4 max-w-lg flex flex-col sm:flex-row items-center sm:items-end text-center sm:text-left">
+    {# Jumbotron headshot: displays at 160px (size-40), so srcset offers a
+       320px (2x) and the 480px Photo.avif (3x + no-srcset fallback + the
+       og:image seo.rs points at). Right-sized from the master (Phase CN).
+       Links home (Phase 13) — the only route back to the landing. #}
+    {# `display:contents` so the link adds NO layout box — the <img> stays
+       the flex child with its own `m-2` gap (a wrapping `block`/inline <a>
+       pulled that margin inside the link and the portrait overlapped the
+       name). Still fully clickable; hover feedback moves to the img. #}
+    <a href="/" aria-label="Home" class="contents">
+        <img class="size-40 m-2 rounded-full border-8 border-navy hover:opacity-90" width="160" height="160"
+            src="/images/Photo.avif?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"
+            srcset="/images/Photo-320.avif?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}} 320w, /images/Photo.avif?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}} 480w"
+            sizes="160px" alt="Christopher Hotchkiss" /></a>
+    <div class="mb-2">
+        <h1 class="font-display text-xl text-navy uppercase underline underline-offset-8 decoration-yellow">
+            Christopher Hotchkiss
+        </h1>
+        <p class="py-2 font-content text-m text-navy">Crafting Solutions, Shaping Products: From Concept to
+            Code</p>
+    </div>
+</header>

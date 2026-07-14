@@ -1,0 +1,117 @@
+{# The fab-gui slicer/placer editor (Phase CW), framed UNDER the real site nav
+   (CW.10). Standalone document — NOT base.html's content card, because the tool
+   wants a full-bleed viewport, not a padded box. Layout: the normal site header
+   (jumbotron + nav, shared partials) in document flow up top, then a `position:
+   sticky` full-dynamic-viewport tool region — scroll down and the header slides
+   up out of view while the canvas PINS at top:0 and takes the whole screen (the
+   app draws its own MODEL/PARTS/EXPORT bar at the canvas top, so it reads as the
+   tool's sticky toolbar). COOP/COEP live on the RESPONSE (set in the handler) so
+   the geom worker gets cross-origin isolation; every asset here is same-origin,
+   so it survives COEP. `base`/`glue_url` are version-pathed (cache-bust). #}
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <link href="/styles/main.css?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" rel="stylesheet" />
+    <link href="/images/favicon.ico?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}" rel="shortcut icon" />
+    <meta name="theme-color" content="#14213d" />
+    <title>fab — 3D slicer/placer · Christopher Hotchkiss</title>
+    <style>
+        /* The tool region — sticky under the site header, full dynamic-viewport
+           height so it fills the screen once the header scrolls past. min-height:0
+           is irrelevant here (not a flex child); the height is explicit. */
+        #stage {
+            position: sticky;
+            top: 0;
+            width: 100%;
+            height: 100vh;
+            height: 100dvh;
+            background: #14213d;
+        }
+
+        canvas#fab-gui {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #splash {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            background: #14213d;
+            color: #ffc935;
+            transition: opacity .3s;
+            z-index: 5;
+        }
+
+        #splash.hide {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #splash .ring {
+            width: 38px;
+            height: 38px;
+            border: 4px solid #24365a;
+            border-top-color: #ffc935;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        #splash .msg {
+            font-weight: 600;
+            letter-spacing: .03em;
+        }
+    </style>
+</head>
+
+<body class="bg-body-grey">
+    {# Site header — normal document flow, scrolls up out of view. Mirrors base.html's
+       centered header column so the nav + jumbotron look identical to every page. #}
+    <div class="flex flex-col justify-center items-center">
+        {% include "partials/jumbotron.html" %}
+        <div class="p-2 w-full min-w-0 flex flex-col items-center">
+            {% include "partials/nav.html" %}
+        </div>
+    </div>
+
+    {# The tool. data-base = where the bundle is MOUNTED — the app resolves lazy
+       geom/ + libs.json fetches against THIS, not the document URL (which drops the
+       versioned dir -> 404). The canvas MUST exist before init() (the app binds to
+       it) and fit_canvas_to_parent tracks #stage. #}
+    <div id="stage">
+        <canvas id="fab-gui" data-base="{{ base }}"></canvas>
+        <div id="splash">
+            <div class="ring"></div>
+            <div class="msg">Loading the slicer&hellip;</div>
+        </div>
+    </div>
+
+    <script type="module">
+        // fab-gui fires `fab-gui:ready` (a document CustomEvent) once its first frame paints — drop the
+        // splash then. Fallback timeout so a boot failure still reveals the canvas + its own error.
+        const splash = document.getElementById('splash');
+        const hide = () => splash && splash.classList.add('hide');
+        document.addEventListener('fab-gui:ready', hide, { once: true });
+        setTimeout(hide, 30000);
+        import init from '{{ glue_url }}';
+        init().catch(e => {
+            if (!`${e}`.includes('Using exceptions for control flow')) console.error('fab-gui init:', e);
+        });
+    </script>
+</body>
+
+</html>

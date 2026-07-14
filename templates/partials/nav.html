@@ -1,0 +1,82 @@
+{# Primary site navigation — content tabs + admin group (desktop) and a native
+   <details> hamburger (mobile). Shared by base.html and the /3d/editor tool page
+   (Phase CW.10). Needs `top_bar` (tabs + active) and `auth_state` in scope.
+   `{% include %}` does NOT inherit the parent's macro imports, so import icons here. #}
+{% import "partials/icons.html" as icons %}
+<!-- Navigation -->
+{# max-w-screen-lg, not -md: the logged-in row (5 content tabs since
+   the Library tab + the admin group) runs ~910px — the -md cap
+   wrapped it. This block only renders at lg:+ viewports, so the
+   1024px cap always fits on screen. #}
+<nav class="max-w-screen-lg pl-2" aria-label="Primary">
+    <!-- Desktop (lg+): single-row nav — content tabs + admin tabs (own group) -->
+    <div class="hidden lg:flex flex-row items-end gap-4">
+        <ul class="flex flex-row flex-wrap list-none gap-px">
+            {% for item in top_bar.tabs %}
+            {% if item.0 == "login" && auth_state.display_name().is_some() %}
+            {# Logged in: the LOGIN tab is redundant (the admin group has Logout) #}
+            {% else if item.1 == true %}
+            <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-yellow">
+                <a class="text-sm text-yellow uppercase" href="/pages/{{item.0}}">{{item.0}}</a>
+            </li>
+            {% else %}
+            <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-transparent">
+                <a class="text-sm text-div-grey uppercase" href="/pages/{{item.0}}">{{item.0}}</a>
+            </li>
+            {% endif %}
+            {% endfor %}
+        </ul>
+        {% if auth_state.display_name().is_some() %}
+        {# Admin controls as their own tab group — same pill style, never marked active #}
+        <ul class="flex flex-row list-none gap-px">
+            {% if auth_state.is_admin() %}
+            <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 {% if top_bar.active == "admin" %}border-b-yellow{% else %}border-b-transparent{% endif %}">
+                <a class="text-sm uppercase {% if top_bar.active == "admin" %}text-yellow{% else %}text-div-grey hover:text-yellow{% endif %}" href="/admin/pages">Admin</a>
+            </li>
+            {% endif %}
+            <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-transparent">
+                <a class="text-sm text-div-grey uppercase hover:text-yellow" href="/login/logout">Logout</a>
+            </li>
+            {% if auth_state.is_admin() %}
+            <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 {% if top_bar.active == "admin" %}border-b-yellow{% else %}border-b-transparent{% endif %}">
+                <a class="text-sm uppercase {% if top_bar.active == "admin" %}text-yellow{% else %}text-div-grey hover:text-yellow{% endif %}" href="/admin/pages" title="New page" aria-label="New page">{% call icons::plus() %}</a>
+            </li>
+            {% endif %}
+        </ul>
+        {% endif %}
+    </div>
+
+    <!-- Tablet + mobile (below lg): a hamburger — native <details>, no JS -->
+    <details class="lg:hidden">
+        <summary class="list-none [&::-webkit-details-marker]:hidden cursor-pointer inline-flex items-center gap-2 bg-navy text-div-grey px-4 py-3 rounded-t font-display uppercase text-sm">
+            {% call icons::bars() %} Menu
+        </summary>
+        <div class="bg-navy rounded-b overflow-hidden">
+            <ul class="list-none flex flex-col">
+                {% for item in top_bar.tabs %}
+                {% if item.0 == "login" && auth_state.display_name().is_some() %}
+                {% else if item.1 == true %}
+                <li class="border-l-4 border-yellow">
+                    <a class="block px-4 py-2 text-sm text-yellow uppercase font-display" href="/pages/{{item.0}}">{{item.0}}</a>
+                </li>
+                {% else %}
+                <li class="border-l-4 border-transparent">
+                    <a class="block px-4 py-2 text-sm text-div-grey uppercase font-display hover:bg-white/10" href="/pages/{{item.0}}">{{item.0}}</a>
+                </li>
+                {% endif %}
+                {% endfor %}
+            </ul>
+            {% if auth_state.display_name().is_some() %}
+            <div class="flex flex-col border-t border-white/15 text-div-grey">
+                {% if auth_state.is_admin() %}
+                <a class="block border-l-4 px-4 py-2 text-sm uppercase font-display {% if top_bar.active == "admin" %}border-yellow text-yellow{% else %}border-transparent hover:bg-white/10{% endif %}" href="/admin/pages">Admin</a>
+                {% endif %}
+                <a class="block border-l-4 border-transparent px-4 py-2 text-sm uppercase font-display hover:bg-white/10" href="/login/logout">Logout</a>
+                {% if auth_state.is_admin() %}
+                <a class="block border-l-4 px-4 py-2 text-sm uppercase font-display {% if top_bar.active == "admin" %}border-yellow text-yellow{% else %}border-transparent hover:bg-white/10{% endif %}" href="/admin/pages">{% call icons::plus() %} New page</a>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </details>
+</nav>

@@ -122,6 +122,12 @@ async fn editor_route_is_cross_origin_isolated_and_confined() {
         body.contains("fab-gui:ready"),
         "document wires the splash-removal cue: {body}"
     );
+    // CW.10: the editor renders UNDER the real site nav (not a bespoke header) —
+    // the tool region below sticky-pins on scroll while the nav scrolls away.
+    assert!(
+        body.contains("aria-label=\"Primary\""),
+        "editor renders the real site nav: {body}"
+    );
 
     // The isolation must NOT bleed onto the rest of the site.
     let home = reqwest::get(server.url("/")).await.unwrap();
