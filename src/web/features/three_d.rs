@@ -37,14 +37,15 @@ pub fn three_d_router() -> Router<AppState> {
         // COOP/COEP cross-origin isolation stays off the rest of the site. The
         // resource URLs are VERSION-PATHED (`/editor/<ver>/…`) so a bundle bump
         // changes the URL (cache-bust); the glue resolves the wasm relative to its
-        // own path, so the version rides through to fab_web_bg.wasm — both
+        // own path, so the version rides through to fab_gui_bg.wasm — both
         // immutable within a version, and never version-skewed. `{_v}` is ignored
         // (the embed is always the current version; the document only ever links
         // the current path).
         .route("/editor", get(editor_document))
-        // ALL bundle files under the versioned prefix. The 0.8.0+ bundle is a TREE
-        // (fab_web.js/.wasm PLUS an openscad/ worker + wasm + libs.json); the glue
-        // fetches them relative to its own path, so one wildcard serves the lot.
+        // ALL bundle files under the versioned prefix. The fab-gui bundle is a TREE
+        // (fab_gui.js/.wasm PLUS a geom/ Manifold-kernel worker + wasm, and a root
+        // libs.json the app fetches once); the glue fetches them relative to its own
+        // path, so one wildcard serves the lot.
         .route("/editor/{_v}/{*path}", get(editor_asset))
 }
 
@@ -150,28 +151,33 @@ pub async fn show_3d_index(
 
 // ── The WASM slicer/placer editor (Phase CW) ──────────────────────────────────
 
-/// The fab-web WASM bundle, embedded from `$OUT_DIR/fab-web` — build.rs downloads +
-/// sha256-verifies the pinned release and drops the raw 32 MB wasm, so only the
-/// brotli/gzip variants + the JS glue ride in the binary.
+/// The fab-gui WASM bundle, embedded from `$OUT_DIR/fab-gui` — build.rs downloads +
+/// sha256-verifies the pinned release and drops each raw wasm that ships a `.gz`
+/// (the app + the geom kernel when present), so only the brotli/gzip variants + the
+/// JS glue ride in the binary.
 #[derive(RustEmbed)]
-#[folder = "$OUT_DIR/fab-web"]
-struct FabWeb;
+#[folder = "$OUT_DIR/fab-gui"]
+struct FabGui;
 
 /// The pinned bundle version (from build.rs), used to version-path the editor's
 /// resource URLs so a bump busts the cache — same intent as the site's `?cb=`, but
 /// in the PATH because the glue drops the query when resolving the wasm relatively.
-const FAB_WEB_VERSION: &str = env!("FAB_WEB_VERSION");
+const FAB_GUI_VERSION: &str = env!("FAB_GUI_VERSION");
 
 /// The editor's top-level document — the site OWNS it (the bundle ships an
-/// `index.reference.html` to crib from). Two load-bearing pieces from the reference:
-/// the `<canvas id="fab-web">` MUST exist before `init()` — the app binds to it
-/// (missing = panic) and `fit_canvas_to_parent` tracks its parent's size — and the
-/// `init().catch` swallows winit's "control flow" exit exception (it would otherwise
-/// read as a crash). Absolute import path so the glue's `import.meta.url` resolves
-/// the wasm under `/3d/editor/`. COOP/COEP live on THIS document (per the contract —
-/// future wasm-threads headroom; the bundle is single-threaded today). Append
-/// `?demo` for a no-file smoke (loads the embedded sample) — the app reads
-/// `location.search` itself, so the route needs no query handling.
+/// `index.reference.html` to crib from). Framed as a FLEX COLUMN: a real site header
+/// (navy/gold, the ← 3D back link) on top, the canvas filling the region below — the
+/// header owns navigation, the app draws its own tab-bar inside the canvas, no
+/// overlap (fab-gui reads only `data-base`; `data-inset-top` is gone). Load-bearing
+/// pieces from the reference: the `<canvas id="fab-gui">` MUST exist before `init()`
+/// — the app binds to it (missing = panic) and `fit_canvas_to_parent` tracks its
+/// parent (`#stage`) — and `init().catch` swallows winit's "control flow" exit
+/// exception (it would otherwise read as a crash). A BOOT SPLASH covers the ~8.7 MiB
+/// download and lifts on the `fab-gui:ready` document event (a 30s fallback reveals
+/// the canvas anyway, so a boot failure still surfaces its own error). Absolute
+/// import path so the glue's `import.meta.url` resolves the wasm under `/3d/editor/`.
+/// COOP/COEP live on THIS document (per the contract — future wasm-threads headroom;
+/// the bundle is single-threaded today).
 const EDITOR_HTML: &str = r#"<!doctype html>
 <html lang="en">
 <head>
@@ -179,23 +185,52 @@ const EDITOR_HTML: &str = r#"<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>fab — 3D slicer/placer · Christopher Hotchkiss</title>
 <style>
-  html,body{margin:0;height:100%;background:#1a2b4a;overflow:hidden}
+  :root{--navy:#1a2b4a;--navy-2:#24365a;--gold:#ffc935}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--navy);
+            font:14px/1.4 system-ui,sans-serif;color:#e8ecf4}
+  #shell{display:flex;flex-direction:column;height:100%}
+  header{flex:0 0 auto;display:flex;align-items:center;gap:.75rem;height:44px;
+         padding:0 .75rem;background:var(--navy);border-bottom:2px solid var(--gold)}
+  header a.back{color:var(--gold);text-decoration:none;font-weight:600}
+  header a.back:hover{text-decoration:underline}
+  header .title{font-weight:600;letter-spacing:.02em}
+  /* the tool region — the canvas fills it; fit_canvas_to_parent tracks THIS box.
+     min-height:0 lets the flex child shrink instead of overflowing the column. */
+  #stage{flex:1 1 auto;position:relative;min-height:0}
   canvas{display:block;width:100%;height:100%}
-  #back{position:fixed;top:.5rem;left:.5rem;z-index:10;background:#1a2b4a;color:#ffc935;
-        font:600 .8rem system-ui,sans-serif;padding:.35rem .6rem;border-radius:.3rem;text-decoration:none}
-  #back:hover{background:#24365a}
+  #splash{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+          justify-content:center;gap:1rem;background:var(--navy);color:var(--gold);
+          transition:opacity .3s;z-index:5}
+  #splash.hide{opacity:0;pointer-events:none}
+  #splash .ring{width:38px;height:38px;border:4px solid var(--navy-2);border-top-color:var(--gold);
+                border-radius:50%;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #splash .msg{font-weight:600;letter-spacing:.03em}
 </style>
 </head>
 <body>
-<a id="back" href="/3d">&larr; 3D</a>
-<!-- data-inset-top: px of top-left page chrome the app insets its UI under.
-     data-base: where the bundle is MOUNTED — the app resolves lazy openscad/ fetches
-     against this, NOT the document URL (which drops the versioned dir → 404). -->
-<canvas id="fab-web" data-inset-top="44" data-base="__BASE__"></canvas>
+<div id="shell">
+  <header>
+    <a class="back" href="/3d">&larr; 3D</a>
+    <span class="title">Slicer / Placer</span>
+  </header>
+  <div id="stage">
+    <!-- data-base: where the bundle is MOUNTED — the app resolves lazy geom/ + libs.json
+         fetches against THIS, not the document URL (which drops the versioned dir -> 404). -->
+    <canvas id="fab-gui" data-base="__BASE__"></canvas>
+    <div id="splash"><div class="ring"></div><div class="msg">Loading the slicer&hellip;</div></div>
+  </div>
+</div>
 <script type="module">
+  // fab-gui fires `fab-gui:ready` (a document CustomEvent) once its first frame paints — drop the
+  // splash then. Fallback timeout so a boot failure still reveals the canvas + its own error.
+  const splash = document.getElementById('splash');
+  const hide = () => splash && splash.classList.add('hide');
+  document.addEventListener('fab-gui:ready', hide, { once: true });
+  setTimeout(hide, 30000);
   import init from '__GLUE_URL__';
   init().catch(e => {
-    if (!`${e}`.includes('Using exceptions for control flow')) console.error('INIT ERROR:', e);
+    if (!`${e}`.includes('Using exceptions for control flow')) console.error('fab-gui init:', e);
   });
 </script>
 </body>
@@ -207,12 +242,12 @@ const EDITOR_HTML: &str = r#"<!doctype html>
 /// cross-origin isolated.
 async fn editor_document() -> Response {
     // The bundle's mount base — reused for the glue import AND `data-base` (the app
-    // resolves lazy openscad/ fetches against it, not the document URL). Version in
-    // the path so it cache-busts + stays consistent.
-    let base = format!("/3d/editor/{FAB_WEB_VERSION}/");
+    // resolves lazy geom/ + libs.json fetches against it, not the document URL).
+    // Version in the path so it cache-busts + stays consistent.
+    let base = format!("/3d/editor/{FAB_GUI_VERSION}/");
     let html = EDITOR_HTML
         .replace("__BASE__", &base)
-        .replace("__GLUE_URL__", &format!("{base}fab_web.js"));
+        .replace("__GLUE_URL__", &format!("{base}fab_gui.js"));
     Response::builder()
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header("cross-origin-opener-policy", "same-origin")
@@ -222,14 +257,15 @@ async fn editor_document() -> Response {
         .expect("static editor document is a valid response")
 }
 
-/// Serve ANY file from the version-pathed bundle tree (`fab_web.js`, the wasm, and
-/// the `openscad/` worker + wasm + libs.json). Prefers a precompressed sibling the
-/// client accepts (`.br`, then `.gz`) with the matching `Content-Encoding`;
-/// otherwise serves identity — reconstructing it by gunzipping the `.gz` when the
-/// raw was dropped at build (only `fab_web_bg.wasm` is dropped, and it ships a
-/// `.gz`). So a no-`Accept-Encoding` client (curl, a proxy) always gets correct
-/// identity bytes, never a mislabeled compressed blob. `{_v}` is ignored (the embed
-/// is always the current version; the document only ever links the current path).
+/// Serve ANY file from the version-pathed bundle tree (`fab_gui.js`, the wasm, the
+/// `geom/` kernel worker + wasm, and the root `libs.json`). Prefers a precompressed
+/// sibling the client accepts (`.br`, then `.gz`) with the matching
+/// `Content-Encoding`; otherwise serves identity — reconstructing it by gunzipping
+/// the `.gz` when the raw was dropped at build (build.rs drops a raw wasm only when
+/// its `.gz` exists, so this fallback always has one). So a no-`Accept-Encoding`
+/// client (curl, a proxy) always gets correct identity bytes, never a mislabeled
+/// compressed blob. `{_v}` is ignored (the embed is always the current version; the
+/// document only ever links the current path).
 async fn editor_asset(
     Path((_v, path)): Path<(String, String)>,
     headers: HeaderMap,
@@ -238,20 +274,20 @@ async fn editor_asset(
     // A precompressed variant the client accepts, served with its Content-Encoding
     // (so it skips the site's on-the-fly CompressionLayer — never double-compressed).
     if accepts_encoding(&headers, "br") {
-        if let Some(f) = FabWeb::get(&format!("{path}.br")) {
+        if let Some(f) = FabGui::get(&format!("{path}.br")) {
             return bundle_response(f.data, &ctype, Some("br"));
         }
     }
     if accepts_encoding(&headers, "gzip") {
-        if let Some(f) = FabWeb::get(&format!("{path}.gz")) {
+        if let Some(f) = FabGui::get(&format!("{path}.gz")) {
             return bundle_response(f.data, &ctype, Some("gzip"));
         }
     }
     // Identity: the file itself, or gunzip its `.gz` if the raw was dropped.
-    if let Some(f) = FabWeb::get(&path) {
+    if let Some(f) = FabGui::get(&path) {
         return bundle_response(f.data, &ctype, None);
     }
-    if let Some(gz) = FabWeb::get(&format!("{path}.gz")) {
+    if let Some(gz) = FabGui::get(&format!("{path}.gz")) {
         if let Ok(raw) = gunzip(&gz.data) {
             return bundle_response(raw.into(), &ctype, None);
         }
@@ -281,7 +317,7 @@ fn bundle_response(
         .header(header::CONTENT_TYPE, content_type)
         .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
         // The editor document is COEP:require-corp, so its dedicated WORKER
-        // (openscad-worker.js) must ITSELF be served require-corp or the load is
+        // (geom/geom-worker.js) must ITSELF be served require-corp or the load is
         // blocked — a same-origin module/wasm passes without these, but a Worker
         // script does not. CORP satisfies the resource-policy check; both are inert
         // on the non-worker files. (This is the CORP I wrongly dropped, thinking
@@ -319,9 +355,9 @@ fn accepts_encoding(headers: &HeaderMap, enc: &str) -> bool {
 /// A missing bundle file is a build/config error, not a user-fixable 404 — surface
 /// it loudly (500) so a broken embed is obvious.
 fn bundle_missing(name: &str) -> Response {
-    tracing::error!("fab-web bundle file missing from the embed: {name}");
+    tracing::error!("fab-gui bundle file missing from the embed: {name}");
     Response::builder()
         .status(StatusCode::INTERNAL_SERVER_ERROR)
-        .body(Body::from(format!("fab-web bundle incomplete: {name}")))
+        .body(Body::from(format!("fab-gui bundle incomplete: {name}")))
         .expect("error response is valid")
 }

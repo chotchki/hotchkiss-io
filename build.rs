@@ -21,10 +21,12 @@ const TAILWIND_VERSION: &str = "v4.3.0";
 
 /// Pinned fab-scad web bundle — the WASM slicer/placer editor served under `/3d`
 /// (Phase CW). The GitHub release tag is `web-v<version>`; the asset is
-/// `fab-web-<version>.tar.gz`. Bumping the version re-downloads (a sibling marker
-/// in OUT_DIR holds the fetched version).
-const FAB_WEB_VERSION: &str = "0.11.0";
-const FAB_WEB_TAG: &str = "web-v0.11.0";
+/// `fab-gui-<version>.tar.gz`. Bumping the version re-downloads (a sibling marker
+/// in OUT_DIR holds the fetched version). fab-gui replaced fab-web (one codebase
+/// desktop + web; the OpenSCAD side-module is gone — scad-rs renders in the geom
+/// worker now). CONFIRM this const matches the ACTUAL published tag before build.
+const FAB_GUI_VERSION: &str = "0.12.0";
+const FAB_GUI_TAG: &str = "web-v0.12.0";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -108,40 +110,42 @@ async fn main() -> Result<()> {
     io::stderr().write_all(&output.stderr)?;
     assert!(output.status.success(), "tailwind css build failed");
 
-    fetch_fab_web(&out_dir)
+    fetch_fab_gui(&out_dir)
         .await
-        .context("fetching the pinned fab-web WASM bundle")?;
+        .context("fetching the pinned fab-gui WASM bundle")?;
     // Expose the pinned version to the runtime so the editor version-paths its
     // resource URLs (cache-bust — the URL changes only on a bundle bump, letting
     // the glue + wasm cache `immutable` and stay version-consistent).
-    println!("cargo::rustc-env=FAB_WEB_VERSION={FAB_WEB_VERSION}");
+    println!("cargo::rustc-env=FAB_GUI_VERSION={FAB_GUI_VERSION}");
 
     Ok(())
 }
 
-/// Download + extract the pinned fab-web WASM bundle into `$OUT_DIR/fab-web` (the
+/// Download + extract the pinned fab-gui WASM bundle into `$OUT_DIR/fab-gui` (the
 /// rust-embed folder), version-keyed by a sibling marker so a bump re-downloads —
 /// same shape as the Tailwind CLI fetch. The per-file sha256 in `manifest.json` is
-/// asserted (a corrupt/tampered download fails the build), then the raw 32 MB
-/// `fab_web_bg.wasm` is dropped: rust-embed carries only the brotli/gzip variants +
-/// the JS glue (~17 MB, not ~49), and the route serves the precompressed wasm.
-async fn fetch_fab_web(out_dir: &str) -> Result<()> {
-    let dir = Path::new(out_dir).join("fab-web");
-    let marker = Path::new(out_dir).join("fab-web.version");
+/// asserted (a corrupt/tampered download fails the build), then each raw wasm whose
+/// `.gz` sibling ships is dropped: rust-embed carries only the brotli/gzip variants +
+/// the JS glue, and the route serves the precompressed wasm — `editor_asset`
+/// reconstructs identity by gunzipping the `.gz` for a no-Accept-Encoding client (so
+/// a raw without a `.gz` is KEPT, not dropped — see the drop loop below).
+async fn fetch_fab_gui(out_dir: &str) -> Result<()> {
+    let dir = Path::new(out_dir).join("fab-gui");
+    let marker = Path::new(out_dir).join("fab-gui.version");
     let up_to_date = std::fs::read_to_string(&marker)
-        .map(|v| v.trim() == FAB_WEB_VERSION)
+        .map(|v| v.trim() == FAB_GUI_VERSION)
         .unwrap_or(false);
     if up_to_date && dir.is_dir() {
         return Ok(());
     }
 
     let url = format!(
-        "https://github.com/chotchki/fab-scad/releases/download/{FAB_WEB_TAG}/fab-web-{FAB_WEB_VERSION}.tar.gz"
+        "https://github.com/chotchki/fab-scad/releases/download/{FAB_GUI_TAG}/fab-gui-{FAB_GUI_VERSION}.tar.gz"
     );
     let bytes = reqwest::get(&url)
         .await?
         .error_for_status()
-        .with_context(|| format!("downloading the fab-web bundle from {url}"))?
+        .with_context(|| format!("downloading the fab-gui bundle from {url}"))?
         .bytes()
         .await?;
 
@@ -152,24 +156,33 @@ async fn fetch_fab_web(out_dir: &str) -> Result<()> {
     let gz = flate2::read::GzDecoder::new(Cursor::new(bytes.as_ref()));
     tar::Archive::new(gz)
         .unpack(&dir)
-        .context("unpacking the fab-web tar.gz")?;
+        .context("unpacking the fab-gui tar.gz")?;
 
-    verify_fab_web(&dir).context("verifying fab-web sha256 against manifest.json")?;
+    verify_fab_gui(&dir).context("verifying fab-gui sha256 against manifest.json")?;
 
-    // The .br/.gz variants (served precompressed) cover every browser that can run
-    // this app, so the raw 32 MB wasm has no runtime use — drop it before embed.
-    let _ = std::fs::remove_file(dir.join("fab_web_bg.wasm"));
+    // Drop each raw wasm ONLY when its `.gz` sibling exists — `editor_asset`
+    // reconstructs identity by GUNZIPPING the `.gz` for a no-Accept-Encoding client
+    // (it can't brotli-decode), so a wasm that ships only `.br` MUST keep its raw or
+    // that client 500s. fab-web shipped a `.gz` for the app wasm but only `.br` for
+    // the geom kernel; the migration doc says fab-gui adds the geom `.gz` too — this
+    // makes the drop safe-by-construction either way (both dropped when the .gz is
+    // present, the geom raw kept if it isn't) instead of trusting that claim blind.
+    for raw in ["fab_gui_bg.wasm", "geom/fab_geom_bg.wasm"] {
+        if dir.join(format!("{raw}.gz")).is_file() {
+            let _ = std::fs::remove_file(dir.join(raw));
+        }
+    }
 
-    std::fs::write(&marker, FAB_WEB_VERSION)?;
+    std::fs::write(&marker, FAB_GUI_VERSION)?;
     Ok(())
 }
 
 /// Assert every file `manifest.json` lists hashes to its declared sha256 — the
-/// build-time half of the fab-web contract.
-fn verify_fab_web(dir: &Path) -> Result<()> {
+/// build-time half of the fab-gui contract.
+fn verify_fab_gui(dir: &Path) -> Result<()> {
     use sha2::{Digest, Sha256};
     let manifest_raw =
-        std::fs::read_to_string(dir.join("manifest.json")).context("reading fab-web manifest.json")?;
+        std::fs::read_to_string(dir.join("manifest.json")).context("reading fab-gui manifest.json")?;
     let manifest: serde_json::Value = serde_json::from_str(&manifest_raw)?;
     let sums = manifest
         .get("sha256")
@@ -182,7 +195,7 @@ fn verify_fab_web(dir: &Path) -> Result<()> {
         let got = format!("{:x}", Sha256::digest(&bytes));
         anyhow::ensure!(
             got == want,
-            "fab-web {name}: sha256 mismatch (want {want}, got {got})"
+            "fab-gui {name}: sha256 mismatch (want {want}, got {got})"
         );
     }
     Ok(())

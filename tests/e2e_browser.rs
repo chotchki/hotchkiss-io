@@ -608,3 +608,122 @@ async fn family_library_gate_login_next_and_entry() {
     let _ = std::fs::remove_dir_all(&profile);
     drop(server);
 }
+
+// ── Editor boot e2e (fab-gui migration, CW.9) ────────────────────────────────
+/// Loads `/3d/editor` in real headless Chrome and asserts the fab-gui WASM app
+/// BOOTS end-to-end — coverage the direct-fetch integration tests (three_d.rs)
+/// can't give: a real browser resolving the version-pathed bundle subresources
+/// relative to the glue, instantiating the wasm, and enforcing COOP/COEP. Hard
+/// asserts: every editor subresource loads (no 404), the `#fab-gui` bind canvas
+/// exists, the context is actually cross-origin isolated (the isolation TOOK, not
+/// just that headers were sent), no fatal wasm error hit the console, and the boot
+/// splash LIFTS on the app's `fab-gui:ready` event (the "~8.7 MiB download isn't a
+/// blank page" contract). The 3D render runs on headless SwiftShader; the
+/// splash-lift is the only GPU/timing-sensitive assertion — the rest are deterministic.
+#[tokio::test]
+async fn editor_boots_in_browser() {
+    use chromiumoxide::cdp::browser_protocol::log::{
+        EnableParams as LogEnableParams, EventEntryAdded, LogEntryLevel, LogEntrySource,
+    };
+    let _e2e = e2e_lock().await;
+    let server: TestServer = spawn_test_server().await.expect("spawn harness");
+    let (mut browser, handle, profile) = launch().await;
+    let page = browser.new_page("about:blank").await.expect("new page");
+
+    page.execute(LogEnableParams::default()).await.expect("Log.enable");
+    let mut entries = page
+        .event_listener::<EventEntryAdded>()
+        .await
+        .expect("log listener");
+    let collected: std::sync::Arc<
+        std::sync::Mutex<Vec<(LogEntrySource, LogEntryLevel, String, Option<String>)>>,
+    > = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = collected.clone();
+    let log_task = tokio::spawn(async move {
+        while let Some(ev) = entries.next().await {
+            let e = &ev.entry;
+            sink.lock()
+                .unwrap()
+                .push((e.source.clone(), e.level.clone(), e.text.clone(), e.url.clone()));
+        }
+    });
+
+    page.goto(server.url("/3d/editor")).await.expect("goto /3d/editor");
+
+    // Wait for the splash to lift on `fab-gui:ready` (the app booted + painted).
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut booted = false;
+    while Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let hidden: bool = page
+            .evaluate("(function(){var s=document.getElementById('splash');return !!(s&&s.classList.contains('hide'));})()")
+            .await
+            .ok()
+            .and_then(|r| r.into_value().ok())
+            .unwrap_or(false);
+        if hidden {
+            booted = true;
+            break;
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await; // flush late error logs
+
+    let canvas_present: bool = page
+        .evaluate("!!document.getElementById('fab-gui')")
+        .await
+        .ok()
+        .and_then(|r| r.into_value().ok())
+        .unwrap_or(false);
+    let cross_origin_isolated: bool = page
+        .evaluate("window.crossOriginIsolated === true")
+        .await
+        .ok()
+        .and_then(|r| r.into_value().ok())
+        .unwrap_or(false);
+
+    let logs = collected.lock().unwrap().clone();
+    let mut subresource_failures = Vec::new();
+    let mut fatal_wasm = Vec::new();
+    for (src, lvl, text, url) in &logs {
+        let is_editor_sub = url.as_deref().map(|u| u.contains("/3d/editor/")).unwrap_or(false);
+        if matches!(lvl, LogEntryLevel::Error) && matches!(src, LogEntrySource::Network) && is_editor_sub {
+            subresource_failures.push(format!("{text} — {}", url.as_deref().unwrap_or("")));
+        }
+        let t = text.to_lowercase();
+        if matches!(lvl, LogEntryLevel::Error)
+            && (t.contains("runtimeerror")
+                || t.contains("could not grow")
+                || t.contains("unreachable executed")
+                || t.contains("panicked"))
+        {
+            fatal_wasm.push(text.clone());
+        }
+    }
+    // On any failure, dump the whole log so the CI output shows what happened.
+    if !booted || !subresource_failures.is_empty() || !fatal_wasm.is_empty() || !canvas_present || !cross_origin_isolated {
+        eprintln!("--- editor boot diagnostics: {} log entries ---", logs.len());
+        for (src, lvl, text, url) in &logs {
+            eprintln!("[{src:?}/{lvl:?}] {text} {}", url.as_deref().unwrap_or(""));
+        }
+    }
+
+    browser.close().await.ok();
+    handle.abort();
+    log_task.abort();
+    let _ = std::fs::remove_dir_all(profile);
+
+    assert!(
+        subresource_failures.is_empty(),
+        "editor bundle subresource(s) failed to load: {subresource_failures:?}"
+    );
+    assert!(fatal_wasm.is_empty(), "fatal wasm error(s) in console: {fatal_wasm:?}");
+    assert!(canvas_present, "the #fab-gui bind canvas is missing from the served document");
+    assert!(
+        cross_origin_isolated,
+        "the editor context is not cross-origin isolated (COOP/COEP did not take in the browser)"
+    );
+    assert!(
+        booted,
+        "the boot splash never lifted — fab-gui:ready did not fire within 30s (the app failed to boot)"
+    );
+}
