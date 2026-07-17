@@ -23,10 +23,15 @@ use crate::web::{
     features::top_bar::TopBar, html_template::HtmlTemplate, session::SessionData,
 };
 
-/// Read at most the last 256 KiB of the log — NEVER slurp a multi-GB file.
+/// Read at most the last 256 KiB of EACH log file — NEVER slurp a multi-GB file.
 const TAIL_BYTES: u64 = 256 * 1024;
 /// And show at most this many lines (after the level filter), newest-first.
 const TAIL_LINES: usize = 800;
+/// Walk back at most this many daily-rotated files looking for `TAIL_LINES`
+/// matches (DM.9). Bounds the work while covering ~a work-week — enough that an
+/// ERROR which rotated into an older file is still found, not structurally
+/// hidden the moment today's file fills with newer noise.
+const MAX_FILES: usize = 5;
 
 /// Level filter for the viewer. `Warn` means warn-AND-above (warn + error).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -107,35 +112,67 @@ pub async fn show_logs(
     Ok(HtmlTemplate(tmpl).into_response())
 }
 
-/// Find the newest `hotchkiss.io.log*` under `dir` (tracing's DAILY rotation
-/// suffixes a date, and there's an `access.log` sibling we skip), read its last
-/// `TAIL_BYTES`, and return up to `TAIL_LINES` lines newest-first, filtered to
-/// `level`. Returns (lines, filename). A missing dir / no log file is an EMPTY
+/// Read the app-log tail newest-first, filtered to `level`, WALKING BACK across
+/// tracing's DAILY-rotated `hotchkiss.io.log*` files (skipping the `access.log`
+/// sibling) until `TAIL_LINES` matches are collected or `MAX_FILES` files are
+/// read. Returns (lines, sources) where `sources` names each file that actually
+/// contributed a line, newest-first. A missing dir / no log file is an EMPTY
 /// tail, not an error.
+///
+/// DM.9: the pre-fix version read only the SINGLE newest file, so an ERROR that
+/// had rotated into yesterday's file went invisible the moment today's file
+/// filled its 256 KiB tail with newer noise — a warn/error view could read empty
+/// while the incident sat one file over. Under `All` today's file usually fills
+/// the budget alone (same as before); the walk-back only kicks in when the
+/// filter leaves the newest file short — exactly the error-hunting case.
 fn read_log_tail(dir: &Path, level: LogLevel) -> anyhow::Result<(Vec<String>, String)> {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return Ok((Vec::new(), String::new())), // dir not created yet
     };
-    let mut newest: Option<(SystemTime, PathBuf)> = None;
+
+    // Every app-log file, newest mtime first (access.log* and others skipped).
+    let mut files: Vec<(SystemTime, PathBuf)> = Vec::new();
     for entry in entries.flatten() {
-        let name = entry.file_name();
-        if !name.to_string_lossy().starts_with("hotchkiss.io.log") {
-            continue; // skip access.log* and anything else
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("hotchkiss.io.log")
+        {
+            continue;
         }
         let mtime = entry
             .metadata()
             .and_then(|m| m.modified())
             .unwrap_or(UNIX_EPOCH);
-        if newest.as_ref().is_none_or(|(t, _)| mtime > *t) {
-            newest = Some((mtime, entry.path()));
+        files.push((mtime, entry.path()));
+    }
+    files.sort_by_key(|(mtime, _)| std::cmp::Reverse(*mtime)); // newest first
+
+    let mut out: Vec<String> = Vec::new();
+    let mut sources: Vec<String> = Vec::new();
+    for (_, path) in files.into_iter().take(MAX_FILES) {
+        if out.len() >= TAIL_LINES {
+            break;
+        }
+        let file_lines = read_one_tail(&path, level)?; // newest-first, filtered
+        if file_lines.is_empty() {
+            continue; // don't credit a file that contributed nothing
+        }
+        let remaining = TAIL_LINES - out.len();
+        out.extend(file_lines.into_iter().take(remaining));
+        if let Some(name) = path.file_name() {
+            sources.push(name.to_string_lossy().into_owned());
         }
     }
-    let Some((_, path)) = newest else {
-        return Ok((Vec::new(), String::new()));
-    };
 
-    let mut f = std::fs::File::open(&path)?;
+    Ok((out, sources.join(", ")))
+}
+
+/// Read the last `TAIL_BYTES` of ONE file and return its lines matching `level`,
+/// newest-first.
+fn read_one_tail(path: &Path, level: LogLevel) -> anyhow::Result<Vec<String>> {
+    let mut f = std::fs::File::open(path)?;
     let len = f.metadata()?.len();
     let start = len.saturating_sub(TAIL_BYTES);
     f.seek(SeekFrom::Start(start))?;
@@ -148,19 +185,12 @@ fn read_log_tail(dir: &Path, level: LogLevel) -> anyhow::Result<(Vec<String>, St
     if start > 0 && !lines.is_empty() {
         lines.remove(0);
     }
-    let out: Vec<String> = lines
+    Ok(lines
         .iter()
         .filter(|l| level.matches(l))
         .rev() // newest-first
-        .take(TAIL_LINES)
         .map(|s| s.to_string())
-        .collect();
-
-    let source = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    Ok((out, source))
+        .collect())
 }
 
 #[cfg(test)]
@@ -179,17 +209,19 @@ mod tests {
     }
 
     #[test]
-    fn tail_reads_newest_file_filters_level_and_reverses() {
+    fn tail_walks_files_newest_first_and_filters() {
         let dir = std::env::temp_dir().join(format!("hio-logtest-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        // an OLDER rotated file + an access.log sibling — both must be ignored.
+        // an OLDER rotated file (INFO only) + an access.log sibling. The access
+        // sibling is ALWAYS ignored; the older app-log is now walked into when
+        // the newest file leaves the budget unfilled (DM.9).
         write_with_mtime(
             &dir.join("hotchkiss.io.log.2026-06-28"),
-            "2026-06-28T00:00:00Z  INFO old: ignore me\n",
+            "2026-06-28T00:00:00Z  INFO old: from yesterday\n",
             1_000,
         );
         write_with_mtime(&dir.join("access.log.2026-06-29"), "irrelevant access line\n", 9_000);
-        // the NEWEST app log (by mtime) — what we should tail.
+        // the NEWEST app log (by mtime).
         write_with_mtime(
             &dir.join("hotchkiss.io.log.2026-06-29"),
             "2026-06-29T00:00:01Z  INFO t: first\n\
@@ -198,21 +230,54 @@ mod tests {
             2_000,
         );
 
+        // All: both app-log files, newest-first, older file's line last; the
+        // access.log sibling is never included.
         let (all, src) = read_log_tail(&dir, LogLevel::All).unwrap();
-        assert_eq!(src, "hotchkiss.io.log.2026-06-29");
-        assert_eq!(all.len(), 3);
+        assert_eq!(all.len(), 4);
         assert!(all[0].contains("a problem"), "newest line first");
-        assert!(all[2].contains("first"));
-        assert!(!all.iter().any(|l| l.contains("ignore me")), "not the older file");
+        assert!(all[3].contains("from yesterday"), "older file walked in, last");
         assert!(!all.iter().any(|l| l.contains("access line")), "not access.log");
+        assert_eq!(src, "hotchkiss.io.log.2026-06-29, hotchkiss.io.log.2026-06-28");
 
-        let (warn, _) = read_log_tail(&dir, LogLevel::Warn).unwrap();
+        // Warn / Error: only the newest file has matches, so the older INFO-only
+        // file contributes nothing and isn't credited as a source.
+        let (warn, warn_src) = read_log_tail(&dir, LogLevel::Warn).unwrap();
         assert_eq!(warn.len(), 2, "warn + error");
         assert!(warn.iter().all(|l| l.contains("WARN") || l.contains("ERROR")));
+        assert_eq!(warn_src, "hotchkiss.io.log.2026-06-29");
 
         let (err, _) = read_log_tail(&dir, LogLevel::Error).unwrap();
         assert_eq!(err.len(), 1);
         assert!(err[0].contains("a problem"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// DM.9 regression guard: an ERROR that rotated into an OLDER file must still
+    /// surface when today's (newest) file has no matching line — the exact
+    /// blind spot the single-newest-file tail created.
+    #[test]
+    fn error_in_older_file_is_found_when_newest_lacks_it() {
+        let dir = std::env::temp_dir().join(format!("hio-logtest-older-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Yesterday: the ERROR we're hunting.
+        write_with_mtime(
+            &dir.join("hotchkiss.io.log.2026-06-28"),
+            "2026-06-28T09:00:00Z ERROR boot: the incident\n",
+            1_000,
+        );
+        // Today: only INFO — the old code would have stopped here and reported
+        // an empty error view.
+        write_with_mtime(
+            &dir.join("hotchkiss.io.log.2026-06-29"),
+            "2026-06-29T00:00:01Z  INFO t: nothing wrong today\n",
+            2_000,
+        );
+
+        let (err, src) = read_log_tail(&dir, LogLevel::Error).unwrap();
+        assert_eq!(err.len(), 1, "the older file's error is found");
+        assert!(err[0].contains("the incident"));
+        assert_eq!(src, "hotchkiss.io.log.2026-06-28", "credited to the older file");
 
         std::fs::remove_dir_all(&dir).ok();
     }

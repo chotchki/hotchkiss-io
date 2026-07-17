@@ -151,6 +151,72 @@ async fn passkey_registration_then_admin_dashboard() {
     drop(server);
 }
 
+/// DM.1: a cancelled/failed passkey ceremony must surface a VISIBLE error — the
+/// exact incident (a dismissed sheet was a silent unhandled rejection, no DOM
+/// write, no console on a phone). We simulate the cancel by patching
+/// `navigator.credentials.create` to reject with `NotAllowedError` (the register
+/// extension reads it at call time, so a post-load patch takes effect); the
+/// ceremony's `.catch` must then fill `#error_message` and must NOT navigate away
+/// as if it succeeded. No virtual authenticator needed — create() never runs for
+/// real.
+#[tokio::test]
+async fn cancelled_registration_surfaces_a_visible_error() {
+    let _e2e = e2e_lock().await;
+    let server: TestServer = spawn_test_server().await.expect("spawn harness");
+    let (mut browser, handle, profile) = launch().await;
+    let page = browser.new_page("about:blank").await.expect("new page");
+
+    page.goto(server.url("/login")).await.expect("goto /login");
+
+    // Simulate the user dismissing the passkey sheet (or a timeout).
+    let _: bool = js(
+        &page,
+        "(() => { navigator.credentials.create = () => \
+         Promise.reject(Object.assign(new Error('x'), { name: 'NotAllowedError' })); \
+         return true; })()",
+    )
+    .await;
+
+    let username = page.find_element("#username").await.expect("#username");
+    username.click().await.expect("focus #username");
+    username.type_str("e2e-cancel").await.expect("type username");
+    page.find_element("button[type=submit]")
+        .await
+        .expect("submit button")
+        .click()
+        .await
+        .expect("click submit");
+
+    // The .catch must write the error slot (pre-DM this stayed empty forever).
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let msg = loop {
+        assert!(
+            Instant::now() < deadline,
+            "no visible error after a cancelled ceremony — DM.1 .catch regressed"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let m: String =
+            js(&page, "document.getElementById('error_message').textContent").await;
+        if !m.trim().is_empty() {
+            break m;
+        }
+    };
+    let lower = msg.to_lowercase();
+    assert!(
+        lower.contains("cancel") || lower.contains("try again"),
+        "error should explain the cancel; got {msg:?}"
+    );
+
+    // And we did NOT falsely navigate to a logged-in page.
+    let url = page.url().await.ok().flatten().unwrap_or_default();
+    assert!(url.contains("/login"), "stayed on /login after failure; url={url}");
+
+    browser.close().await.ok();
+    handle.await.ok();
+    let _ = std::fs::remove_dir_all(&profile);
+    drop(server);
+}
+
 /// Evaluate a JS expression on the page and return it as a JSON value.
 async fn js<T: serde::de::DeserializeOwned>(page: &Page, expr: &str) -> T {
     page.evaluate(expr)

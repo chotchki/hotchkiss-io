@@ -3882,3 +3882,110 @@ async fn duplicate_slug_create_returns_409_over_http() {
         "the raw SQLite constraint must not leak: {body}"
     );
 }
+
+// ---- Phase DM: auth flows fail loud (user + operator feedback) -------------
+
+/// DM.4: the login page carries a `<noscript>` explainer, a server-fillable
+/// error slot, and a native/htmx fallback that lands on `/login/js_required`
+/// (not a silent reload or a 401 loop).
+#[tokio::test]
+async fn login_page_has_noscript_and_js_fallback() {
+    let server = spawn_test_server().await.expect("spawn");
+    let body = client()
+        .get(server.url("/login"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(body.contains("<noscript>"), "noscript explainer present");
+    assert!(
+        body.contains("/login/js_required"),
+        "form falls back to the js_required route, not a silent reload"
+    );
+    assert!(
+        body.contains("id=\"error_message\""),
+        "the error slot the ceremony JS writes into is present"
+    );
+}
+
+/// DM.4: the fallback route itself renders a real "you need JavaScript" message
+/// at 200 — a public GET, so it never trips the mutation gate into a 401 loop.
+#[tokio::test]
+async fn js_required_fallback_renders_message() {
+    let server = spawn_test_server().await.expect("spawn");
+    let resp = client()
+        .get(server.url("/login/js_required"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.text().await.unwrap();
+    assert!(
+        body.contains("JavaScript"),
+        "explicit message, not a silent reload: {}",
+        &body[..body.len().min(400)]
+    );
+}
+
+/// DM.6: a taken display_name is rejected at `start_register` — BEFORE the
+/// passkey is minted — with a real 409, and the raw PK-constraint text never
+/// leaks (mirrors the duplicate-slug contract).
+#[tokio::test]
+async fn duplicate_display_name_rejected_before_ceremony() {
+    let server = spawn_test_server().await.expect("spawn");
+    server.seed_user("taken", "Registered").await.unwrap();
+
+    let resp = client()
+        .get(server.url("/login/start_register/taken"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::CONFLICT,
+        "a taken name is a 409 before the ceremony starts"
+    );
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("already taken"), "actionable message: {body}");
+    assert!(
+        !body.to_uppercase().contains("UNIQUE") && !body.contains("users"),
+        "the raw SQLite constraint / table must not leak: {body}"
+    );
+}
+
+/// DM.6/DM.7: an AVAILABLE, valid name is NOT blocked — `start_register` returns
+/// the real WebAuthn challenge (200). Guards against the pre-check over-blocking.
+#[tokio::test]
+async fn available_display_name_starts_registration() {
+    let server = spawn_test_server().await.expect("spawn");
+    let resp = client()
+        .get(server.url("/login/start_register/brand-new-name"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.text().await.unwrap();
+    assert!(
+        body.contains("challenge") && body.contains("publicKey"),
+        "returns the creation challenge: {}",
+        &body[..body.len().min(200)]
+    );
+}
+
+/// DM.7: an over-long name is a real 400 with a reason — not a 500, a silent
+/// truncation, or a route 404.
+#[tokio::test]
+async fn invalid_display_name_rejected_with_reason() {
+    let server = spawn_test_server().await.expect("spawn");
+    let long = "x".repeat(65);
+    let resp = client()
+        .get(server.url(&format!("/login/start_register/{long}")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("too long"), "reason surfaced: {body}");
+}

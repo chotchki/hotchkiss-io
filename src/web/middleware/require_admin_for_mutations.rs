@@ -1,4 +1,5 @@
 use axum::{extract::Request, http::Method, middleware::Next, response::Response};
+use tracing::{info, warn};
 
 use crate::db::dao::roles::Role;
 use crate::web::error_page::{forbidden_response, unauthorized_response};
@@ -64,8 +65,25 @@ pub async fn require_admin_for_mutations(
     if session_data.auth_state.is_admin() {
         next.run(req).await
     } else if session_data.auth_state.is_authenticated() {
+        // A logged-in NON-admin denied a mutation is genuinely notable (a real
+        // account, or a stale/compromised session, hitting an admin route) —
+        // WARN so the /admin/logs warn|error filter surfaces it (DM.9).
+        warn!(
+            method = %req.method(),
+            path = req.uri().path(),
+            role = %session_data.auth_state.role(),
+            "mutation denied: authenticated but not admin (403)"
+        );
         forbidden_response(req.headers())
     } else {
+        // Anonymous mutation attempts are mostly bot probes — INFO (visible in
+        // the "all" view, kept OUT of warn|error) so the routine noise doesn't
+        // drown the notable 403s above.
+        info!(
+            method = %req.method(),
+            path = req.uri().path(),
+            "mutation denied: no valid identity (401)"
+        );
         unauthorized_response(req.headers())
     }
 }

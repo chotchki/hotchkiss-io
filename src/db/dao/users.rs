@@ -80,6 +80,32 @@ impl UserDao {
         .await?)
     }
 
+    /// Look a user up by their `display_name` (the table's PRIMARY KEY). Backs
+    /// the registration pre-check (DM.6): reject a taken name BEFORE the passkey
+    /// is minted on the device, so a collision doesn't strand a real credential
+    /// behind a bare 500.
+    pub async fn find_by_display_name(
+        pool: &SqlitePool,
+        display_name: &str,
+    ) -> Result<Option<UserDao>> {
+        Ok(query_as!(
+            UserDao,
+            r#"
+        SELECT
+            display_name,
+            id as "id: uuid::fmt::Hyphenated",
+            keys as "keys: sqlx::types::Json<Vec<Passkey>>",
+            app_role as "role: Role"
+        FROM users
+        WHERE
+            display_name = ?1
+    "#,
+            display_name
+        )
+        .fetch_optional(pool)
+        .await?)
+    }
+
     pub async fn find_by_uuid(pool: &SqlitePool, uuid: &Uuid) -> Result<Option<UserDao>> {
         let temp_uuid = uuid.to_string();
         Ok(query_as!(

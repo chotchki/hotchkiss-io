@@ -15,14 +15,30 @@
     </div>
 </form>
 {% else %}
+<noscript>
+    <div class="rounded-md border-2 border-navy p-2 mb-2 text-navy">
+        Registering and signing in use <strong>passkeys</strong>, which need
+        JavaScript. Please enable JavaScript and use a recent Safari (16.4+),
+        Chrome, or Firefox.
+    </div>
+</noscript>
+{# The register extension cancels this htmx request and runs the passkey
+   ceremony. If htmx or the extension fails to load, the native/htmx fallback
+   lands on the public GET /login/js_required (a real message) instead of a
+   silent reload or a 401 HX-Redirect loop (DM.4). #}
 <form
     class="rounded-md border-2 border-navy"
     hx-ext="webauthn-autofill,webauthn-register"
     webauthn-autofill="true"
     hx-webauthn-register
-    hx-post="/login/not-needed"
+    hx-get="/login/js_required"
+    action="/login/js_required"
+    method="get"
 >
-    <div id="error_message"></div>
+    {# Error slot: the ceremony JS writes failures here (DM.1/2/3), and the
+       server pre-fills it on the js_required fallback. empty:hidden so an empty
+       slot adds no red gap. #}
+    <div id="error_message" class="text-red-700 px-2 empty:hidden">{% match error %}{% when Some with (msg) %}{{ msg }}{% when None %}{% endmatch %}</div>
     <div class="p-2">
         <label for="username">Username:</label>
         <input

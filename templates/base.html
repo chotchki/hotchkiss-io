@@ -30,6 +30,10 @@
        htmx.* at parse time (htmx-webauthn, htmx-sortable, the stl-view module)
        MUST also defer so it runs after htmx (defer preserves document order). #}
     <script defer src="/vendor/htmx/htmx-2.0.4.min.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+    {# Site-wide htmx failure surfacing (DM.8): a non-2xx with no swap becomes a
+       visible toast instead of a silent no-op. Deferred + after htmx (binds its
+       events). #}
+    <script defer src="/scripts/htmx-errors.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 
     {% block head %}{% endblock %}
 </head>
