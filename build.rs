@@ -25,8 +25,8 @@ const TAILWIND_VERSION: &str = "v4.3.0";
 /// in OUT_DIR holds the fetched version). fab-gui replaced fab-web (one codebase
 /// desktop + web; the OpenSCAD side-module is gone — scad-rs renders in the geom
 /// worker now). CONFIRM this const matches the ACTUAL published tag before build.
-const FAB_GUI_VERSION: &str = "0.15.0";
-const FAB_GUI_TAG: &str = "web-v0.15.0";
+const FAB_GUI_VERSION: &str = "0.16.0";
+const FAB_GUI_TAG: &str = "web-v0.16.0";
 
 #[tokio::main]
 async fn main() -> Result<()> {
