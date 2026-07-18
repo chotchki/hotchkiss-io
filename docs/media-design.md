@@ -1,0 +1,411 @@
+# Media subsystem — design & contract
+
+THE single source of truth for hotchkiss.io's media. This ABSORBS the former
+`docs/fab-scad-roundtrip.md` and the CLAUDE.md "Media" paragraph — read it before
+touching `src/media/`, `web/features/media.rs`, `web/features/admin/media.rs`, or
+the `media` / `media_variant` schema.
+
+Each section is tagged **[SHIPPED]** (in prod), **[TARGET]** (the design we're
+rationalizing toward — not built yet), or plain (background). The gap between
+SHIPPED and TARGET is the [Rationalization backlog](#11-rationalization-backlog).
+
+---
+
+## 1. Model & principles
+
+ALL binary media — images, video, audio, STLs/3MF, OpenSCAD, arbitrary files —
+lives in a content-addressed **disk store**, NOT SQLite BLOBs. One logical **item**
+(`media`) carries N **variants** (`media_variant`) — a video's HEVC + AV1 encodes +
+an auto-poster; an image's responsive AVIF ladder; a model's SCAD source + low/high
+meshes; an audiobook's AAC track + cover art. The bytes live on disk sharded by
+`sha256`; the DB rows are metadata.
+
+Two IDENTIFIERS, both unguessable, each with a job:
+- **`media_ref`** — the opaque **UUIDv7** author token. It IS the item's stable
+  identity: `![](/media/<ref>)` embeds, `/media/<ref>` the resource. NEVER changes,
+  even when the bytes behind it do (this is why we need no "superseded-by" pointer).
+- **`url_key`** — `HMAC-SHA256(crypto_keys id 2, sha)`, per-VARIANT. The byte route
+  `/media/file/<url_key>` key. Deterministic in the content, so identical bytes
+  dedup to one key; it CHANGES when the bytes change (a re-encode / a round-trip
+  save mints new keys — embed by `ref`, never by pasted `url_key`).
+
+**Organizing principle — HATEOAS.** `/media/<ref>` is a RESOURCE that describes its
+own representations and controls. A caller (the browser, fab-gui, a script, a future
+SPA) discovers what variants exist and where to write from the resource itself —
+never from a hardcoded URL shape or a memorized format vocabulary. The site owns its
+URLs; clients follow the `href`s they're handed. This is the frame the whole
+subsystem rationalizes toward: uniform negotiation on `/media/<ref>` for EVERY kind,
+with kind-specific logic confined to the presentation layer (the embed).
+
+---
+
+## 2. Storage — `MediaStore` (`src/media/`)  [SHIPPED]
+
+Files under the configured `Settings.media_paths` roots, sharded `ab/cd/<sha256>`,
+atomic temp+rename, dedup by content.
+
+- **Streaming ingest.** `MediaStore::stage()` → `StagedBlob`: upload bytes stream
+  chunk-by-chunk to a temp in `<root>/.staging`, hashed incrementally (`sha2`), then
+  atomic-renamed into `ab/cd/<sha>` (or dedup'd + dropped). So a multi-GB upload is
+  disk-bound, not RAM-bound (the old `field.bytes()→Vec<u8>` OOM'd near free-RAM).
+  An aborted upload self-cleans on `Drop`. `store(&[u8])` is the in-memory twin
+  (posters, resizes) — identical digest, so dedup is consistent across both paths.
+- **Multi-drive (CJ).** `media_paths` is an ORDERED list; `pick_write_root` fills
+  the first root with `media_min_free_bytes` headroom UP FRONT (so the commit rename
+  stays intra-volume — a cross-volume rename is `EXDEV`) and falls through to the
+  next when a drive drops below the margin. A root is a write target ONLY if PRESENT
+  (its dir or parent exists = the drive is mounted): a cleanly-unmounted external
+  root is skipped, never `create_dir_all`'d onto the boot disk (the M1 bug). Configure
+  a SUBDIR under each volume, not the mount root, so the present-check is meaningful.
+- **Resolve.** Each variant records a `storage_root` HINT (nullable); `resolve_path`
+  tries the hint first (O(1)) then first-found-scans all roots — self-healing if a
+  file moved. An unmounted root → that variant 404s. Backblaze covers off-site backup
+  at the filesystem level, so the app never copies media for backup.
+- The `.staging` dir is `--exclude`d from the prod→beta media rsync.
+
+---
+
+## 3. Schema
+
+- **`media`** — `media_id` PK, `media_ref` UNIQUE, `kind` (image/video/stl/audio/file),
+  `title`, `width`/`height`/`duration_ms` (the item's dims), `created_at`,
+  **`min_role`** (NULL = public; the visibility gate, §4), **`chapters`** (JSON
+  `[{start_ms,title}]`, Audio only).
+- **`media_variant`** — `variant_id` PK, `media_id` FK (CASCADE), `sha256`, `url_key`
+  (NON-unique index — content dedup means many rows share a key; see §4 strictest-wins),
+  `mime`, `codecs`, `bytes`, `storage_root` (hint), `width`/`height` (this ENCODING's
+  pixels, for an image's srcset).
+- Migrations of note: `0016` api_keys · `0017` storage_root · `0018` variant width/height
+  · `0026` media.min_role · `0027` chapters. The retired `attachments` table + the dead
+  `page_cover_attachment_id` column intentionally remain (circular FK — a future
+  `-- no-transaction` rebuild drops them).
+- **Typed tokens (DJ.4):** `MediaRef<'a>` (`[A-Za-z0-9_-]`, never UUID-shaped so legacy
+  slug refs resolve) and `UrlKey<'a>` (whose constructor `UrlKey::parse` IS the 64-hex
+  gate). `ModelFormat` (`Scad`/`Stl`/`ThreeMf` + `from_mime`/`is_mesh`) replaced fragile
+  `mime == "model/3mf"` matching. `MediaKind` (image/video/stl/audio/file).
+
+---
+
+## 4. Authorization  [SHIPPED]
+
+Two ORTHOGONAL gates. Both fail closed. Both are enforced OUTSIDE the media handlers
+(the handlers assume the gate already ran) — EXCEPT the read-visibility check, which
+each read path applies because it's per-item data.
+
+### 4a. Mutation gate — who may WRITE (`require_admin_for_mutations`, Phase E)
+
+A single fail-closed layer, site-wide, inner to the session layer. **`GET`/`HEAD`/
+`OPTIONS` are public everywhere** (safe, side-effect-free — an allowlist of SAFE
+methods, NOT a deny-list of known-mutating verbs, so a new route/verb is gated by
+default). **Every other method requires an authenticated Admin.** Decision order:
+safe methods → anonymous WebAuthn ceremony allowlist → role-scoped allowlist
+(rank-checked, currently just `POST /library/progress`@Family) → admin fallback →
+deny. A MISSING identity denies **401** (`unauthorized_response`); an
+authenticated-but-INSUFFICIENT caller denies **403** (`forbidden_response`); the 401
+carries NO `WWW-Authenticate` (deliberate — no basic-auth dialog, no MCP OAuth chase).
+
+So for the media resource, with ZERO bespoke wiring:
+- **Safe reads** — `GET /media/<ref>` (negotiated), `GET /media/file/<key>`, `GET
+  /media/embed/<ref>`, `GET /media/<ref>/variants`, **`OPTIONS /media/<ref>`** — PUBLIC,
+  then read-gated per 4b.
+- **Writes** — `PUT` / `POST` / `DELETE` on `/media`, `/media/<ref>`, and
+  `/media/<ref>/variants` (create, add, replace-all, metadata, delete) — non-safe → admin
+  fallback → **Admin only**, automatically. They can't slip past: the WebAuthn +
+  role-scoped allowlists are exact `(method, path)` and none of these is listed.
+- **The ONE exception — `GET /media` (list ALL items) is a NON-public GET** the safe-method
+  default would wrongly expose. Enumerating the whole library is an ADMIN capability (the
+  opaque `ref` / HMAC `url_key` design exists precisely to stop non-admins discovering
+  media). It needs its OWN `require_admin` on that route — the same pattern `/admin/analytics`
+  uses. This is the single spot where "GET is public" and the media model disagree; the
+  rationalization MUST gate it explicitly (a public `GET /media` listing would be a
+  library-wide leak). The manifest's ROLE-AWARE controls (§5) are the HATEOAS mirror of
+  this: a non-admin `OPTIONS` sees no write controls.
+Identity is resolved by `refresh_session_role` (cookie session, live role) OR
+`api_key_auth` (`Authorization: Bearer hio_…`, full role delegation), injected before
+the gate reads `SessionData`.
+
+### 4b. Visibility gate — who may READ (`min_role`, Phase DC)
+
+`media.min_role TEXT NULL`, decoded fail-closed by `MediaDao::min_role_rank`
+(NULL→0 / Registered→1 / Family→2 / **everything else → Admin/top**, NEVER the raw
+string). Gates all read paths:
+- **Byte route** resolves the variant AND a **STRICTEST-WINS** required rank in ONE
+  query (`find_by_url_key_with_required_rank`: `MAX(CASE…)` across every item sharing
+  the `url_key` — content dedup makes the key index non-unique, so a LIMIT-1 owner
+  could be the LOOSEST and leak; MAX can only over-restrict, which breaks VISIBLY).
+- **`/media/<ref>` (GET + OPTIONS [TARGET]) + embed** apply `is_visible_to(viewer)` on
+  the item. **Denied ≡ the unknown-ref/key 404** — no existence oracle. A denied
+  `/media/embed/<ref>` returns the byte-identical bad-ref error-span at 200 (HTMX still
+  swaps; the per-viewer embed fetch means the content-keyed render_cache never captures
+  a role decision).
+- **Gated bytes** ship `Cache-Control: private, …, immutable` (browser + range cache
+  stay; shared caches cut out); public media unchanged.
+- New variants INHERIT the item's gate (they carry no `min_role` of their own — create,
+  add-variant, and replace-all all rely on this). Covers gate at the PAGE level; authoring
+  rule: public page ⇒ public cover.
+
+### 4c. Executable-content hardening (CL)
+
+The byte route always sends `X-Content-Type-Options: nosniff` and forces
+`Content-Disposition: attachment` on executable mimes (`html`/`svg`/`xml`/`js`) — a
+`MediaKind::File` carries a filename-guessed mime on a public same-origin route, so an
+admin-uploaded `.svg`/`.html` must not run as active script (stored XSS). Probe-verified
+image/video/stl/audio render inline. The `application/x-openscad` byte route also sends
+`Cross-Origin-Resource-Policy: cross-origin` so the COEP-isolated `/3d/editor` can fetch
+model bytes (CORP does NOT bypass `min_role` — that's checked first).
+
+---
+
+## 5. The resource — collection, item, variants  [mixed]
+
+The read + write surface, uniform across every kind. FOUR resources, and a verb
+discipline that keeps it HATEOAS-clean: **every write is an idempotent PUT (replace)
+except the two server-assigns-identity creates (POST) — and there is NO PATCH.**
+
+```
+/media                            the item collection
+/media/<ref>                      an item — metadata + a variant collection
+/media/<ref>/variants             the item's variant collection
+/media/<ref>/variants/<url_key>   one variant, as a collection member
+/media/file/<url_key>             a variant's BYTES (content-addressed, shared; §6)
+```
+
+| operation | verb + URL | why this verb | replaces |
+|---|---|---|---|
+| **create an item** | `POST /media` | server mints the UUIDv7 `ref` → `201` + `Location: /media/<ref>` | `POST /admin/media/upload` |
+| list items | `GET /media` | admin-only (a non-public GET; see §4a) | `GET /admin/media` |
+| read a representation | `GET /media/<ref>` (negotiated) | safe | `serve_media_by_ref` |
+| item state (JSON) | `GET /media/<ref>` + `Accept: application/json` | GET/PUT symmetry | — |
+| discover controls | `OPTIONS /media/<ref>` | safe → manifest | — |
+| **edit metadata** | `PUT /media/<ref>` (JSON) | replace the item's writable representation (title, min_role) — idempotent | `rename` + `visibility` |
+| delete item | `DELETE /media/<ref>` | | `delete_media` |
+| **add a variant** | `POST /media/<ref>/variants` | server mints the content-addressed `url_key` | `add_encode` |
+| **replace all variants** | `PUT /media/<ref>/variants` | replace the collection — idempotent (fab-gui's SAVE) | DO's `PATCH /media/<ref>` |
+| list variants | `GET /media/<ref>/variants` | = the manifest's `variants` | — |
+| remove a variant | `DELETE /media/<ref>/variants/<url_key>` | `url_key` is unambiguous WITHIN a ref | `delete_variant` |
+
+**POST vs PUT — the one rule:** POST when the SERVER assigns the URI (create item →
+UUIDv7 `ref`; add variant → `HMAC(sha)` `url_key` the client can't derive), PUT when the
+CLIENT owns the URI it's replacing (metadata; the whole variant collection). Two POSTs,
+both genuine creates; every other write a PUT. No overloaded verb, no PATCH merge-format.
+
+**GET/PUT symmetry on the item.** `GET /media/<ref>` + `Accept: application/json` returns
+the item's state; `PUT /media/<ref>` (JSON) replaces its writable fields (title,
+min_role). Same shape in and out. Media BYTES are negotiated alternates
+(`Accept: image/avif` → 302). `OPTIONS` owns pure control-discovery — it carries the
+`controls` block; `GET(json)` carries state.
+
+### The manifest — `OPTIONS /media/<ref>`  [TARGET]
+
+Every variant a followable link + the controls the caller may use (**ROLE-AWARE**: an
+Admin sees the write controls + each variant's `remove`; a public caller sees only
+`variants[].href`). `min_role`-gated (denied ≡ 404). This same body is the `201` create
+response and the `GET(json)` state.
+
+```json
+{
+  "ref": "<media_ref>",
+  "self": "/media/<ref>",
+  "kind": "stl",
+  "title": "…",
+  "min_role": null,
+  "variants": [
+    { "type": "application/x-openscad", "bytes": 210,     "href": "/media/file/<k1>", "remove": "/media/<ref>/variants/<k1>" },
+    { "type": "model/3mf",              "bytes": 120000,  "href": "/media/file/<k2>", "remove": "/media/<ref>/variants/<k2>" },
+    { "type": "model/3mf",              "bytes": 2400000, "href": "/media/file/<k3>", "remove": "/media/<ref>/variants/<k3>" }
+  ],
+  "controls": {
+    "add":         { "href": "/media/<ref>/variants", "method": "POST",   "accepts": "multipart/form-data" },
+    "replace-all": { "href": "/media/<ref>/variants", "method": "PUT",    "accepts": "multipart/form-data" },
+    "metadata":    { "href": "/media/<ref>",          "method": "PUT",    "accepts": "application/json" },
+    "delete":      { "href": "/media/<ref>",          "method": "DELETE" }
+  }
+}
+```
+Image variants also carry `width`/`height`; A/V variants `codecs` when known. The client
+follows links — no URL construction, no format vocabulary to hardcode. outputSchema root
+is an object (not a bare array).
+
+### `GET /media/<ref>` — read, content-negotiated  [TARGET; SHIPPED = largest-only]
+
+Precedence **`?format=` (explicit) > `Accept` (preference) > largest (default)**:
+- **`?format=<token>`** — `scad`/`stl`/`3mf`/`avif`/`mp4`/… → mime → 302 to the LARGEST
+  variant of that mime. Unknown token or absent format → **406** (OPTIONS to discover).
+- **`Accept: <mime>`** — 302 to the largest ACCEPTABLE variant. A browser's `…,*/*`
+  matches everything → largest overall, so a plain download link is UNCHANGED (no
+  implied-state surprise — this is what killed the scad-first heuristic). A specific,
+  unsatisfiable Accept with no `*/*` → **406**.
+- **neither** → largest.
+302 to the chosen `/media/file/<url_key>`; response carries `Vary: Accept` +
+`Content-Location`. TODAY (SHIPPED) this route ignores negotiation and always redirects
+to the largest variant — the rationalization adds `?format=`/`Accept`.
+
+### `PUT /media/<ref>/variants` — replace all (the round-trip SAVE)  [SHIPPED as `PATCH /media/<ref>`; DP re-verbs]
+
+The fab-scad round-trip SAVE + general update-in-place. `multipart/form-data`, SAME shape
+as create — one file part per file, typed by EXTENSION (`.scad`→`application/x-openscad`,
+`.3mf`→`model/3mf`, `.stl`→`model/stl`), streamed to disk (`DefaultBodyLimit::disable()`),
+sharing `ingest_multipart` so it can't drift from create. **COMPLETE replacement:** the
+uploaded set BECOMES the whole collection, wiped + re-inserted in ONE transaction
+(`delete_all_for_media` → `create` each → `update_facts` re-derives kind/dims). The item's
+metadata (`title`/`min_role`/`ref`) is untouched BY CONSTRUCTION — it lives on the PARENT
+`/media/<ref>`, not this collection (exactly why the collection sub-resource beats DO's
+PATCH-that-remembers-to-preserve-metadata). New variants inherit the gate; un-re-uploaded
+variants (a render thumbnail) are DROPPED; replaced blobs go cold (no in-line sweep).
+`200`/manifest; `400` empty body (a replace-to-nothing is a DELETE). Versioning deferred
+(an additive `superseded_at` doesn't break this). **SHIPPED today as `PATCH /media/<ref>`
+(Phase DO); DP re-verbs to `PUT …/variants` — inert, no consumer breaks.**
+
+### `POST /media` — create item  ·  `POST /media/<ref>/variants` — add one  [TARGET]
+
+Both mint a SERVER-assigned identity → both POST → `201` + `Location`. `POST /media`
+creates an ITEM (mints the UUIDv7 `ref`, initial variants in the multipart); `POST
+/media/<ref>/variants` adds ONE variant to an existing item (mints its `HMAC(sha)`
+`url_key`) WITHOUT re-uploading the rest — the admin curation path, distinct from
+replace-all (adding one codec to a big video mustn't force re-sending every encode). Same
+multipart ingest as the PUT; content-dedup makes a repeat add an idempotent no-op (bonus,
+not contract). `POST /media` takes an optional `min_role`/`title`; a variant inherits the
+item's gate.
+
+### `PUT /media/<ref>` — edit metadata  ·  `DELETE …` — remove  [TARGET]
+
+`PUT /media/<ref>` (JSON `{title, min_role}`) REPLACES the item's writable metadata — the
+honest home for the old `rename` + `visibility` POSTs, idempotent (no PATCH).
+`DELETE /media/<ref>` drops the item (CASCADE its variants);
+`DELETE /media/<ref>/variants/<url_key>` drops one variant. All Admin-gated by §4a.
+
+---
+
+## 6. Byte route `/media/file/<url_key>`  [SHIPPED]
+
+Streams a variant's bytes via `tower_http::ServeFile` (HTTP range/206, `Accept-Ranges`,
+immutable cache). Looked up by the STORED `url_key` (so a prod/beta key mismatch still
+serves — resolves by sha). `UrlKey::parse` gates the 64-hex format at the door (junk ≡
+404, no oracle). Path resolve runs in `spawn_blocking` with a 5s timeout → 503 on a
+wedged/asleep drive (abandons the uncancellable stat, logs loudly; the file READ only
+runs once the stat passed). Gating + nosniff + CORP per §4b/4c. EXCLUDED from
+`request_log` (a streaming range-storm would self-greylist a listening household via R3
++ swamp the Humans signal). The `CompressionLayer` excludes `video/`/`audio/`/`model/`/
+`application/octet-stream` (gzipping a range response corrupts it).
+
+---
+
+## 7. Ingest — `/admin/media` (admin-gated)  [SHIPPED]
+
+`upload_media` streams each file part through `ingest_multipart` → stage → commit →
+`ffprobe` (never trusting the filename: `.stl`/`.3mf`/`.scad` by ext, image-vs-video by
+`format.duration`, audio by its first non-`attached_pic` AUDIO stream). All parts in one
+upload GROUP into one item; the item kind is the **DOMINANT** kind (`dominant_kind`: a
+model/video/audio beats an image — so a render grouped with a model stays a viewer,
+order-independent). Then best-effort derived variants:
+- **Poster** (video + audio): ffmpeg frame-grab → AVIF (video thumbnail; audio pulls the
+  `attached_pic` cover art → library thumb + lock-screen artwork).
+- **Responsive ladder** (image, CN): width-stepped AVIF downscales (480/960, skip ≥
+  source), each a content-addressed `image/avif` variant carrying its pixel width.
+`add_encode` appends a variant to an existing item BY id (another codec, or a poster).
+Uploads POST via `XMLHttpRequest` for a native `<progress>` bar (CK). A file ffprobe
+can't type → `MediaKind::File` (mime by extension, octet-stream fallback) — a graceful
+download, not a rejection; but a MISSING ffprobe errors loudly (deploy misconfig).
+Codec policy: video sources ordered HEVC-before-AV1 (Safari AV1 `<video>` is jerky);
+audio UNIVERSAL-only (aac→audio/mp4, mp3→audio/mpeg, flac→audio/flac; opus/vorbis/alac
+bail → File — AAC m4b is canonical). Visibility: `upload_media` takes a `min_role`
+multipart field (known gate roles only; absent/garbage → public — `fab publish` sends
+nothing); the editor drop sends the page's current visibility.
+
+---
+
+## 8. Embed (presentation) `/media/embed/<ref>`  [SHIPPED]
+
+The KIND-SPECIFIC layer — deliberately the opposite of §5's uniform resource. The
+markdown transformer rewrites `![](/media/<ref>)` → a `<span hx-get="/media/embed/<ref>"
+hx-trigger="load" hx-swap="outerHTML">`; `render_embed_html` dispatches by kind:
+- **image** → `<img data-zoomable srcset="…480w,…960w,…origw" sizes>` (`cover_url_for`
+  = smallest for a card thumbnail; `cover_hero_for` = largest for the hero).
+- **video** → `<video>` multi-`<source>` (HEVC before AV1) + poster.
+- **audio** → native `<audio>` + cover-art/title header + `audio-player.js` (chapters,
+  ±30s, rate, MediaSession, resume; series playlist auto-advance via track adoption, DG).
+- **stl/3mf** → the three.js viewer (`stl_viewer_block`), sized `max-w-2xl h-96` with a
+  fullscreen toggle; VIEWER = smallest `model/3mf` (color+fast, else smallest mesh),
+  DOWNLOAD = largest mesh, `data-format` (stl|3mf) branches the loader. A scad variant
+  adds the **"Open in the slicer"** button (§10). Selection is over `ModelFormat::is_mesh`
+  variants only (an image variant is thumbnail, never mis-loaded as mesh).
+- **file** → a styled `download_button` (glyph + name + size, `download` attr).
+
+**Rationalization note:** the embed's per-kind SELECTION (smallest-3MF, largest-mesh,
+srcset) is presentation and STAYS here — but it and the resource manifest (§5) should
+share ONE variant-selection vocabulary rather than duplicate the `bytes`/`mime` logic.
+
+---
+
+## 9. Kinds — the variant profile
+
+| kind  | variants | negotiation example |
+|---|---|---|
+| image | responsive AVIF ladder (+ original) | `?format=avif` / `Accept: image/avif` → largest; per-variant `width` picks a size by `href` |
+| video | HEVC + AV1 `video/mp4` + poster AVIF | `mp4` → largest; poster is `image/avif` |
+| audio | AAC (`audio/mp4`) + cover art AVIF | `m4a`/`aac` → the audio; art is `image/avif` |
+| stl   | scad + low/high mesh (3mf/stl) | `scad` → source, `3mf`/`stl` → largest mesh |
+| file  | the one file | its own type |
+
+`bytes` is the fidelity key everywhere (decimation/downscale is monotonic).
+
+---
+
+## 10. The 3D round-trip (Phases DN → DO → DP)
+
+A model is one item carrying its SCAD source + low/high meshes. fab-gui (the WASM SCAD
+slicer at `/3d/editor`) both LOADS the scad and SAVES edits back — all on the uniform
+resource, nothing model-special:
+
+- **Load [SHIPPED core]:** the embed's "Open in the slicer" button →
+  `?model=/media/<ref>?format=scad` **[TARGET form]** (today: `?model=/media/file/<scad
+  url_key>` — direct, works, but leaks the per-save key and gives the app no ref to save
+  to). fab-gui `fetch_text`s the model URL → the scad; the ref lives in the URL's PATH so
+  the save target is derivable by dropping the query, or via OPTIONS `save.href`.
+- **Save [SHIPPED as `PATCH /media/<ref>`; DP re-verbs to `PUT /media/<ref>/variants`]:**
+  replace the whole variant collection (§5). The opaque ref never changes, so every
+  `![](/media/<ref>)` embed stays valid across edits — no supersession pointer.
+- **fab-gui side (upstream):** export low-res mesh (3MF multicolor / STL single-color,
+  keep low+high SAME format) + full-res 3MF + the edited SCAD; `PUT` all three to
+  `/media/<ref>/variants` (multipart file parts, correct extensions), authenticated by the
+  ambient same-origin session cookie. INERT until the fab-gui pin bump — the shipped bundle
+  doesn't drive save yet.
+- Color: STL carries none; a multicolor model ships low+high 3MF (`3MFLoader` shows
+  standard basematerials/color-groups, NOT Bambu MMU paint). `.scad` mime is the
+  community `application/x-openscad` (its `application/` prefix keeps it out of the
+  `model/*` mesh glob for free).
+- Open decision: public SCAD + parametric fab-gui = any visitor can re-slice via the load
+  path (a free customizer) — desirable or a gating call.
+
+---
+
+## 11. Rationalization backlog
+
+The deltas between SHIPPED and TARGET — the code-alignment work (Phase DP), scoped:
+
+- **`GET /media/<ref>` negotiation** — add `?format=`/`Accept` (precedence, `Vary`,
+  `Content-Location`, 406) over today's largest-only redirect. Kill the scad-first
+  heuristic idea (implied state) — the default stays largest, scad served only on
+  explicit request.
+- **`OPTIONS /media/<ref>` manifest** — new; the HATEOAS entry point (§5). Wire it on the
+  existing `/{media_ref}` method-router; safe-method-public + `min_role`-gated; ROLE-AWARE
+  `controls` (write controls only for an Admin caller).
+- **Write surface re-verb** — the full HATEOAS surface (§5): `POST /media` (create,
+  `201`+`Location`), `POST /media/<ref>/variants` (add), **`PUT /media/<ref>/variants`
+  (replace-all — RE-VERBS the shipped DO `PATCH /media/<ref>`; inert)**, `PUT /media/<ref>`
+  (metadata), `DELETE /media/<ref>` + `…/variants/<key>`. **Zero PATCH.**
+- **`GET /media` admin gate** — the list-all is a NON-public GET; give it its own
+  `require_admin` (the safe-method default would leak the whole library — §4a).
+- **Admin-route migration** — fold `/admin/media/{upload,encode,rename,visibility,delete,
+  variant}` onto the `/media/<ref>[/variants]` surface (templates + `media-upload.js` +
+  `editor-support.js`). SCOPE CALL: inside DP, or a follow-on so DP stays "canonical
+  `/media` surface + fab-gui contract".
+- **The slicer button** → emit `?model=/media/<ref>?format=scad` (ref in the path, format
+  explicit) instead of the per-save `url_key`.
+- **Shared variant-selection vocabulary** — the embed (§8) and the manifest/negotiation
+  (§5) should pick from ONE typed selector (by-type/by-size over `ModelFormat` + `bytes`/
+  `width`), not two hand-rolled copies.
+- **Docs** — this file is the source; `fab-scad-roundtrip.md` and the CLAUDE.md media
+  paragraph become one-line pointers here.
+- Deferred: size-within-format negotiation (`?width=`/`sizes`); a `?format=` token↔mime
+  table vs. suffix-matching; whether OPTIONS also answers a `GET … Accept: application/json`.

@@ -1,4 +1,4 @@
-<!-- plan-bridge:phase-high-water=DO -->
+<!-- plan-bridge:phase-high-water=DR -->
 # Plan
 
 Completed phases are in `PLAN_ARCHIVE.md` (most recent: Phase 12 — beta deployment on the mini (inverted `main`→beta / `v*`tag→prod flow); Phase 1 — `get_recs_by_name` `type=A` filter fix (ACME renewal hang); Phase 9 — Tailwind cleanup / dropped DaisyUI; Phase 8 — local/e2e test harness; Phase 7 — admin analytics dashboard; Phase 2 — DNS module testability; Phase 5 — dropped the `cookie-rs` fork; Phase 3 — `ifconfig.me` → Cloudflare `cdn-cgi/trace`; Phase 0 — push-to-deploy on the Mac mini; Phase 4 — `tray-wrapper` 0.4.1 bump).
@@ -112,13 +112,45 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 
 *Half 2 of the fab-scad model round-trip — the SITE side. DN shipped the LOAD (open the SCAD in the slicer); this closes the loop with the SAVE TARGET so a logged-in Admin's fab-gui edit re-homes onto the SAME media item. The verb is **`PATCH /media/<ref>`** — the item's stable ref IS its identity, and the fail-closed mutation layer gates any non-GET to Admin FOR FREE (the WebAuthn + role-scoped allowlists are both POST-only, so a PATCH structurally can't slip past the admin fallback — no new authz wiring, and it can't be forgotten). Semantics: **COMPLETE replacement** (chris's call) — the uploaded multipart file set BECOMES the item's entire variant set (old variants wiped in one tx), the item row (ref/title/`min_role`) preserved so every `![](/media/<ref>)` embed stays valid with zero rewrite; a render-image thumbnail not re-uploaded is dropped (the uploaded set is authoritative). Replace-not-version: the old blobs go cold on disk (content-addressed, Backblaze-backed — the delete path already doesn't sweep). The fab-gui export + same-origin authenticated upload is chris's UPSTREAM fab-scad work (currently BLOCKED on this landing); this phase gives it a POST target + freezes the contract in `docs/fab-scad-roundtrip.md`.*
 
-- [ ] DO.0 - Phase exit: `PATCH /media/<ref>` replaces a model item's variants in place (Admin-only, complete replace), ref/title/gate preserved and embeds unbroken; the contract doc marks the site side SHIPPED; tests green; shipped.
+- [x] DO.0 - Phase exit: `PATCH /media/<ref>` replaces a model item's variants in place (Admin-only, complete replace), ref/title/gate preserved and embeds unbroken; the contract doc marks the site side SHIPPED; tests green; shipped.
 - [x] DO.1 - DAO: `MediaVariantDao::delete_all_for_media` + `MediaDao::update_facts` (re-derive `kind`/dims/`duration_ms`/`chapters` from the new primary), both executor-generic so the handler runs wipe→insert→re-derive in ONE transaction. Unit test: the variant set replaces in place while the item identity (ref/title/`min_role`) stays untouched.
 - [x] DO.2 - Extract the streaming-ingest helper from `upload_media` (stage→commit→probe each file part + parse the text fields) so upload (mint) and PATCH (replace) share ONE O(chunk)-memory ingest path; `upload_media` refactored onto it, behavior byte-identical (its existing media-vertical test still passes).
 - [x] DO.3 - Handler `patch_media_by_ref`: resolve the ref (404 unknown), ingest the file set (400 if empty — a replace-to-nothing is a DELETE, not a PATCH), tx-replace the variant set + re-derive facts (ref/title/gate preserved, new variants INHERIT the item's `min_role`), best-effort poster/responsive parity with upload, `200` JSON `{media_ref, kind, variants:[{url_key,mime,bytes}]}`.
 - [x] DO.4 - Route: `.patch(patch_media_by_ref)` on the public `/{media_ref}` route + `DefaultBodyLimit::disable()` (multi-GB model set); Admin-gating INHERITED from `require_admin_for_mutations` (no allowlist entry — a non-safe method hits the admin fallback).
 - [x] DO.5 - Tests: authz (anonymous PATCH → 401), unknown ref → 404, empty → 400, happy replace (old `url_key` 404s, new serves, ref + title preserved), gate preserved (upload `Family` → PATCH → new variant still gated: anon denied / admin 200).
 - [x] DO.6 - Docs: `docs/fab-scad-roundtrip.md` — mark the site side SHIPPED + freeze the contract (`PATCH /media/<ref>`, cookie-auth Admin, multipart file parts typed by extension, complete-replace, cold blobs, response shape); CLAUDE.md media-section delta.
+
+## Phase DP - Media resource: content negotiation + discovery (read half)
+
+*The READ half of the HATEOAS media resource (`docs/media-design.md` §5). `/media/<ref>` becomes content-negotiated + self-describing: a caller STATES what representation it wants and DISCOVERS what's there, instead of the server heuristically redirecting to the largest variant. Independent of the write re-verb (DQ) — this is the external read/discovery contract fab-gui + any client loads against.*
+
+- [ ] DP.0 - Phase exit: `GET /media/<ref>` negotiates (`?format=` > `Accept` > largest), `OPTIONS /media/<ref>` returns the role-aware hypermedia manifest, the slicer button loads via `?model=/media/<ref>?format=scad`; tests + docs; shipped.
+- [ ] DP.1 - `GET /media/<ref>` negotiation: `?format=<token>` (scad/stl/3mf/avif/mp4 → mime; 406 on no-match) > `Accept` (largest acceptable; `*/*` → largest; specific-unsatisfiable → 406) > largest. `Vary: Accept` + `Content-Location`; `min_role`-gated (denied ≡ 404); `Accept: application/json` → the item state.
+- [ ] DP.2 - `OPTIONS /media/<ref>` → the manifest `{ref, self, kind, title, min_role, variants:[{type,bytes,width?,href,remove?}], controls:{…}}`. ROLE-AWARE (write controls + per-variant `remove` only for an Admin caller); safe-method-public + `min_role`-gated; wired on the existing `/{media_ref}` method-router.
+- [ ] DP.3 - ONE shared, typed variant-SELECTOR (by-type / by-size over `ModelFormat` + `bytes`/`width`) used by the negotiation (DP.1), the manifest (DP.2), AND the embed (§8 — replacing its hand-rolled smallest-3mf / largest-mesh / srcset picks). No duplicate selection logic.
+- [ ] DP.4 - Slicer button → `?model=/media/<ref>?format=scad` (ref in the PATH = the SAVE target, derivable by dropping the query; format EXPLICIT — no implied state). Replaces the `?model=/media/file/<url_key>` form.
+- [ ] DP.5 - Tests (negotiation precedence + 406 + Vary; manifest shape + role-aware controls + gating; selector unit; slicer URL) + `media-design.md` [TARGET]→[SHIPPED] flips.
+
+## Phase DQ - Media resource: the write surface (RESTful, zero PATCH)
+
+*The WRITE half (`docs/media-design.md` §5). The canonical REST surface every writer (fab-gui + the admin UI) targets: two POSTs for the server-assigns-identity CREATES, PUT for every idempotent replace, DELETE for removal — NO PATCH. RE-VERBS the shipped DO endpoint (`PATCH /media/<ref>` → `PUT /media/<ref>/variants`) — safe, it's inert (no fab-gui pin).*
+
+- [ ] DQ.0 - Phase exit: the full `/media[/<ref>/variants]` write surface is live — `POST /media` (create, 201+Location), `POST …/variants` (add), `PUT …/variants` (replace-all), `PUT /media/<ref>` (metadata), `DELETE` item + variant, admin-gated `GET /media` (list); DO's PATCH re-verbed; tests + docs; shipped.
+- [ ] DQ.1 - `PUT /media/<ref>/variants` — re-verb DO's `patch_media_by_ref` (identical ingest / tx / complete-replace body) onto PUT of the variant collection; metadata untouched BY CONSTRUCTION. Retire `PATCH /media/<ref>`.
+- [ ] DQ.2 - `POST /media` — create an item (multipart initial variants + optional title/min_role) → `201` + `Location: /media/<ref>` + the manifest. The RESTful home of `upload_media`.
+- [ ] DQ.3 - `POST /media/<ref>/variants` — add ONE variant to an existing item (the `add_encode` semantics, by ref not id) → `201` + `Location`; content-dedup = idempotent no-op.
+- [ ] DQ.4 - `PUT /media/<ref>` (json `{title, min_role}`) — replace item metadata (the `rename` + `visibility` merge); `DELETE /media/<ref>` (item, CASCADE) + `DELETE /media/<ref>/variants/<url_key>` (one variant).
+- [ ] DQ.5 - `GET /media` — the admin-only item listing behind its OWN `require_admin` (the safe-method default would leak the whole library — §4a); JSON collection.
+- [ ] DQ.6 - Tests (each verb + the 201/Location + the `GET /media` admin gate + the re-verb preserves DO's behavior) + docs flips.
+
+## Phase DR - Migrate the admin media UI onto the canonical surface
+
+*Fold the parallel `/admin/media/*` vocabulary onto the `/media[/<ref>/variants]` REST surface so the library UI and fab-gui share ONE contract (`docs/media-design.md` §11). Behind the DQ surface — the external contract ships first, the admin swap lands after, no fab-scad blocker.*
+
+- [ ] DR.0 - Phase exit: the admin library drives the canonical `/media` surface (upload→`POST /media`, add→`POST …/variants`, rename+visibility→`PUT /media/<ref>`, delete→`DELETE`, per-variant→`DELETE …/variants/<key>`); the `/admin/media/*` mutation routes retire; tests + docs; shipped.
+- [ ] DR.1 - Templates + `media-upload.js` + `editor-support.js` → the new verbs/URLs (upload progress + drop-group + inline editor insert unchanged in behavior).
+- [ ] DR.2 - Retire the `/admin/media/{upload,encode,rename,visibility,delete,variant}` handlers (thin shims first if needed, then drop); keep `GET /admin/media` as the library PAGE (HTML), distinct from `GET /media` (JSON collection).
+- [ ] DR.3 - Tests (the admin UI still round-trips through the new surface) + docs.
 
 ## Backlog (not yet phased)
 
