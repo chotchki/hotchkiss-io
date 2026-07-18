@@ -77,6 +77,18 @@ pub fn viewer_mesh(variants: &[MediaVariantDao]) -> Option<&MediaVariantDao> {
         })
 }
 
+/// Image variants carrying a pixel WIDTH, sorted ASCENDING — the srcset ladder (§8).
+/// A legacy image with no widths yields an empty ladder, so the embed falls back to a
+/// single `src`. The largest is the src (best for a no-srcset client + the zoom view).
+pub fn image_ladder(variants: &[MediaVariantDao]) -> Vec<&MediaVariantDao> {
+    let mut sized: Vec<&MediaVariantDao> = variants
+        .iter()
+        .filter(|v| v.mime.starts_with("image/") && v.width.is_some())
+        .collect();
+    sized.sort_by_key(|v| v.width.unwrap_or(0));
+    sized
+}
+
 /// A parsed `Accept` media range.
 struct AcceptRange {
     ty: String,
@@ -244,6 +256,23 @@ mod tests {
     fn empty_item_negotiates_to_empty() {
         assert_eq!(negotiate(&[], None, None), Negotiation::Empty);
         assert_eq!(negotiate(&[], Some("scad"), None), Negotiation::NotAcceptable);
+    }
+
+    #[test]
+    fn image_ladder_is_width_sorted_and_image_only() {
+        let mut orig = v("orig", "image/avif", 5000);
+        orig.width = Some(1600);
+        let mut w960 = v("w960", "image/avif", 2000);
+        w960.width = Some(960);
+        let mut w480 = v("w480", "image/avif", 800);
+        w480.width = Some(480);
+        let mut legacy = v("legacy", "image/png", 100); // no width → excluded
+        legacy.width = None;
+        let poster = v("poster", "video/mp4", 9); // not an image → excluded
+        let vs = [orig, w960, w480, legacy, poster];
+        let ladder = image_ladder(&vs);
+        let keys: Vec<&str> = ladder.iter().map(|v| v.url_key.as_str()).collect();
+        assert_eq!(keys, vec!["w480", "w960", "orig"], "ascending width, images-with-width only");
     }
 
     #[test]

@@ -402,27 +402,22 @@ pub(crate) fn render_embed_html(media: &MediaDao, variants: &[MediaVariantDao]) 
             let Some(fallback) = variants.first() else {
                 return error_span("image has no stored file");
             };
-            // Image variants carrying a width → a srcset (Phase CN): a new upload
-            // records the original's width plus its 480/960 AVIF downscales, so the
-            // browser pulls an appropriately-sized file instead of the full-res
-            // original. A legacy image with no widths falls through to a single src.
-            let mut sized: Vec<(&MediaVariantDao, i64)> = variants
-                .iter()
-                .filter(|v| v.mime.starts_with("image/"))
-                .filter_map(|v| v.width.map(|w| (v, w)))
-                .collect();
-            sized.sort_by_key(|(_, w)| *w);
+            // Image variants carrying a width → a srcset via the SHARED selector
+            // (Phase CN/DP): a new upload records the original's width + its 480/960
+            // AVIF downscales, so the browser pulls an appropriately-sized file. A
+            // legacy image with no widths falls through to a single src.
+            let ladder = media_select::image_ladder(variants);
             // src = the largest (best for a no-srcset client + the zoom view);
             // falls back to the first variant when nothing has a width.
-            let src_key = sized
+            let src_key = ladder
                 .last()
-                .map(|(v, _)| v.url_key.as_str())
+                .map(|v| v.url_key.as_str())
                 .unwrap_or(fallback.url_key.as_str());
             // Only worth a srcset with ≥2 distinct sizes.
-            let srcset_attr = if sized.len() >= 2 {
-                let entries: Vec<String> = sized
+            let srcset_attr = if ladder.len() >= 2 {
+                let entries: Vec<String> = ladder
                     .iter()
-                    .map(|(v, w)| format!("/media/file/{} {w}w", v.url_key))
+                    .map(|v| format!("/media/file/{} {}w", v.url_key, v.width.unwrap_or(0)))
                     .collect();
                 format!(
                     " srcset=\"{}\" sizes=\"(max-width: 768px) 100vw, 768px\"",
