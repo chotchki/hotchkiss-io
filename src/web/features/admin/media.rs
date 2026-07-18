@@ -341,7 +341,15 @@ async fn ingest_new_item(
     )
     .await?;
 
+    // Two byte-identical parts in one upload share a sha (the blob dedups) → insert
+    // each sha ONCE, else the 2nd variant insert violates UNIQUE(media_id, sha256) → 500
+    // (DQ review). The `media` row + earlier variants are already committed, so a dup
+    // insert would leave a partial item.
+    let mut seen = std::collections::HashSet::new();
     for f in &ingested {
+        if !seen.insert(f.sha.clone()) {
+            continue;
+        }
         create_variant(
             &state.pool,
             &hmac_key,
@@ -490,7 +498,17 @@ async fn append_variants(
     let hmac_key = CryptoKey::get_or_create(&state.pool, MEDIA_HMAC_KEY_ID)
         .await?
         .key_value;
-    let existing = MediaVariantDao::find_by_media_id(&state.pool, media_id).await?;
+    // Seed the dedup set with the item's EXISTING shas, then track each new one as we
+    // go — so a byte-identical part already on the item OR a duplicate EARLIER IN THIS
+    // BATCH is skipped. Without the in-batch guard, two identical file parts in one
+    // request both miss the pre-loop snapshot and the 2nd insert violates
+    // UNIQUE(media_id, sha256) → 500 + a partial append (DQ review).
+    let mut seen: std::collections::HashSet<String> =
+        MediaVariantDao::find_by_media_id(&state.pool, media_id)
+            .await?
+            .into_iter()
+            .map(|v| v.sha256)
+            .collect();
 
     let mut saw_file = false;
     while let Some(mut field) = multipart
@@ -512,9 +530,10 @@ async fn append_variants(
             }
             saw_file = true;
             let (sha, len, root) = staged.commit(&state.media_store).await?;
-            // Dedup: the same bytes are already an encode of this item → no-op
-            // (commit already deduped the blob on disk; skip the metadata row).
-            if existing.iter().any(|v| v.sha256 == sha) {
+            // Dedup (commit already deduped the blob on disk; skip the metadata row).
+            // `insert` returns false if the sha was already present (existing OR earlier
+            // in this batch) → an idempotent no-op.
+            if !seen.insert(sha.clone()) {
                 continue;
             }
             let root = root.to_string_lossy().into_owned();

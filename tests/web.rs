@@ -2194,6 +2194,43 @@ async fn media_write_surface_is_admin_gated() {
     }
 }
 
+/// Phase DQ (review fix): two byte-identical file parts in ONE multipart dedup to a
+/// SINGLE variant — NOT a 500 from the `UNIQUE(media_id, sha256)` the 2nd insert would
+/// hit + a partial append. Covers both create (`POST /media`) and add (`POST …/variants`).
+/// Needs ffprobe.
+#[tokio::test]
+async fn media_dedups_identical_parts_within_one_upload() {
+    if !ffprobe_available() {
+        eprintln!("skipping dedup test: ffprobe not found");
+        return;
+    }
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // CREATE with two IDENTICAL parts → 201 + exactly ONE variant (deduped, not a 500).
+    let bytes: Vec<u8> = (0..1500u32).map(|i| (i.wrapping_mul(11)) as u8).collect();
+    let form = reqwest::multipart::Form::new()
+        .part("file", bin_part(bytes.clone(), "dup1.bin"))
+        .part("file", bin_part(bytes.clone(), "dup2.bin"));
+    let resp = admin.post(server.url("/media")).multipart(form).send().await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "identical parts dedup, not a 500");
+    let m: serde_json::Value = resp.json().await.unwrap();
+    let r = m["ref"].as_str().unwrap().to_string();
+    assert_eq!(m["variants"].as_array().unwrap().len(), 1, "two identical parts → ONE variant");
+
+    // ADD an identical part again → 201, STILL one variant (idempotent content-dedup).
+    let add = admin
+        .post(server.url(&format!("/media/{r}/variants")))
+        .multipart(reqwest::multipart::Form::new().part("file", bin_part(bytes, "dup3.bin")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(add.status(), StatusCode::CREATED);
+    let m2: serde_json::Value = add.json().await.unwrap();
+    assert_eq!(m2["variants"].as_array().unwrap().len(), 1, "re-adding the same bytes is a no-op");
+}
+
 /// Phase DP: `GET /media/<ref>` content-negotiates (`?format=` > wildcard-free
 /// `Accept` > largest) and `OPTIONS /media/<ref>` returns the hypermedia manifest.
 /// The manifest's per-type `href`s are the ground truth the negotiation Locations are
