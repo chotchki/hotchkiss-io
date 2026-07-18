@@ -185,27 +185,42 @@ fn dominant_kind(kinds: &[MediaKind]) -> MediaKind {
     }
 }
 
-pub async fn upload_media(
-    State(state): State<AppState>,
-    mut multipart: Multipart,
-) -> Result<Response, AppError> {
-    let mut ingested: Vec<(String, Probed, i64, String)> = Vec::new();
-    let mut ref_input: Option<String> = None;
-    let mut title: Option<String> = None;
-    let mut first_filename: Option<String> = None;
-    let mut min_role: Option<String> = None;
+/// A file part streamed to the content store + ffprobe'd at ingest.
+struct IngestedFile {
+    sha: String,
+    probed: Probed,
+    len: i64,
+    root: String,
+}
 
+/// The non-file multipart fields a media upload may carry.
+#[derive(Default)]
+struct MediaTextFields {
+    media_ref: Option<String>,
+    title: Option<String>,
+    min_role: Option<String>,
+    first_filename: Option<String>,
+}
+
+/// Stream every file part straight to the content store (O(chunk) memory —
+/// hashed + written as it arrives, NEVER buffered whole, so a multi-GB upload
+/// works without OOMing) and ffprobe each stored file; collect the parsed text
+/// fields alongside. Shared by `upload_media` (mint a new item) and
+/// `patch_media_by_ref` (complete-replace an existing item's variants), so the
+/// one streaming path can't drift between the two.
+async fn ingest_multipart(
+    store: &MediaStore,
+    mut multipart: Multipart,
+) -> Result<(Vec<IngestedFile>, MediaTextFields)> {
+    let mut files = Vec::new();
+    let mut fields = MediaTextFields::default();
     while let Some(mut field) = multipart
         .next_field()
         .await
         .map_err(|e| anyhow!("reading multipart: {e}"))?
     {
         if let Some(fname) = field.file_name().map(|s| s.to_string()) {
-            // Stream the file straight to the content store (O(chunk) memory) —
-            // hashed + written as it arrives, NEVER buffered whole — then ffprobe
-            // the stored file. This is what lets a multi-GB upload work without
-            // OOMing the process (the old path slurped the field into a Vec<u8>).
-            let mut staged = state.media_store.stage().await?;
+            let mut staged = store.stage().await?;
             while let Some(chunk) = field
                 .chunk()
                 .await
@@ -216,36 +231,59 @@ pub async fn upload_media(
             if staged.is_empty() {
                 continue; // empty part → drop it (the staged temp self-cleans)
             }
-            let (sha, len, root) = staged.commit(&state.media_store).await?;
+            let (sha, len, root) = staged.commit(store).await?;
             let root = root.to_string_lossy().into_owned();
-            let probed = probe_stored(
-                state.media_store.clone(),
-                sha.clone(),
-                fname.clone(),
-                Some(root.clone()),
-            )
-            .await?;
-            if first_filename.is_none() {
-                first_filename = Some(fname);
+            let probed =
+                probe_stored(store.clone(), sha.clone(), fname.clone(), Some(root.clone())).await?;
+            if fields.first_filename.is_none() {
+                fields.first_filename = Some(fname);
             }
-            ingested.push((sha, probed, len as i64, root));
+            files.push(IngestedFile { sha, probed, len: len as i64, root });
         } else {
             let name = field.name().unwrap_or("").to_string();
             let value = field.text().await.unwrap_or_default();
             match name.as_str() {
-                "media_ref" if !value.trim().is_empty() => ref_input = Some(value),
-                "title" if !value.trim().is_empty() => title = Some(value),
+                "media_ref" if !value.trim().is_empty() => fields.media_ref = Some(value),
+                "title" if !value.trim().is_empty() => fields.title = Some(value),
                 // Visibility default (DC.5): a file dropped on a GATED page's
                 // editor must inherit that page's gate, not mint public media —
                 // editor-support.js sends the page's current visibility here.
                 // Only the known gate roles are accepted; absent / "Public" /
                 // anything else → public (which is what `fab publish` sends:
-                // nothing).
-                "min_role" => min_role = parse_media_visibility(&value),
+                // nothing). PATCH ignores this — it preserves the item's gate.
+                "min_role" => fields.min_role = parse_media_visibility(&value),
                 _ => {}
             }
         }
     }
+    Ok((files, fields))
+}
+
+/// After the variant rows exist, generate the derived variants that depend on the
+/// item's kind — width-stepped AVIFs for an image (srcset), a frame-grab poster
+/// for video/audio (thumbnail + lock-screen artwork). Best-effort (each logs on
+/// failure; the primary still serves). Shared by upload + PATCH so the two can't
+/// drift; the derived variants carry no `min_role` of their own → they inherit
+/// the item's gate.
+async fn add_derived_variants(
+    state: &AppState,
+    hmac_key: &[u8],
+    media_id: i64,
+    kind: MediaKind,
+    primary_sha: String,
+) {
+    if kind == MediaKind::Image {
+        maybe_add_responsive_variants(state, hmac_key, media_id, primary_sha).await;
+    } else if matches!(kind, MediaKind::Video | MediaKind::Audio) {
+        maybe_add_poster(state, hmac_key, media_id, primary_sha).await;
+    }
+}
+
+pub async fn upload_media(
+    State(state): State<AppState>,
+    multipart: Multipart,
+) -> Result<Response, AppError> {
+    let (ingested, fields) = ingest_multipart(&state.media_store, multipart).await?;
 
     if ingested.is_empty() {
         return Ok((StatusCode::BAD_REQUEST, "No files in the upload").into_response());
@@ -256,9 +294,10 @@ pub async fn upload_media(
     // human name lives in `title` (library display / search / rename), derived
     // from the filename when not given.
     let media_ref = uuid::Uuid::now_v7().simple().to_string();
-    let title = title
-        .or(ref_input)
-        .or_else(|| first_filename.as_deref().map(strip_media_suffixes))
+    let title = fields
+        .title
+        .or(fields.media_ref)
+        .or_else(|| fields.first_filename.as_deref().map(strip_media_suffixes))
         .filter(|s| !s.trim().is_empty());
 
     let hmac_key = CryptoKey::get_or_create(&state.pool, MEDIA_HMAC_KEY_ID)
@@ -270,10 +309,10 @@ pub async fn upload_media(
     // model is its THUMBNAIL, not the item's type, order-independently. Dims/duration
     // come from the first variant OF that kind (an image grouped into a model item
     // must not set the model's dims).
-    let kinds: Vec<MediaKind> = ingested.iter().map(|(_, p, _, _)| p.kind).collect();
+    let kinds: Vec<MediaKind> = ingested.iter().map(|f| f.probed.kind).collect();
     let kind = dominant_kind(&kinds);
-    let primary = ingested.iter().find(|(_, p, _, _)| p.kind == kind).unwrap_or(&ingested[0]);
-    let (primary_sha, primary_probed) = (primary.0.clone(), &primary.1);
+    let primary = ingested.iter().find(|f| f.probed.kind == kind).unwrap_or(&ingested[0]);
+    let (primary_sha, primary_probed) = (primary.sha.clone(), &primary.probed);
     let media = MediaDao::create(
         &state.pool,
         media_ref.clone(),
@@ -282,46 +321,124 @@ pub async fn upload_media(
         primary_probed.width,
         primary_probed.height,
         primary_probed.duration_ms,
-        min_role,
+        fields.min_role,
         primary_probed.chapters.clone(),
     )
     .await?;
 
-    for (sha, probed, len, root) in &ingested {
+    for f in &ingested {
         create_variant(
             &state.pool,
             &hmac_key,
             media.media_id,
-            sha.clone(),
-            probed.mime.clone(),
-            probed.codecs.clone(),
-            *len,
-            Some(root.clone()),
-            probed.width,
-            probed.height,
+            f.sha.clone(),
+            f.probed.mime.clone(),
+            f.probed.codecs.clone(),
+            f.len,
+            Some(f.root.clone()),
+            f.probed.width,
+            f.probed.height,
         )
         .await?;
     }
 
-    // Responsive image variants (Phase CN): for an image, generate width-stepped
-    // AVIFs from the original so the render can emit a srcset and the browser
-    // pulls an appropriately-sized file. Best-effort — the original still serves.
-    if kind == MediaKind::Image {
-        maybe_add_responsive_variants(&state, &hmac_key, media.media_id, primary_sha.clone()).await;
-    }
-
-    // Auto-poster for video (non-fatal — the video still plays without one).
-    // Audio rides the same path: ffmpeg's frame grab pulls the attached_pic
-    // cover art out of an m4b/mp3, which becomes the library thumbnail AND the
-    // lock-screen artwork (data-artwork on the embed). Artless audio just logs.
-    if matches!(kind, MediaKind::Video | MediaKind::Audio) {
-        maybe_add_poster(&state, &hmac_key, media.media_id, primary_sha.clone()).await;
-    }
+    add_derived_variants(&state, &hmac_key, media.media_id, kind, primary_sha).await;
 
     Ok(Json(json!({
         "media_id": media.media_id,
         "media_ref": media_ref,
         "markdown": format!("![](/media/{media_ref})"),
+    }))
+    .into_response())
+}
+
+/// `PATCH /media/<ref>` — the fab-scad round-trip SAVE target (Phase DO). A
+/// logged-in Admin's fab-gui edit re-uploads the model's files here; the item's
+/// ENTIRE variant set is COMPLETELY REPLACED in place, keeping the stable
+/// `media_ref` / `title` / `min_role` so every `![](/media/<ref>)` embed + the
+/// gate survive the swap with zero rewrite. Same multipart shape as
+/// `/admin/media/upload` (file parts typed by extension), just PATCH +
+/// ref-targeted + replace-not-mint. Anything not re-uploaded (e.g. a render-image
+/// thumbnail) is dropped — the uploaded set is authoritative. Old blobs go cold
+/// on disk (content-addressed, no in-line sweep — same contract as delete).
+///
+/// Wired on the PUBLIC `/media` nest but Admin-gated by
+/// `require_admin_for_mutations` (a non-safe method → the admin fallback; the
+/// WebAuthn + role-scoped allowlists are POST-only, so a PATCH structurally
+/// can't slip past) — NOT the `/admin` nest's `require_admin`.
+pub async fn patch_media_by_ref(
+    State(state): State<AppState>,
+    Path(media_ref): Path<String>,
+    multipart: Multipart,
+) -> Result<Response, AppError> {
+    let Some(item) = MediaDao::find_by_ref(&state.pool, &media_ref).await? else {
+        return Ok((StatusCode::NOT_FOUND, "No such media item").into_response());
+    };
+
+    let (ingested, _fields) = ingest_multipart(&state.media_store, multipart).await?;
+    // A complete replace needs at least one file — replacing to zero variants is a
+    // DELETE, not a PATCH. Reject it so a fumbled upload can't blank the item.
+    if ingested.is_empty() {
+        return Ok((StatusCode::BAD_REQUEST, "No files in the upload").into_response());
+    }
+
+    let hmac_key = CryptoKey::get_or_create(&state.pool, MEDIA_HMAC_KEY_ID)
+        .await?
+        .key_value;
+
+    // Re-derive the item's kind/dims from the NEW set exactly as upload does; the
+    // identity (ref/title/min_role) is preserved by NOT re-writing those columns.
+    let kinds: Vec<MediaKind> = ingested.iter().map(|f| f.probed.kind).collect();
+    let kind = dominant_kind(&kinds);
+    let primary = ingested.iter().find(|f| f.probed.kind == kind).unwrap_or(&ingested[0]);
+    let primary_sha = primary.sha.clone();
+
+    // Atomic swap: wipe the old variant set, insert the new one, re-derive facts —
+    // so a mid-flight failure never leaves the item with a mix of old + new.
+    let mut tx = state.pool.begin().await?;
+    MediaVariantDao::delete_all_for_media(&mut *tx, item.media_id).await?;
+    for f in &ingested {
+        let url_key = media_url_key(&hmac_key, &f.sha)?;
+        MediaVariantDao::create(
+            &mut *tx,
+            item.media_id,
+            f.sha.clone(),
+            url_key,
+            f.probed.mime.clone(),
+            f.probed.codecs.clone(),
+            f.len,
+            Some(f.root.clone()),
+            f.probed.width,
+            f.probed.height,
+        )
+        .await?;
+    }
+    MediaDao::update_facts(
+        &mut *tx,
+        item.media_id,
+        kind,
+        primary.probed.width,
+        primary.probed.height,
+        primary.probed.duration_ms,
+        primary.probed.chapters.clone(),
+    )
+    .await?;
+    tx.commit().await?;
+
+    // Derived variants (image srcset / video-audio poster) — best-effort, and they
+    // inherit the item's preserved gate (they carry no min_role of their own).
+    add_derived_variants(&state, &hmac_key, item.media_id, kind, primary_sha).await;
+
+    // Reflect the final variant set back so fab-gui can confirm the swap.
+    let variants = MediaVariantDao::find_by_media_id(&state.pool, item.media_id).await?;
+    let variant_json: Vec<_> = variants
+        .iter()
+        .map(|v| json!({ "url_key": v.url_key, "mime": v.mime, "bytes": v.bytes }))
+        .collect();
+    Ok(Json(json!({
+        "media_ref": media_ref,
+        "kind": kind.as_str(),
+        "variants": variant_json,
     }))
     .into_response())
 }

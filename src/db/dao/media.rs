@@ -251,6 +251,41 @@ impl MediaDao {
             .await?;
         Ok(())
     }
+
+    /// Re-derive the item's variant-DERIVED facts after a complete variant
+    /// replace (Phase DO — the fab-scad round-trip PATCH). `kind`/dims/duration/
+    /// chapters come from the new primary variant, computed the same way `create`
+    /// stamped them at ingest; the item's IDENTITY (`media_ref`, `title`,
+    /// `min_role`) is deliberately NOT touched, so `![](/media/<ref>)` embeds +
+    /// the gate survive the swap. Executor-generic so the handler can run this in
+    /// the same transaction as the wipe + inserts.
+    pub async fn update_facts(
+        executor: impl SqliteExecutor<'_>,
+        media_id: i64,
+        kind: MediaKind,
+        width: Option<i64>,
+        height: Option<i64>,
+        duration_ms: Option<i64>,
+        chapters: Option<String>,
+    ) -> Result<()> {
+        let kind_str = kind.as_str();
+        query!(
+            r#"
+            UPDATE media
+            SET kind = ?1, width = ?2, height = ?3, duration_ms = ?4, chapters = ?5
+            WHERE media_id = ?6
+            "#,
+            kind_str,
+            width,
+            height,
+            duration_ms,
+            chapters,
+            media_id,
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    }
 }
 
 /// One stored encoding of a media item. `sha256` keys the disk store (never
@@ -370,6 +405,23 @@ impl MediaVariantDao {
         query!(
             r#"DELETE FROM media_variant WHERE variant_id = ?1"#,
             variant_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    }
+
+    /// Wipe every variant of an item — the first half of a complete-replace
+    /// (Phase DO). Executor-generic so it shares the PATCH handler's transaction
+    /// with the re-inserts + `MediaDao::update_facts`. Disk bytes go cold (same
+    /// content-addressed no-sweep contract as `delete_by_id`).
+    pub async fn delete_all_for_media(
+        executor: impl SqliteExecutor<'_>,
+        media_id: i64,
+    ) -> Result<()> {
+        query!(
+            r#"DELETE FROM media_variant WHERE media_id = ?1"#,
+            media_id
         )
         .execute(executor)
         .await?;
@@ -586,6 +638,65 @@ mod tests {
                 .await?
                 .is_none()
         );
+        Ok(())
+    }
+
+    /// Phase DO: a complete variant replace (wipe → re-insert → re-derive facts)
+    /// swaps the whole variant set while the item's IDENTITY survives — the
+    /// `media_ref`, `title`, and `min_role` gate are untouched, so existing
+    /// embeds + the gate keep working. The kind/dims re-derive to the new set.
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn variants_replace_in_place_keeping_item_identity(pool: SqlitePool) -> Result<()> {
+        // A gated model item with a decimated + full mesh (the round-trip shape).
+        let item = MediaDao::create(
+            &pool,
+            "model-ref".into(),
+            MediaKind::Stl,
+            Some("Widget".into()),
+            None,
+            None,
+            None,
+            Some("Family".into()),
+            None,
+        )
+        .await?;
+        for (sha, key) in [("oldlow", "oldlowkey"), ("oldhigh", "oldhighkey")] {
+            MediaVariantDao::create(
+                &pool, item.media_id, sha.into(), key.into(),
+                "model/3mf".into(), None, 100, None, None, None,
+            )
+            .await?;
+        }
+        assert_eq!(
+            MediaVariantDao::find_by_media_id(&pool, item.media_id).await?.len(),
+            2
+        );
+
+        // Complete replace in one tx: wipe, insert the fresh set, re-derive facts.
+        let mut tx = pool.begin().await?;
+        MediaVariantDao::delete_all_for_media(&mut *tx, item.media_id).await?;
+        MediaVariantDao::create(
+            &mut *tx, item.media_id, "newlow".into(), "newlowkey".into(),
+            "model/3mf".into(), None, 42, None, None, None,
+        )
+        .await?;
+        MediaDao::update_facts(&mut *tx, item.media_id, MediaKind::Stl, None, None, None, None)
+            .await?;
+        tx.commit().await?;
+
+        // Exactly the new variant remains; the old keys are gone.
+        let variants = MediaVariantDao::find_by_media_id(&pool, item.media_id).await?;
+        assert_eq!(variants.len(), 1, "old variants wiped, only the new one");
+        assert_eq!(variants[0].sha256, "newlow");
+        assert!(MediaVariantDao::find_by_url_key(&pool, "oldlowkey").await?.is_none());
+        assert!(MediaVariantDao::find_by_url_key(&pool, "newlowkey").await?.is_some());
+
+        // Item identity untouched: same ref, title, and Family gate.
+        let after = MediaDao::find_by_ref(&pool, "model-ref").await?.unwrap();
+        assert_eq!(after.media_id, item.media_id);
+        assert_eq!(after.title.as_deref(), Some("Widget"));
+        assert_eq!(after.min_role.as_deref(), Some("Family"));
+        assert_eq!(after.kind()?, MediaKind::Stl);
         Ok(())
     }
 

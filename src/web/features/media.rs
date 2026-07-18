@@ -10,7 +10,7 @@
 //! transformer emits a placeholder that GETs here on load; we look up the media
 //! kind + variants and return the right element (same pattern as inline diagrams).
 
-use axum::extract::{Path, Request, State};
+use axum::extract::{DefaultBodyLimit, Path, Request, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
@@ -31,8 +31,17 @@ pub fn media_router() -> Router<AppState> {
         .route("/file/{url_key}", get(serve_media_file))
         .route("/embed/{media_ref}", get(render_media_embed))
         // Download by the author ref (one path segment — never collides with the
-        // two-segment /file/ and /embed/ routes above).
-        .route("/{media_ref}", get(serve_media_by_ref))
+        // two-segment /file/ and /embed/ routes above). PATCH on the same identity
+        // is the fab-scad round-trip SAVE (Phase DO): complete variant replace in
+        // place, Admin-gated FOR FREE by `require_admin_for_mutations` (GET public,
+        // PATCH → admin fallback). `DefaultBodyLimit::disable()` for the multi-GB
+        // model set, same as the /admin/media/upload route.
+        .route(
+            "/{media_ref}",
+            get(serve_media_by_ref)
+                .patch(crate::web::features::admin::media::patch_media_by_ref)
+                .layer(DefaultBodyLimit::disable()),
+        )
 }
 
 /// Download route for the author ref: `GET /media/<media_ref>` → 302 to the item's

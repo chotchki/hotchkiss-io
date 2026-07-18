@@ -36,7 +36,40 @@ fab-gui already reads `?model=` and `fetch_text`s it. The URL is **same-origin**
 `Cross-Origin-Resource-Policy: cross-origin` on the byte route, so the COEP:require-corp editor can
 fetch it. It's served `application/x-openscad`, which fab-gui reads as text. Nothing to build here.
 
-## Save — the fab-gui side to build (Half 2, upstream)
+## Save — the site SAVE TARGET, SHIPPED (Phase DO)
+
+The site now exposes the update-in-place endpoint fab-gui POSTs to. The contract is **FROZEN** — build
+the fab-gui side against exactly this:
+
+    PATCH /media/<ref>
+
+- **Verb + URL:** `PATCH` on the item's OWN ref URL — the same identity the editor loaded from. Not a
+  new `/admin/…` route: the ref IS the resource, and the fail-closed mutation layer gates any non-GET
+  to Admin automatically (the WebAuthn + role allowlists are POST-only, so a PATCH can't slip past the
+  admin fallback — no bespoke guard, and it can't be forgotten).
+- **Auth:** the ambient **session cookie**. The editor is same-origin, so a logged-in Admin's PATCH
+  carries it — no token, no OAuth. A missing identity is a `401`, insufficient a `403`, from the
+  global layer.
+- **Body:** `multipart/form-data`, the SAME shape as `/admin/media/upload` — one **file part per file**
+  (the edited SCAD + the meshes). The site types each by its filename EXTENSION, so send correct ones:
+  `.scad` → `application/x-openscad`, `.3mf` → `model/3mf`, `.stl` → `model/stl`. Non-file fields are
+  ignored (the gate is preserved, never re-set here). Body size is unlimited (streamed to disk, not
+  buffered).
+- **Semantics — COMPLETE replacement:** the uploaded set BECOMES the item's entire variant set, wiped +
+  re-inserted in ONE transaction. The item's identity — `media_ref`, `title`, and `min_role` gate — is
+  preserved, so every `![](/media/<ref>)` embed and the gate survive with zero rewrite; the new variants
+  INHERIT the item's gate. Anything NOT re-uploaded (e.g. a hand-added render-image thumbnail) is
+  DROPPED — the uploaded set is authoritative. Replaced blobs go cold on disk (content-addressed,
+  Backblaze-backed; no in-line sweep, same as delete).
+- **Response:** `200` JSON `{ "media_ref": "…", "kind": "stl", "variants": [ { "url_key": "…", "mime":
+  "model/3mf", "bytes": 12345 }, … ] }` — the final variant set, so fab-gui can confirm the swap. `404`
+  unknown ref, `400` empty body (a replace-to-nothing is a DELETE, not a PATCH).
+
+**One boundary to design around:** the byte `url_key` is `HMAC(sha)`, so replacing bytes CHANGES it —
+any author-pasted `/media/file/<url_key>` link goes stale, but `![](/media/<ref>)` embeds resolve live
+and stay valid. Embed by ref; let raw byte URLs be URLs.
+
+## Save — the fab-gui side still to build (upstream)
 
 To close the loop, fab-gui (when a logged-in Admin drives it) needs to:
 
@@ -44,21 +77,13 @@ To close the loop, fab-gui (when a logged-in Admin drives it) needs to:
    multicolor model (color-preserving), or a low-res STL for single-color — the full-res **3MF**
    (color, print), plus the edited **SCAD text** itself. Keep low + high the SAME format (see
    *Color & resolution* above).
-2. **Upload** all three to the site's media API, **authenticated by the ambient session cookie** —
-   the editor is same-origin, so a logged-in Admin's POST carries the cookie automatically. No token
-   plumbing, no OAuth.
-3. **Target the EXISTING item**, not a new one. Carry the item's `media_ref` from load → save (the
-   site puts it in the editor URL; fab-gui echoes it on upload). The site then **updates the item's
-   variants IN PLACE** on the same `media_ref` — so every `![](/media/<ref>)` embed on the site stays
-   valid with zero rewrite. (This is why we don't need a "superseded-by" pointer: the opaque ref never
-   changes; only the bytes behind it do.)
-
-## Site-side pieces Half 2 adds (so fab-gui has something to POST to)
-
-- An **update-item-variants** endpoint (Admin): `POST` the three files targeting an existing
-  `media_ref`, replacing the same-format variants. (Today `/admin/media/upload` MINTS a new item;
-  `add_encode` adds a variant to an item by id — Half 2 wires the "update in place by ref" path.)
-- The item ref threaded into the editor URL on load, and read back on save.
+2. **PATCH** all of them to `/media/<ref>` as multipart file parts (correct extensions per the contract
+   above), **authenticated by the ambient session cookie** — the editor is same-origin, so a logged-in
+   Admin's PATCH carries it automatically. No token plumbing, no OAuth.
+3. **Carry the item's `media_ref`** from load → save. The site puts it in the editor URL on load; fab-gui
+   echoes it into the PATCH URL. The site updates the variants IN PLACE on the same ref — so every
+   `![](/media/<ref>)` embed stays valid with zero rewrite. (This is why we don't need a "superseded-by"
+   pointer: the opaque ref never changes; only the bytes behind it do.)
 
 ## Recommended authoring workflow
 
@@ -67,7 +92,7 @@ To close the loop, fab-gui (when a logged-in Admin drives it) needs to:
 2. Embed `![](/media/R)` on the model page → the web gets the viewer (stl/3mf) + an **"Open in the
    slicer"** button.
 3. **Edit:** click the button → fab-gui loads the SCAD (URL carries `R`). Tweak params / geometry.
-4. **Save:** fab-gui exports STL+3MF+SCAD and POSTs them targeting `R` → variants updated in place.
+4. **Save:** fab-gui exports STL+3MF+SCAD and PATCHes them to `/media/R` → variants replaced in place.
    The page re-renders with the new mesh + source; the embed link is untouched.
 
 ## Open decisions for fab-gui to weigh in on
@@ -75,8 +100,10 @@ To close the loop, fab-gui (when a logged-in Admin drives it) needs to:
 - **Export targets:** decimated-STL tri-count budget (small enough for a snappy web viewer), and 3MF
   color fidelity (standard basematerials/color-groups — the site's `3MFLoader` doesn't show slicer
   paint extensions like Bambu MMU).
-- **Replace vs. version:** does a re-upload REPLACE the old same-format variant, or accumulate (free
-  edit history + a per-item "current variant" marker)? Site-side call, but it shapes the endpoint.
+- **Replace vs. version:** DECIDED — **complete replace** (Phase DO). A PATCH wipes the whole variant
+  set and re-inserts the uploaded one; the item identity (ref/title/gate) is preserved. No edit history,
+  no "current variant" marker. If versioning is ever wanted, a `media_variant.superseded_at` + a current
+  marker is an additive change that doesn't break this contract.
 - **Public source ⇒ free customizer:** because the SCAD is public and fab-gui is parametric, any
   visitor can already tweak params and re-slice via the load path. If that's desirable, nothing extra
   is needed; if not, that's a gating decision.

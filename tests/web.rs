@@ -13,6 +13,28 @@ fn client() -> reqwest::Client {
         .unwrap()
 }
 
+/// Media ingest shells out to ffprobe; the media tests skip where it's absent
+/// (dev machines have it; some CI runners may not).
+fn ffprobe_available() -> bool {
+    std::process::Command::new("ffprobe")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// A generic-binary multipart file part (octet-stream) — ffprobe can't type it,
+/// so it ingests as `MediaKind::File` (no responsive/poster derivation → fast +
+/// deterministic).
+fn bin_part(bytes: Vec<u8>, name: &str) -> reqwest::multipart::Part {
+    reqwest::multipart::Part::bytes(bytes)
+        .file_name(name.to_string())
+        .mime_str("application/octet-stream")
+        .unwrap()
+}
+
 #[tokio::test]
 async fn favicon_and_apple_icon_served_at_root() {
     // Browsers request /favicon.ico at the root by default (and iOS /apple-touch-icon.png)
@@ -1790,6 +1812,198 @@ async fn media_streams_large_generic_file_and_serves_it_back() {
     let lib = admin.get(server.url("/admin/media")).send().await.unwrap().text().await.unwrap();
     assert!(lib.contains("copy-link"), "library offers a copy-link button");
     assert!(lib.contains(&url_key), "library card carries the share url_key");
+}
+
+/// Phase DO: the fab-scad round-trip SAVE — `PATCH /media/<ref>` COMPLETELY
+/// replaces an item's variant set in place. The stable ref + title survive (so
+/// `![](/media/<ref>)` embeds don't break), the new bytes serve, and the OLD
+/// variant's url_key is GONE (a genuine replace, not an append). Generic-file
+/// payloads keep it fast + deterministic; needs ffprobe (the ingest probes).
+#[tokio::test]
+async fn media_patch_replaces_variant_set_in_place() {
+    if !ffprobe_available() {
+        eprintln!("skipping media PATCH test: ffprobe not found");
+        return;
+    }
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // Distinct generic payloads — ffprobe types neither → MediaKind::File.
+    let old_bytes: Vec<u8> = (0..4096u32).map(|i| (i.wrapping_mul(7)) as u8).collect();
+    let new_bytes: Vec<u8> = (0..2048u32).map(|i| (i.wrapping_mul(13).wrapping_add(1)) as u8).collect();
+
+    // Upload the original → item ref R.
+    let form = reqwest::multipart::Form::new().part("file", bin_part(old_bytes, "model.old.bin"));
+    let up: serde_json::Value = admin
+        .post(server.url("/admin/media/upload"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let media_ref = up["media_ref"].as_str().unwrap().to_string();
+    let media_id = up["media_id"].as_i64().unwrap();
+
+    // Title it, to prove the title survives the swap.
+    admin
+        .post(server.url(&format!("/admin/media/{media_id}/rename")))
+        .form(&[("title", "Widget")])
+        .send()
+        .await
+        .unwrap();
+
+    // Capture the OLD variant's url_key from the download embed; the bytes serve now.
+    let embed = reqwest::get(server.url(&format!("/media/embed/{media_ref}")))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let old_key = embed
+        .split("/media/file/")
+        .nth(1)
+        .expect("embed carries a file url")
+        .split('"')
+        .next()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        reqwest::get(server.url(&format!("/media/file/{old_key}"))).await.unwrap().status(),
+        StatusCode::OK
+    );
+
+    // PATCH the SAME ref with the new bytes → complete replace.
+    let form = reqwest::multipart::Form::new().part("file", bin_part(new_bytes.clone(), "model.new.bin"));
+    let resp = admin
+        .patch(server.url(&format!("/media/{media_ref}")))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "admin PATCH should succeed");
+    let j: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(j["media_ref"].as_str().unwrap(), media_ref, "ref unchanged");
+    let variants = j["variants"].as_array().expect("variants array");
+    assert_eq!(variants.len(), 1, "exactly the one new variant");
+    let new_key = variants[0]["url_key"].as_str().unwrap().to_string();
+    assert_ne!(new_key, old_key, "the url_key changed with the bytes");
+
+    // The new bytes serve byte-for-byte.
+    let served = reqwest::get(server.url(&format!("/media/file/{new_key}"))).await.unwrap();
+    assert_eq!(served.status(), StatusCode::OK);
+    assert_eq!(
+        served.bytes().await.unwrap().as_ref(),
+        new_bytes.as_slice(),
+        "new bytes served"
+    );
+
+    // The OLD variant is GONE — a complete replace, not an append.
+    assert_eq!(
+        reqwest::get(server.url(&format!("/media/file/{old_key}"))).await.unwrap().status(),
+        StatusCode::NOT_FOUND,
+        "old variant wiped"
+    );
+
+    // The stable ref + title survived → embeds keep working, now pointing at the new bytes.
+    let embed2 = reqwest::get(server.url(&format!("/media/embed/{media_ref}")))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(embed2.contains(&new_key), "embed resolves the new bytes via the SAME ref");
+    let lib = admin.get(server.url("/admin/media")).send().await.unwrap().text().await.unwrap();
+    assert!(lib.contains("Widget"), "title preserved across the swap");
+}
+
+/// Phase DO guards: the PATCH is Admin-only (inherited from the mutation layer, no
+/// /media-specific rule), 404s an unknown ref, 400s an empty body (a replace-to-
+/// nothing is a DELETE not a PATCH), and the freshly-minted variants INHERIT the
+/// item's PRESERVED gate. Needs ffprobe.
+#[tokio::test]
+async fn media_patch_authz_guards_and_gate_preserved() {
+    if !ffprobe_available() {
+        eprintln!("skipping media PATCH guard test: ffprobe not found");
+        return;
+    }
+    let server = spawn_test_server().await.expect("spawn");
+
+    // Anonymous PATCH → 401 (missing identity): gated FOR FREE by the non-safe-method
+    // admin fallback, no /media-specific rule.
+    let anon = reqwest::Client::new()
+        .patch(server.url("/media/anything"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anon.status(), StatusCode::UNAUTHORIZED);
+
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // Unknown ref → 404.
+    let bytes: Vec<u8> = (0..1024u32).map(|i| i as u8).collect();
+    let miss = admin
+        .patch(server.url("/media/does-not-exist"))
+        .multipart(reqwest::multipart::Form::new().part("file", bin_part(bytes.clone(), "x.bin")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(miss.status(), StatusCode::NOT_FOUND);
+
+    // Upload a GATED (Family) item → R.
+    let form = reqwest::multipart::Form::new()
+        .part("file", bin_part(bytes, "book.bin"))
+        .text("min_role", "Family");
+    let up: serde_json::Value = admin
+        .post(server.url("/admin/media/upload"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let media_ref = up["media_ref"].as_str().unwrap().to_string();
+
+    // Empty PATCH (no file parts) → 400, and it's rejected BEFORE the destructive
+    // tx (a replace to zero variants is a DELETE).
+    let empty = admin
+        .patch(server.url(&format!("/media/{media_ref}")))
+        .multipart(reqwest::multipart::Form::new().text("min_role", "Public"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(empty.status(), StatusCode::BAD_REQUEST, "empty replace rejected");
+
+    // Real PATCH with new bytes → the new variant must INHERIT the Family gate.
+    let new_bytes: Vec<u8> = (0..777u32).map(|i| (i.wrapping_mul(3)) as u8).collect();
+    let j: serde_json::Value = admin
+        .patch(server.url(&format!("/media/{media_ref}")))
+        .multipart(reqwest::multipart::Form::new().part("file", bin_part(new_bytes, "book.v2.bin")))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let new_key = j["variants"][0]["url_key"].as_str().unwrap().to_string();
+
+    // Anonymous fetch of the new bytes → 404 (gated, denied ≡ miss): the gate carried
+    // onto the freshly-minted variant.
+    assert_eq!(
+        reqwest::get(server.url(&format!("/media/file/{new_key}"))).await.unwrap().status(),
+        StatusCode::NOT_FOUND,
+        "gate preserved onto the new variant"
+    );
+    // Admin reaches it.
+    assert_eq!(
+        admin.get(server.url(&format!("/media/file/{new_key}"))).send().await.unwrap().status(),
+        StatusCode::OK,
+        "admin reaches the gated new bytes"
+    );
 }
 
 /// Phase CJ: an uploaded variant records WHICH media root holds its bytes
