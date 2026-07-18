@@ -169,12 +169,29 @@ async fn finish_authentication(
     session: Session,
     mut session_data: SessionData,
     Json(pkc): Json<PublicKeyCredential>,
-) -> Result<Redirect, AppError> {
+) -> Result<Response, AppError> {
     let (client_uuid, _) = state.webauthn.identify_discoverable_authentication(&pkc)?;
 
-    let mut user = UserDao::find_by_uuid(&state.pool, &client_uuid)
-        .await?
-        .ok_or(anyhow!("User not found"))?;
+    // A credential whose user handle has no row is a STRANDED passkey — minted
+    // on-device during a registration whose `finish` then failed (WebAuthn mints
+    // at create(), BEFORE finish, so the credential can't be un-made), or an
+    // account since deleted. Give a real "register to create an account" message,
+    // NOT the old bare 500 dead-end (`.ok_or("User not found")`). We can't heal
+    // the strand server-side, but the user just registers again for a fresh,
+    // working credential.
+    let mut user = match UserDao::find_by_uuid(&state.pool, &client_uuid).await? {
+        Some(u) => u,
+        None => {
+            warn!(
+                "login with an unregistered passkey (user handle {client_uuid}) — stranded credential or deleted account"
+            );
+            return Ok((
+                StatusCode::UNAUTHORIZED,
+                "This passkey isn't registered here — please register to create an account.",
+            )
+                .into_response());
+        }
+    };
 
     let creds: Vec<DiscoverableKey> = user.keys.iter().map(|x| x.into()).collect();
 
@@ -193,15 +210,21 @@ async fn finish_authentication(
         debug!("Logged in {:#?}", user);
 
         session.cycle_id().await?;
+        info!("login succeeded: {} user {:?}", user.role, user.display_name);
         session_data.auth_state = AuthenticationState::Authenticated(user);
         SessionData::update_session(&session, &session_data).await?;
 
         // The JS navigates to this response's final URL (fetch follows the
         // redirect), so the stashed ?next lands the user where the gate
         // sent them to log in.
-        Ok(Redirect::to(&pop_next(&session).await))
+        Ok(Redirect::to(&pop_next(&session).await).into_response())
     } else {
-        Err(anyhow!("Authentication not in progress").into())
+        warn!("finish_authentication called with no authentication in progress");
+        Ok((
+            StatusCode::BAD_REQUEST,
+            "Login wasn't started, or your session expired — please try again.",
+        )
+            .into_response())
     }
 }
 

@@ -3989,3 +3989,30 @@ async fn invalid_display_name_rejected_with_reason() {
     let body = resp.text().await.unwrap();
     assert!(body.contains("too long"), "reason surfaced: {body}");
 }
+
+/// DM follow-up: a STRANDED passkey — a valid assertion whose user handle has no
+/// row (a registration whose `finish` failed, or a deleted account) — gets a
+/// clean "not registered" 401 at login, NOT the old "User not found" 500
+/// dead-end. `identify_discoverable_authentication` only reads the 16-byte
+/// userHandle (no signature check), so a hand-crafted assertion with a
+/// nonexistent handle hits the exact branch with no browser ceremony. The
+/// userHandle here is 16 zero bytes (the nil UUID) — no such user in a fresh DB.
+#[tokio::test]
+async fn stranded_credential_login_is_a_clean_401_not_500() {
+    let server = spawn_test_server().await.expect("spawn");
+    let assertion = r#"{"id":"AAAA","rawId":"AAAA","response":{"authenticatorData":"AAAA","clientDataJSON":"AAAA","signature":"AAAA","userHandle":"AAAAAAAAAAAAAAAAAAAAAA"},"type":"public-key"}"#;
+    let resp = client()
+        .post(server.url("/login/finish_authentication"))
+        .body(assertion)
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "stranded credential → clean 401, not a 500 or an extractor 4xx"
+    );
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("register"), "actionable message: {body}");
+}
