@@ -53,6 +53,10 @@ pub struct GreylistTemplate {
     /// Never-succeeded paths greylisted IPs probe that R1 doesn't match yet (CX.9) — candidates to
     /// add to `SIGNATURE_PATTERNS`.
     pub candidates: Vec<CandidatePath>,
+    /// The server's OWN public IP(s), auto-exempt from the toll (Phase DU) — shown so it's
+    /// visible WHY the operator's home network is never greylisted. Empty until the IP broadcast
+    /// lands (or in debug, `127.0.0.1`).
+    pub allowlisted: Vec<String>,
 }
 
 pub async fn show_greylist(
@@ -106,6 +110,7 @@ pub async fn show_greylist(
         clearances,
         challenged_count,
         candidates,
+        allowlisted: state.greylist.allowlisted(),
     })
     .into_response())
 }

@@ -1,4 +1,4 @@
-<!-- plan-bridge:phase-high-water=DT -->
+<!-- plan-bridge:phase-high-water=DU -->
 # Plan
 
 Completed phases are in `PLAN_ARCHIVE.md` (most recent: Phase 12 — beta deployment on the mini (inverted `main`→beta / `v*`tag→prod flow); Phase 1 — `get_recs_by_name` `type=A` filter fix (ACME renewal hang); Phase 9 — Tailwind cleanup / dropped DaisyUI; Phase 8 — local/e2e test harness; Phase 7 — admin analytics dashboard; Phase 2 — DNS module testability; Phase 5 — dropped the `cookie-rs` fork; Phase 3 — `ifconfig.me` → Cloudflare `cdn-cgi/trace`; Phase 0 — push-to-deploy on the Mac mini; Phase 4 — `tray-wrapper` 0.4.1 bump).
@@ -130,6 +130,17 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [x] DS.2 - Cover/hero ref-stability LOCK: a test that a cover set from EITHER form (`/media/<ref>` or `/media/file/<url_key>`) stores the `media_id` and re-renders correctly AFTER the item's variants are replaced (the hero `<img>`/srcset byte URLs are recomputed each render, never stale). Confirms covers need no rewrite — pins the doc's claim.
 - [x] DS.3 - Editor: confirm the drop-upload inserts `![](/media/<ref>)` (it does) + the library copy affordances lead with the ref-embed (`![](/media/<ref>)`), the byte `/media/file/<key>` "Copy link" kept as the explicit-download secondary. No-op if already so; else a small template/JS tweak.
 - [x] DS.4 - Tests (the save-rewrite: pasted byte URL → ref, unresolvable untouched, both `![]` + `[]` forms; the cover round-trip) + `media-design.md` note flip + CLAUDE.md delta.
+
+## Phase DU - Auto-exempt the operator's own public IP from the greylist
+
+*The mini lives on the operator's home network, so its public IP — the one `IpProviderService` already tracks for the Cloudflare DNS updates — IS the operator's browsing IP, and the greylist was tolling it (an R3 flood from home traffic; a manual release doesn't stick because the next 15-min sweep re-adds it). Auto-exempt the server's OWN public IP(s) from BOTH enforcement points: detection (never scored → never added) and enforcement (never tolled, the allowlist WINS over any snapshot/pinned entry). Zero config, self-maintaining — it follows a residential IP rotation via the same broadcast the DNS service reads. From any OTHER network the operator just authenticates (an `is_authenticated()` session is never tolled), so auto-only fully covers it.*
+
+- [ ] DU.0 - Phase exit: the server's own public IP(s) are never greylisted or tolled — `GreylistSet` consults an auto-maintained allowlist fed by the `IpProviderService` broadcast, the sweep skips + releases them, the admin surface shows the exempt IP; tests; shipped.
+- [x] DU.1 - `GreylistSet` gains an `allow` set (the server's public IP(s)) with `set_public_ips(&HashSet<IpAddr>)` / `is_allowlisted` / `allowlisted()`; `is_greylisted` returns false for an allowlisted IP — the allowlist WINS over any snapshot/pinned entry (defense in depth). Unit test: an allowlisted IP isn't greylisted even after `insert`.
+- [x] DU.2 - Coordinator wiring: carry a `GreylistSet` clone onto `ServiceCoordinator`; in `start()` spawn a DETACHED task subscribed to the `ip_provider_sender` broadcast (a 2nd receiver alongside DNS) that calls `set_public_ips` on every update — the allowlist follows the residential IP with no restart. Debug forces `127.0.0.1` (already RFC-skipped, harmless).
+- [x] DU.3 - Sweep: skip scoring an allowlisted IP (`build_features` runs `should_evaluate`, which skips RFC1918 but NOT the public IP), and release any stale persisted entry for the operator IP(s) each pass (`GreylistDao::release`) so the table + admin view stay clean. Test: a public IP that trips R1 is neither greylisted nor left persisted once allowlisted.
+- [x] DU.4 - Admin `/admin/greylist`: show the auto-exempted operator IP(s) so it's visible WHY they're never tolled — a small `allowlisted: Vec<String>` on the template.
+- [x] DU.5 - Docs: `docs/greylist-challenge-design.md` (the auto-allowlist — source, both enforcement points, the from-elsewhere-just-login rationale) + CLAUDE.md greylist delta.
 
 ## Backlog (not yet phased)
 

@@ -30,6 +30,18 @@
         </form>
     </div>
 
+    {% if !allowlisted.is_empty() %}
+    {# Phase DU: the server's own tracked public IP(s) are auto-exempt — shown so it's clear WHY
+       the operator's home network is never tolled. From any other network, just log in. #}
+    <p class="text-sm text-navy/70 mb-6">
+        <span class="px-1.5 py-0.5 rounded-sm bg-navy text-yellow uppercase text-xs font-display">auto-exempt</span>
+        This server's own public IP{% if allowlisted.len() > 1 %}s{% endif %}
+        ({% for ip in allowlisted %}<code class="font-mono">{{ ip }}</code>{% if !loop.last %}, {% endif %}{% endfor %})
+        {% if allowlisted.len() > 1 %}are{% else %}is{% endif %} never greylisted or tolled — the operator's own
+        network. From anywhere else, just log in (an authenticated session is never tolled).
+    </p>
+    {% endif %}
+
     <h2 class="font-display text-navy uppercase mb-2">Active ({{ entries.len() }})</h2>
     {% if entries.is_empty() %}
     <p class="text-navy/60 text-sm mb-6">Nobody's greylisted right now.</p>

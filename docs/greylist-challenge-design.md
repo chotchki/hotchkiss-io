@@ -63,6 +63,15 @@ R2 and R3 EXEMPT verified search crawlers (below); R1 does not (nothing legit pr
 
 The sweep evaluates a ~24h window and skips loopback + RFC1918 so a dev / LAN client can't greylist itself.
 
+### Operator auto-allowlist — the server's own public IP (Phase DU)
+
+The mini self-hosts on the operator's residential connection, so its **own public IP** — the one `IpProviderService` already tracks and feeds Cloudflare for the DNS updates — **is the operator's browsing IP** (traffic from the home network hairpins through the router NAT and the mini sees it as the shared public IP). Left alone, the greylist tolls the operator: a busy home day can trip R3, and a manual release doesn't stick because the next 15-min sweep re-adds it. So the server's tracked public IP(s) are **auto-exempt** at BOTH enforcement points:
+
+- **Detection** — the sweep skips scoring an allowlisted IP (it's not covered by the loopback/RFC1918 skip, since it's a genuine public IP), so it's never added; and each pass **releases** any stale/pinned row for it (e.g. one carried in a prod→beta snapshot) so the table + admin view stay clean.
+- **Enforcement** — `GreylistSet::is_greylisted` returns false for an allowlisted IP: the allowlist **wins over any entry**, snapshot OR manual pin, so the operator's network can never be tolled even by a stale row racing the next sweep.
+
+It's **zero config and self-maintaining**: a detached coordinator task subscribes to the same IP broadcast the DNS service reads and calls `GreylistSet::set_public_ips` on every change, so a residential IP rotation updates DNS *and* the allowlist together. (In `debug_assertions` the tracked IP is forced to `127.0.0.1`, already covered by the RFC skip — harmless.) The admin `/admin/greylist` page shows the exempt IP(s) so it's visible WHY they're never tolled. This deliberately covers ONLY the home network; from any other network (cellular, an office) the operator just **authenticates** — an `is_authenticated()` session is never tolled — so an arbitrary-IP/CIDR config allowlist was decided OUT as unnecessary surface.
+
 ### Crawler safety — FCrDNS, not a UA allowlist
 
 A real search crawler CAN plausibly trip R2 — after a site restructure Googlebot re-crawls dead URLs for years (like /pages/Resume) and eats a 404 burst. A UA string is no protection (it's the first thing a scraper spoofs). So before R2/R3 auto-greylists a crawler-claiming IP, the sweep does **forward-confirmed reverse DNS**: reverse the IP, check the PTR ends in a known crawler suffix (`googlebot.com`, `search.msn.com`, `crawl.yahoo.net`, …), then forward-resolve that name and confirm it maps back to the same IP. A spoofed UA can't fake DNS it doesn't control. Verified crawlers are never auto-greylisted, and the exemption is recorded so it's visible WHY an IP that looks noisy was spared.

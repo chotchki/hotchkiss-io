@@ -22,6 +22,9 @@ pub struct ServiceCoordinator {
     dns_provider_service: DnsProviderService,
     acme_provider_service: AcmeProviderService,
     endpoints_provider_service: EndpointsProviderService,
+    /// The shared greylist snapshot (Phase DU) — carried here so `start()` can keep its
+    /// operator-allowlist synced to the server's own public IP off the IP broadcast.
+    greylist_set: crate::greylist::active_set::GreylistSet,
 }
 
 impl ServiceCoordinator {
@@ -69,7 +72,7 @@ impl ServiceCoordinator {
         // the try_join!) — a failed pass logs and retries, never takes the app down. Reuses
         // the ACME resolver for FCrDNS crawler verification, and refreshes the shared snapshot
         // the enforcement middleware reads.
-        crate::greylist::sweep::spawn(pool.clone(), resolver.clone(), greylist_set);
+        crate::greylist::sweep::spawn(pool.clone(), resolver.clone(), greylist_set.clone());
 
         // Phase DL: the daily dead-link scan. Detached interval loop (NOT in the
         // try_join!) — a failed pass logs and retries next tick, never takes the app
@@ -84,12 +87,31 @@ impl ServiceCoordinator {
             dns_provider_service,
             acme_provider_service,
             endpoints_provider_service,
+            greylist_set,
         })
     }
 
     pub async fn start(self) -> Result<()> {
         let (ip_provider_sender, ip_provider_reciever) = broadcast::channel(1);
         let (tls_config_sender, tls_config_reciever) = broadcast::channel(1);
+
+        // Phase DU: keep the greylist's operator-allowlist synced to the server's own public
+        // IP(s) — the mini's home network is the operator's browsing network, so it's never
+        // tolled/scored. A DETACHED task off a SECOND receiver on the same broadcast the DNS
+        // service reads; subscribe BEFORE the IP service starts so the boot-time send isn't
+        // missed. (Debug forces 127.0.0.1, already RFC-skipped — harmless.)
+        let mut greylist_ip_rx = ip_provider_sender.subscribe();
+        let greylist_set = self.greylist_set;
+        tokio::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match greylist_ip_rx.recv().await {
+                    Ok(ips) => greylist_set.set_public_ips(&ips),
+                    Err(RecvError::Lagged(_)) => continue, // catch up on the next latest
+                    Err(RecvError::Closed) => break,       // sender gone → app shutting down
+                }
+            }
+        });
 
         let ips = self.ip_provider_service;
         let dps = self.dns_provider_service;

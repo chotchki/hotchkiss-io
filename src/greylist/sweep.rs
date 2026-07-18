@@ -68,6 +68,12 @@ pub async fn run_once<D: CrawlerDns>(
     let expires = ttl_expiry(Utc::now());
 
     for f in &features {
+        // Never score the operator's own public IP (Phase DU) — `build_features` skips
+        // RFC1918/loopback but NOT the public IP, so guard here. The mini's home network
+        // is the operator's browsing network; it's exempt from detection outright.
+        if set.is_allowlisted(&f.ip) {
+            continue;
+        }
         let Verdict::Greylist {
             rule,
             reason,
@@ -98,6 +104,18 @@ pub async fn run_once<D: CrawlerDns>(
 
         GreylistDao::upsert_auto(pool, &f.ip, &reason, Some(&evidence), expires).await?;
         report.greylisted += 1;
+    }
+
+    // Phase DU: the operator's own public IP(s) never persist — release a stale/pinned row
+    // (e.g. carried in a prod→beta snapshot, or from before this IP was the tracked public
+    // one) so the table + admin view stay clean. Enforcement already ignores them live
+    // (`is_greylisted` honors the allowlist); this keeps the DB honest.
+    for ip in set.allowlisted() {
+        match GreylistDao::release(pool, &ip).await {
+            Ok(n) if n > 0 => info!("greylist sweep: released operator IP {ip} (auto-allowlisted)"),
+            Ok(_) => {}
+            Err(e) => warn!("greylist sweep: failed releasing operator IP {ip}: {e:?}"),
+        }
     }
 
     // Trim lapsed rows, then refresh the request-path snapshot from the active set.
@@ -136,7 +154,7 @@ pub fn spawn(pool: SqlitePool, resolver: TokioAsyncResolver, set: GreylistSet) {
 mod tests {
     use super::*;
     use crate::db::dao::request_log::NewRequestLog;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::net::IpAddr;
 
     /// Minimal offline resolver for the sweep test: verifies exactly the IPs whose PTR+forward
@@ -216,6 +234,38 @@ mod tests {
         assert_eq!(report.greylisted, 1);
         assert_eq!(report.exempted_crawlers, 1);
         assert_eq!(report.skipped_unknown_dns, 0);
+        Ok(())
+    }
+
+    /// Phase DU: the server's OWN public IP is never greylisted — even when it trips R1 hard —
+    /// AND a stale persisted row for it is RELEASED, so the operator's home network is never
+    /// tolled and the admin table stays clean.
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn sweep_never_greylists_the_operator_public_ip(pool: SqlitePool) -> Result<()> {
+        let operator = "203.0.113.77"; // stands in for the mini's own tracked public IP
+
+        // It trips R1 hard (signature probes) — but must NOT be greylisted once allowlisted.
+        for p in ["/wp-login.php", "/xmlrpc.php", "/.env", "/.git/config"] {
+            RequestLogDao::insert(&pool, &req(p, 404, operator)).await?;
+        }
+        // A PRE-EXISTING persisted entry (e.g. carried in a snapshot) → the sweep must release it.
+        let expires = ttl_expiry(Utc::now());
+        GreylistDao::upsert_auto(&pool, operator, "R1: stale", None, expires).await?;
+
+        let dns = MockDns::default();
+        let cache = CrawlerCache::new(Duration::from_secs(3600));
+        let set = GreylistSet::new();
+        set.set_public_ips(&HashSet::from([operator.parse::<IpAddr>().unwrap()]));
+
+        let report = run_once(&pool, &dns, &cache, &set).await?;
+
+        let active = GreylistDao::active(&pool).await?;
+        assert!(
+            active.iter().all(|e| e.ip != operator),
+            "operator IP is neither scored nor left persisted (skipped + released)"
+        );
+        assert!(!set.is_greylisted(operator), "operator IP is never tolled");
+        assert_eq!(report.greylisted, 0, "the R1 trip did not greylist the allowlisted operator IP");
         Ok(())
     }
 }
