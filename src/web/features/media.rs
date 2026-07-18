@@ -10,15 +10,17 @@
 //! transformer emits a placeholder that GETs here on load; we look up the media
 //! kind + variants and return the right element (same pattern as inline diagrams).
 
-use axum::extract::{DefaultBodyLimit, Path, Request, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
-use axum::Router;
-use http::{header, HeaderName, HeaderValue, StatusCode};
+use axum::{Json, Router};
+use http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
+use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
 use crate::db::dao::media::{MediaDao, MediaKind, MediaVariantDao, ModelFormat};
+use crate::web::features::media_select::{self, Negotiation};
 use crate::web::util::media_ref::UrlKey;
 use crate::web::app_state::AppState;
 use crate::web::session::SessionData;
@@ -39,40 +41,149 @@ pub fn media_router() -> Router<AppState> {
         .route(
             "/{media_ref}",
             get(serve_media_by_ref)
+                .options(media_manifest)
                 .patch(crate::web::features::admin::media::patch_media_by_ref)
                 .layer(DefaultBodyLimit::disable()),
         )
 }
 
-/// Download route for the author ref: `GET /media/<media_ref>` → 302 to the item's
-/// full-res bytes. The upload API hands `fab publish` a `media_ref` (not the byte
-/// `url_key`), so its Downloads links use this form; resolve the ref → the LARGEST
-/// variant (full-res) → the canonical `/media/file/<url_key>` byte route (which
-/// owns range / caching / nosniff / content-disposition). A UUIDv7 ref is
-/// unguessable, so this adds no enumeration oracle.
-async fn serve_media_by_ref(
-    State(state): State<AppState>,
-    session_data: SessionData,
-    Path(media_ref): Path<String>,
-) -> Response {
-    let media = match MediaDao::find_by_ref(&state.pool, &media_ref).await {
+/// `?format=<token>` query on `GET /media/<ref>` (Phase DP) — the explicit,
+/// link-friendly variant selector (`scad`/`stl`/`3mf`/`avif`/…). Absent → fall to
+/// `Accept`, then largest.
+#[derive(Deserialize)]
+struct FormatQuery {
+    format: Option<String>,
+}
+
+/// The hypermedia manifest for `/media/<ref>` (Phase DP §5) — the item's state +
+/// its variants as followable links. DP ships the READ shape; DQ adds the
+/// role-aware `controls` block + per-variant `remove` links once the write surface
+/// exists.
+#[derive(Serialize)]
+struct Manifest {
+    #[serde(rename = "ref")]
+    media_ref: String,
+    #[serde(rename = "self")]
+    self_url: String,
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    min_role: Option<String>,
+    variants: Vec<VariantEntry>,
+}
+
+#[derive(Serialize)]
+struct VariantEntry {
+    #[serde(rename = "type")]
+    mime: String,
+    bytes: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    width: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    height: Option<i64>,
+    href: String,
+}
+
+fn build_manifest(media: &MediaDao, variants: &[MediaVariantDao]) -> Manifest {
+    Manifest {
+        media_ref: media.media_ref.clone(),
+        self_url: format!("/media/{}", media.media_ref),
+        kind: media.kind.clone(),
+        title: media.title.clone(),
+        min_role: media.min_role.clone(),
+        variants: variants
+            .iter()
+            .map(|v| VariantEntry {
+                mime: v.mime.clone(),
+                bytes: v.bytes,
+                width: v.width,
+                height: v.height,
+                href: format!("/media/file/{}", v.url_key),
+            })
+            .collect(),
+    }
+}
+
+/// Resolve a ref to its item + variants, applying the visibility gate. A miss OR a
+/// denied gate returns the SAME 404 (no existence oracle); a lookup error is a 500.
+/// Shared by the GET-read + OPTIONS-manifest paths.
+async fn resolve_visible(
+    state: &AppState,
+    media_ref: &str,
+    session_data: &SessionData,
+) -> Result<(MediaDao, Vec<MediaVariantDao>), Response> {
+    let media = match MediaDao::find_by_ref(&state.pool, media_ref).await {
         Ok(Some(m)) => m,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Not found").into_response(),
+        Ok(None) => return Err((StatusCode::NOT_FOUND, "Not found").into_response()),
         Err(e) => {
             tracing::error!("media lookup by ref failed: {e:?}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "media lookup failed").into_response();
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "media lookup failed").into_response());
         }
     };
     // Visibility gate (DC.3): denied ≡ the unknown-ref miss above — no oracle.
     if !media.is_visible_to(session_data.auth_state.role()) {
-        return (StatusCode::NOT_FOUND, "Not found").into_response();
+        return Err((StatusCode::NOT_FOUND, "Not found").into_response());
     }
     let variants = MediaVariantDao::find_by_media_id(&state.pool, media.media_id)
         .await
         .unwrap_or_default();
-    match variants.iter().max_by_key(|v| v.bytes) {
-        Some(v) => Redirect::temporary(&format!("/media/file/{}", v.url_key)).into_response(),
-        None => (StatusCode::NOT_FOUND, "no downloadable file for this media").into_response(),
+    Ok((media, variants))
+}
+
+/// `OPTIONS /media/<ref>` → the hypermedia manifest (Phase DP). Safe method →
+/// public, then `min_role`-gated (denied ≡ the unknown-ref 404).
+async fn media_manifest(
+    State(state): State<AppState>,
+    session_data: SessionData,
+    Path(media_ref): Path<String>,
+) -> Response {
+    match resolve_visible(&state, &media_ref, &session_data).await {
+        Ok((media, variants)) => Json(build_manifest(&media, &variants)).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+/// Author-ref READ route: `GET /media/<media_ref>` — content-negotiated (Phase DP,
+/// `docs/media-design.md` §5). Precedence `?format=` (explicit) > `Accept`
+/// (wildcard-free preference) > largest (default). A browser's `…,*/*` carries a
+/// wildcard → largest, so bare-link / `fab publish` download behavior is UNCHANGED;
+/// `?format=scad` / a `*/*`-free `Accept` select a specific representation.
+/// Redirects **307** to the chosen `/media/file/<url_key>` (which owns range /
+/// caching / nosniff / CORP), with `Vary: Accept` + `Content-Location`. `Accept:
+/// application/json` → the item manifest. `min_role`-gated (denied ≡ the unknown-ref
+/// 404 — no oracle); a specific-but-unsatisfiable request is a `406`.
+async fn serve_media_by_ref(
+    State(state): State<AppState>,
+    session_data: SessionData,
+    Path(media_ref): Path<String>,
+    Query(q): Query<FormatQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let (media, variants) = match resolve_visible(&state, &media_ref, &session_data).await {
+        Ok(pair) => pair,
+        Err(resp) => return resp,
+    };
+    let accept = headers.get(header::ACCEPT).and_then(|h| h.to_str().ok());
+    match media_select::negotiate(&variants, q.format.as_deref(), accept) {
+        Negotiation::Variant(v) => {
+            let byte_url = format!("/media/file/{}", v.url_key);
+            let mut resp = Redirect::temporary(&byte_url).into_response();
+            let h = resp.headers_mut();
+            h.insert(header::VARY, HeaderValue::from_static("Accept"));
+            if let Ok(cl) = HeaderValue::from_str(&byte_url) {
+                h.insert(header::CONTENT_LOCATION, cl);
+            }
+            resp
+        }
+        Negotiation::ItemState => Json(build_manifest(&media, &variants)).into_response(),
+        Negotiation::Empty => {
+            (StatusCode::NOT_FOUND, "no downloadable file for this media").into_response()
+        }
+        Negotiation::NotAcceptable => (
+            StatusCode::NOT_ACCEPTABLE,
+            "no variant matches the requested format",
+        )
+            .into_response(),
     }
 }
 
@@ -373,41 +484,25 @@ Your browser can't play this video.</video>"
             )
         }
         MediaKind::Stl => {
-            // Select ONLY over MESH variants (STL/3MF via `ModelFormat::is_mesh`) —
-            // an image variant is a THUMBNAIL/poster and the SCAD source is the
-            // SLICER input, NEVER the mesh, so neither may be mis-picked as the
-            // viewer or download (Phase DN; scad is `application/…`, so the old
-            // `model/*` glob already excluded it — this makes it explicit + typed).
-            let models: Vec<&MediaVariantDao> = variants
-                .iter()
-                .filter(|v| ModelFormat::from_mime(&v.mime).is_some_and(ModelFormat::is_mesh))
-                .collect();
-            if models.is_empty() {
-                return error_span("stl has no stored mesh");
-            }
-            // Multiple model variants = LEVELS OF DETAIL (decimated + full-res) and/or
-            // formats (image + low-res 3MF + high-res 3MF is the common set). Pick by
-            // TYPE then SIZE:
-            //   VIEWER   = the SMALLEST 3MF (color + fast to fetch/render); if there's
-            //              no 3MF, the smallest mesh (the STL LOD preview).
+            // Select ONLY over MESH variants via the SHARED selector (§5 / `media_select`):
+            //   VIEWER   = smallest `model/3mf` (color + fast to fetch/render), else the
+            //              smallest mesh (the STL LOD preview).
             //   DOWNLOAD = the LARGEST mesh (full-res, printable).
-            // `bytes` is the fidelity key — decimation is monotonic (low-res < full),
-            // and `variant_id` fetch order is insertion order (NOT fidelity), so the
-            // min/max-by-bytes is load-bearing. A single-variant model views +
-            // downloads the same file.
-            let smallest_3mf = models
-                .iter()
-                .copied()
-                .filter(|v| v.mime == "model/3mf")
-                .min_by_key(|v| v.bytes);
-            let viewer = smallest_3mf
-                .unwrap_or_else(|| models.iter().copied().min_by_key(|v| v.bytes).unwrap());
+            // An image variant is a THUMBNAIL and the SCAD source is the slicer input,
+            // NEVER the mesh (Phase DN/DP). `bytes` is the fidelity key — decimation is
+            // monotonic and `variant_id` order is insertion order (NOT fidelity), so the
+            // min/max-by-bytes is load-bearing. A single-variant model views + downloads
+            // the same file.
+            let (Some(viewer), Some(full)) =
+                (media_select::viewer_mesh(variants), media_select::largest_mesh(variants))
+            else {
+                return error_span("stl has no stored mesh");
+            };
             let fmt = if viewer.mime == "model/3mf" { "3mf" } else { "stl" };
-            let full = models.iter().copied().max_by_key(|v| v.bytes).unwrap();
             // If the model carries its OpenSCAD source, offer to open it in the
             // slicer (Phase DN) — under the viewer + full-res download.
             let slicer = scad
-                .map(|v| open_in_slicer_button(&v.url_key))
+                .map(|_| open_in_slicer_button(&media.media_ref))
                 .unwrap_or_default();
             format!(
                 "<span class=\"flex flex-col items-center gap-2 my-4\">{}{}{}</span>",
@@ -480,10 +575,10 @@ Your browser can't play this audio.</audio></span>",
             // A standalone OpenSCAD source (no grouped mesh): lead with the slicer
             // button — the point — and keep a download for the raw source (Phase DN).
             // Any other file is just a download.
-            if let Some(s) = scad {
+            if scad.is_some() {
                 format!(
                     "<span class=\"flex flex-col items-center gap-2 my-4\">{}{}</span>",
-                    open_in_slicer_button(&s.url_key),
+                    open_in_slicer_button(&media.media_ref),
                     download_button(&v.url_key, &alt, v.bytes),
                 )
             } else {
@@ -541,15 +636,19 @@ const DOWNLOAD_ICON_SVG: &str = "<svg viewBox=\"0 0 16 16\" width=\"1em\" height
 /// Inline "stacked layers" glyph for the Open-in-the-slicer button (a sliced model).
 const SLICER_ICON_SVG: &str = "<svg viewBox=\"0 0 16 16\" width=\"1em\" height=\"1em\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M8 1.5 14.5 5 8 8.5 1.5 5 8 1.5Z\"/><path d=\"M1.5 8 8 11.5 14.5 8\"/><path d=\"M1.5 11 8 14.5 14.5 11\"/></svg>";
 
-/// "Open in the slicer" button (Phase DN): hands fab-gui the SCAD source URL via
-/// its `?model=` deep-link. Root-relative so fab-gui's `fetch_text` resolves it
-/// same-origin (the editor is COEP-isolated; the byte route carries CORP). Yellow
-/// (not the navy download) so the "open the tool" action reads distinct from
-/// "download the file". The url_key is 64-hex — no query metacharacters to escape.
-fn open_in_slicer_button(scad_url_key: &str) -> String {
+/// "Open in the slicer" button (Phase DN/DP): hands fab-gui the item's ONE round-trip
+/// URL via its `?model=` deep-link — `/media/<ref>?format=scad`. fab-gui `fetch_text`s
+/// it → the negotiated GET (DP §5) 307-redirects `?format=scad` to the SCAD source; the
+/// `ref` in the PATH is the SAVE target (drop the query → `PUT /media/<ref>/variants`,
+/// or follow the OPTIONS manifest). We emit the STABLE `media_ref`, never the per-save
+/// `url_key` (`HMAC(sha)`, no reverse map). Root-relative so `fetch_text` stays
+/// same-origin (COEP-isolated editor; the byte route carries CORP). Yellow (not the navy
+/// download) so "open the tool" reads distinct from "download the file". `media_ref` is
+/// `[A-Za-z0-9_-]` — no query metacharacters to escape.
+fn open_in_slicer_button(media_ref: &str) -> String {
     format!(
         "<a class=\"media-slice inline-flex items-center gap-2 my-2 px-4 py-2 bg-yellow text-navy rounded no-underline hover:bg-yellow/90\" \
-href=\"/3d/editor?model=/media/file/{scad_url_key}\">{SLICER_ICON_SVG}<span>Open in the slicer</span></a>"
+href=\"/3d/editor?model=/media/{media_ref}?format=scad\">{SLICER_ICON_SVG}<span>Open in the slicer</span></a>"
     )
 }
 
@@ -858,7 +957,7 @@ mod tests {
             "scad is never loaded into the mesh viewer: {html}"
         );
         assert!(
-            html.contains("href=\"/3d/editor?model=/media/file/scadkey\""),
+            html.contains("href=\"/3d/editor?model=/media/intro?format=scad\""),
             "Open-in-the-slicer targets the scad source: {html}"
         );
         assert!(html.contains("Open in the slicer"), "{html}");
@@ -874,7 +973,7 @@ mod tests {
             &[variant("scadkey", "application/x-openscad", None)],
         );
         assert!(
-            html.contains("href=\"/3d/editor?model=/media/file/scadkey\""),
+            html.contains("href=\"/3d/editor?model=/media/intro?format=scad\""),
             "standalone scad opens in the slicer: {html}"
         );
         assert!(html.contains("Open in the slicer"), "{html}");
@@ -907,7 +1006,7 @@ mod tests {
             "download = the high-res 3MF: {html}"
         );
         assert!(
-            html.contains("href=\"/3d/editor?model=/media/file/scadkey\""),
+            html.contains("href=\"/3d/editor?model=/media/intro?format=scad\""),
             "slicer button targets the source: {html}"
         );
     }

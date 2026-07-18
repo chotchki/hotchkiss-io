@@ -9,6 +9,7 @@ pub mod listing;
 pub mod login;
 pub mod mcp;
 pub mod media;
+pub mod media_select;
 pub mod not_found;
 pub mod pages;
 pub mod resume;

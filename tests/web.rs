@@ -35,6 +35,14 @@ fn bin_part(bytes: Vec<u8>, name: &str) -> reqwest::multipart::Part {
         .unwrap()
 }
 
+/// The `Location` header of a redirect response (the `client()` doesn't follow them).
+fn location(resp: &reqwest::Response) -> Option<String> {
+    resp.headers()
+        .get("location")
+        .and_then(|h| h.to_str().ok())
+        .map(str::to_string)
+}
+
 #[tokio::test]
 async fn favicon_and_apple_icon_served_at_root() {
     // Browsers request /favicon.ico at the root by default (and iOS /apple-touch-icon.png)
@@ -2003,6 +2011,150 @@ async fn media_patch_authz_guards_and_gate_preserved() {
         admin.get(server.url(&format!("/media/file/{new_key}"))).send().await.unwrap().status(),
         StatusCode::OK,
         "admin reaches the gated new bytes"
+    );
+}
+
+/// Phase DP: `GET /media/<ref>` content-negotiates (`?format=` > wildcard-free
+/// `Accept` > largest) and `OPTIONS /media/<ref>` returns the hypermedia manifest.
+/// The manifest's per-type `href`s are the ground truth the negotiation Locations are
+/// checked against (no content-type dependency). Needs ffprobe (ingest probes).
+#[tokio::test]
+async fn media_get_negotiates_and_options_manifest() {
+    if !ffprobe_available() {
+        eprintln!("skipping DP negotiation test: ffprobe not found");
+        return;
+    }
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // A grouped model item: a SMALL scad source + a LARGER 3mf mesh (dominant → Stl).
+    let scad = bin_part(b"cube([10,10,10]);".to_vec(), "model.scad");
+    let mesh = bin_part((0..8000u32).map(|i| i as u8).collect(), "model.3mf");
+    let up: serde_json::Value = admin
+        .post(server.url("/admin/media/upload"))
+        .multipart(reqwest::multipart::Form::new().part("file", scad).part("file", mesh))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r = up["media_ref"].as_str().unwrap().to_string();
+
+    // OPTIONS → the manifest; map each variant type → its href (the ground truth).
+    let opts = admin
+        .request(reqwest::Method::OPTIONS, server.url(&format!("/media/{r}")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(opts.status(), StatusCode::OK, "OPTIONS → 200 manifest");
+    let m: serde_json::Value = opts.json().await.unwrap();
+    assert_eq!(m["self"].as_str().unwrap(), format!("/media/{r}"));
+    assert_eq!(m["ref"].as_str().unwrap(), r);
+    let variants = m["variants"].as_array().unwrap();
+    let href_of = |ty: &str| -> String {
+        variants
+            .iter()
+            .find(|v| v["type"] == ty)
+            .unwrap_or_else(|| panic!("manifest has no {ty} variant: {m}"))["href"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let scad_href = href_of("application/x-openscad");
+    let mesh_href = href_of("model/3mf");
+
+    // ?format=scad → 307 to the scad href, with Vary: Accept.
+    let r1 = admin.get(server.url(&format!("/media/{r}?format=scad"))).send().await.unwrap();
+    assert_eq!(r1.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(r1.headers().get("vary").and_then(|h| h.to_str().ok()), Some("Accept"));
+    assert_eq!(location(&r1).as_deref(), Some(scad_href.as_str()), "?format=scad → the scad");
+
+    // ?format=3mf → the mesh; ?format=mp4 (absent) → 406.
+    let r2 = admin.get(server.url(&format!("/media/{r}?format=3mf"))).send().await.unwrap();
+    assert_eq!(location(&r2).as_deref(), Some(mesh_href.as_str()), "?format=3mf → the mesh");
+    assert_eq!(
+        admin.get(server.url(&format!("/media/{r}?format=mp4"))).send().await.unwrap().status(),
+        StatusCode::NOT_ACCEPTABLE,
+        "a format the item lacks → 406"
+    );
+
+    // Accept: application/x-openscad (wildcard-FREE) → the scad (an honest preference).
+    let ra = admin
+        .get(server.url(&format!("/media/{r}")))
+        .header("Accept", "application/x-openscad")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(location(&ra).as_deref(), Some(scad_href.as_str()), "wildcard-free Accept → scad");
+
+    // Browser-ish Accept (carries */*) → largest (the mesh) — bare-link behavior UNCHANGED.
+    let rw = admin
+        .get(server.url(&format!("/media/{r}")))
+        .header("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(location(&rw).as_deref(), Some(mesh_href.as_str()), "*/* → largest (unchanged)");
+
+    // Accept: application/json → the item manifest (200), same self as OPTIONS.
+    let js: serde_json::Value = admin
+        .get(server.url(&format!("/media/{r}")))
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(js["ref"].as_str().unwrap(), r);
+    assert_eq!(js["self"].as_str().unwrap(), format!("/media/{r}"));
+
+    // Gate: OPTIONS on a Family item → anon 404 (≡ miss), admin 200.
+    let gated: serde_json::Value = admin
+        .post(server.url("/admin/media/upload"))
+        .multipart(
+            reqwest::multipart::Form::new()
+                .part("file", bin_part(b"secret".to_vec(), "g.bin"))
+                .text("min_role", "Family"),
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let gr = gated["media_ref"].as_str().unwrap();
+    assert_eq!(
+        reqwest::Client::new()
+            .request(reqwest::Method::OPTIONS, server.url(&format!("/media/{gr}")))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND,
+        "anon OPTIONS on a gated item ≡ a miss (no oracle)"
+    );
+    assert_eq!(
+        admin
+            .request(reqwest::Method::OPTIONS, server.url(&format!("/media/{gr}")))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK,
+        "admin OPTIONS on the gated item → 200"
+    );
+    // Unknown ref → 404.
+    assert_eq!(
+        admin
+            .request(reqwest::Method::OPTIONS, server.url("/media/does-not-exist"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
     );
 }
 
@@ -4273,13 +4425,25 @@ async fn scad_upload_serves_openscad_with_corp_and_slicer_embed() {
         .await
         .unwrap();
     assert!(embed.contains("Open in the slicer"), "embed offers slicer: {embed}");
-    let marker = "/3d/editor?model=/media/file/";
-    let start = embed.find(marker).expect("slicer href present") + marker.len();
-    let url_key: String = embed[start..]
-        .chars()
-        .take_while(char::is_ascii_alphanumeric)
-        .collect();
-    assert!(!url_key.is_empty(), "extracted a url_key: {embed}");
+    // The slicer button now carries the round-trip URL (Phase DP): the STABLE ref +
+    // ?format=scad, NOT the per-save url_key.
+    assert!(
+        embed.contains(&format!("/3d/editor?model=/media/{media_ref}?format=scad")),
+        "slicer button carries ?model=/media/<ref>?format=scad: {embed}"
+    );
+    // Resolve the scad's byte url_key via the negotiated GET (?format=scad → 307) —
+    // exercising the actual slicer load path.
+    let redirect = admin
+        .get(server.url(&format!("/media/{media_ref}?format=scad")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(redirect.status(), StatusCode::TEMPORARY_REDIRECT, "?format=scad → 307");
+    let url_key = location(&redirect)
+        .expect("scad redirect Location")
+        .strip_prefix("/media/file/")
+        .expect("a byte URL")
+        .to_string();
 
     // The byte route serves it as OpenSCAD source WITH CORP (public → the editor
     // can fetch it under COEP:require-corp).

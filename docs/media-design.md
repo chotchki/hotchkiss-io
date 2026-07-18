@@ -151,7 +151,7 @@ string). Gates all read paths:
   query (`find_by_url_key_with_required_rank`: `MAX(CASE…)` across every item sharing
   the `url_key` — content dedup makes the key index non-unique, so a LIMIT-1 owner
   could be the LOOSEST and leak; MAX can only over-restrict, which breaks VISIBLY).
-- **`/media/<ref>` (GET + OPTIONS [TARGET]) + embed** apply `is_visible_to(viewer)` on
+- **`/media/<ref>` (GET + OPTIONS) + embed** apply `is_visible_to(viewer)` on
   the item. **Denied ≡ the unknown-ref/key 404** — no existence oracle. A denied
   `/media/embed/<ref>` returns the byte-identical bad-ref error-span at 200 (HTMX still
   swaps; the per-viewer embed fetch means the content-keyed render_cache never captures
@@ -230,12 +230,15 @@ min_role). Same shape in and out. Media BYTES are negotiated alternates
 (`Accept: image/avif` → 302). `OPTIONS` owns pure control-discovery — it carries the
 `controls` block; `GET(json)` carries state.
 
-### The manifest — `OPTIONS /media/<ref>`  [TARGET]
+### The manifest — `OPTIONS /media/<ref>`  [SHIPPED read shape (Phase DP); `controls` = DQ]
 
-Every variant a followable link + the controls the caller may use (**ROLE-AWARE**: an
-Admin sees the write controls + each variant's `remove`; a public caller sees only
-`variants[].href`). `min_role`-gated (denied ≡ 404). This same body is the `201` create
-response and the `GET(json)` state.
+Every variant a followable link + the controls the caller may use. `min_role`-gated
+(denied ≡ 404). This same body is the `GET(json)` state (and, at DQ, the `201` create
+response). **DP SHIPS the read shape** — `{ref, self, kind, title, min_role, variants:
+[{type, bytes, width?, height?, href}]}` (`build_manifest`, served by `OPTIONS` +
+`GET … Accept: application/json`). **DQ adds** the **ROLE-AWARE** `controls` block +
+each variant's `remove` link (an Admin sees the write controls; a public caller sees
+only `variants[].href`) — once the write surface those controls point at exists.
 
 ```json
 {
@@ -261,7 +264,7 @@ Image variants also carry `width`/`height`; A/V variants `codecs` when known. Th
 follows links — no URL construction, no format vocabulary to hardcode. outputSchema root
 is an object (not a bare array).
 
-### `GET /media/<ref>` — read, content-negotiated  [TARGET; SHIPPED = largest-only]
+### `GET /media/<ref>` — read, content-negotiated  [SHIPPED, Phase DP]
 
 Precedence **`?format=` (explicit) > `Accept` (preference) > largest (default)**:
 - **`?format=<token>`** — `scad`/`stl`/`3mf`/`avif`/`mp4`/… → mime → the LARGEST variant
@@ -271,11 +274,11 @@ Precedence **`?format=` (explicit) > `Accept` (preference) > largest (default)**
   surprise — this is what killed the scad-first heuristic). A specific, unsatisfiable
   Accept with no `*/*` → **406**. `Accept: application/json` → the item state (§ above).
 - **neither** → largest.
-Redirects with **HTTP 307** (`Redirect::temporary` — as shipped, NOT 302) to the chosen
-`/media/file/<url_key>`; `Vary: Accept` + `Content-Location`. TODAY (SHIPPED,
-`serve_media_by_ref`) this route ignores negotiation and always 307-redirects to the
-largest variant (a zero-variant item → `404` "no downloadable file for this media"); the
-rationalization adds `?format=`/`Accept`.
+Redirects with **HTTP 307** (`Redirect::temporary`, NOT 302) to the chosen
+`/media/file/<url_key>`; `Vary: Accept` + `Content-Location`. A zero-variant item →
+`404` "no downloadable file for this media". SHIPPED in Phase DP — `serve_media_by_ref`
+delegates to `media_select::negotiate` (the ONE selector, §5 / DP.3), which the embed
+(§8) and the manifest also use.
 
 ### `PUT /media/<ref>/variants` — replace all (the round-trip SAVE)  [SHIPPED as `PATCH /media/<ref>`; DP re-verbs]
 
@@ -470,11 +473,11 @@ A model is one item carrying its SCAD source + low/high meshes. fab-gui (the WAS
 slicer at `/3d/editor`) both LOADS the scad and SAVES edits back — all on the uniform
 resource, nothing model-special:
 
-- **Load [SHIPPED core]:** the embed's "Open in the slicer" button →
-  `?model=/media/<ref>?format=scad` **[TARGET form]** (today: `?model=/media/file/<scad
-  url_key>` — direct, works, but leaks the per-save key and gives the app no ref to save
-  to). fab-gui `fetch_text`s the model URL → the scad; the ref lives in the URL's PATH so
-  the save target is derivable by dropping the query, or via OPTIONS `save.href`.
+- **Load [SHIPPED, Phase DP]:** the embed's "Open in the slicer" button →
+  `?model=/media/<ref>?format=scad`. fab-gui `fetch_text`s the model URL → the negotiated
+  GET 307-redirects `?format=scad` to the scad source; the `ref` lives in the URL's PATH,
+  so the SAVE target is derivable by dropping the query (`PUT /media/<ref>/variants`, DQ)
+  or via the OPTIONS manifest. Emits the STABLE ref, never the per-save `url_key`.
 - **Save [SHIPPED as `PATCH /media/<ref>`; DP re-verbs to `PUT /media/<ref>/variants`]:**
   replace the whole variant collection (§5). The opaque ref never changes, so every
   `![](/media/<ref>)` embed stays valid across edits — no supersession pointer.
@@ -496,13 +499,14 @@ resource, nothing model-special:
 
 The deltas between SHIPPED and TARGET — the code-alignment work (Phase DP), scoped:
 
-- **`GET /media/<ref>` negotiation** — add `?format=`/`Accept` (precedence, `Vary`,
-  `Content-Location`, 406) over today's largest-only redirect. Kill the scad-first
-  heuristic idea (implied state) — the default stays largest, scad served only on
-  explicit request.
-- **`OPTIONS /media/<ref>` manifest** — new; the HATEOAS entry point (§5). Wire it on the
-  existing `/{media_ref}` method-router; safe-method-public + `min_role`-gated; ROLE-AWARE
-  `controls` (write controls only for an Admin caller).
+- **✓ SHIPPED (DP): `GET /media/<ref>` negotiation** — `?format=`/`Accept` (precedence,
+  `Vary`, `Content-Location`, 406) via `media_select::negotiate`; a `*/*`-bearing Accept →
+  largest (bare-link behavior unchanged). The scad-first heuristic idea (implied state)
+  stayed killed.
+- **✓ SHIPPED (DP, read shape): `OPTIONS /media/<ref>` manifest** — the HATEOAS entry
+  point (`build_manifest`, `.options()` on the `/{media_ref}` method-router;
+  safe-method-public + `min_role`-gated). **DQ adds** the ROLE-AWARE `controls` block +
+  per-variant `remove` once the write surface exists.
 - **Write surface re-verb** — the full HATEOAS surface (§5): `POST /media` (create,
   `201`+`Location`), `POST /media/<ref>/variants` (add), **`PUT /media/<ref>/variants`
   (replace-all — RE-VERBS the shipped DO `PATCH /media/<ref>`; inert)**, `PUT /media/<ref>`
@@ -513,12 +517,13 @@ The deltas between SHIPPED and TARGET — the code-alignment work (Phase DP), sc
   variant}` onto the `/media/<ref>[/variants]` surface (templates + `media-upload.js` +
   `editor-support.js`). SCOPE CALL: inside DP, or a follow-on so DP stays "canonical
   `/media` surface + fab-gui contract".
-- **The slicer button** → emit `?model=/media/<ref>?format=scad` (ref in the path, format
-  explicit) instead of the per-save `url_key`.
-- **Shared variant-selection vocabulary** — the embed (§8) and the manifest/negotiation
-  (§5) should pick from ONE typed selector (by-type/by-size over `ModelFormat` + `bytes`/
-  `width`), not two hand-rolled copies.
-- **Docs** — this file is the source; `fab-scad-roundtrip.md` and the CLAUDE.md media
-  paragraph become one-line pointers here.
+- **✓ SHIPPED (DP): the slicer button** emits `?model=/media/<ref>?format=scad` (ref in
+  the path, format explicit) instead of the per-save `url_key`.
+- **✓ SHIPPED (DP): shared variant selector** — `web/features/media_select.rs` (format
+  token→mime, `largest`/`largest_of_mime`, `viewer_mesh`/`largest_mesh`, Accept parsing +
+  `negotiate`) is the ONE selector used by the negotiated GET, the manifest, AND the embed
+  (§8's Stl arm now delegates to `viewer_mesh`/`largest_mesh`).
+- **✓ DONE: docs** — this file is the source; `fab-scad-roundtrip.md` + the CLAUDE.md media
+  paragraph are pointers here.
 - Deferred: size-within-format negotiation (`?width=`/`sizes`); a `?format=` token↔mime
   table vs. suffix-matching; whether OPTIONS also answers a `GET … Accept: application/json`.
