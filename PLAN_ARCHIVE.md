@@ -941,3 +941,67 @@ Design + rationale (the decisions, the honest limits): [docs/greylist-challenge-
 - [x] DT.3 - Recovery: the register error copy points a stuck user at a page RELOAD (clears stuck client state + fetches the patched script; skipped for `InvalidStateError`, which already routes to "log in"). The stranded-credential login path (DM) already returns a clean `401` "register again" — which now SUCCEEDS with DT.1, so the recovery loop closes.
 - [x] DT.4 - Tests: e2e (`sendBeacon`-override + `create`-reject → the beacon fires with action+name, the error still renders — deterministic desktop Chrome, no emulator); integration (the beacon is anonymous + always `204`, POST-only); unit (allowlist includes it). + CLAUDE.md auth-section delta.
 
+---
+
+## 2026-07-18
+
+## Phase DQ - Media resource: the write surface (RESTful, zero PATCH)
+
+*The WRITE half (`docs/media-design.md` §5). The canonical REST surface every writer (fab-gui + the admin UI) targets: two POSTs for the server-assigns-identity CREATES, PUT for every idempotent replace, DELETE for removal — NO PATCH. RE-VERBS the shipped DO endpoint (`PATCH /media/<ref>` → `PUT /media/<ref>/variants`) — safe, it's inert (no fab-gui pin).*
+
+- [x] DQ.0 - Phase exit: the full `/media[/<ref>/variants]` write surface is live — `POST /media` (create, 201+Location), `POST …/variants` (add), `PUT …/variants` (replace-all), `PUT /media/<ref>` (metadata), `DELETE` item + variant, admin-gated `GET /media` (list); DO's PATCH re-verbed; the manifest gains the role-aware `controls` block; tests + docs; shipped.
+- [x] DQ.1 - `PUT /media/<ref>/variants` — re-verb DO's `patch_media_by_ref` (identical ingest / tx / complete-replace body) onto PUT of the variant collection; metadata untouched BY CONSTRUCTION. Retire `PATCH /media/<ref>`.
+- [x] DQ.2 - `POST /media` — create an item (multipart initial variants + optional title/min_role) → `201` + `Location: /media/<ref>` + the manifest. The RESTful home of `upload_media`.
+- [x] DQ.3 - `POST /media/<ref>/variants` — add ONE variant to an existing item (the `add_encode` semantics, by ref not id) → `201` + `Location`; content-dedup = idempotent no-op. DECIDE the derivation: match upload's `add_derived_variants` (poster/responsive) + `update_facts` re-derive, or keep the append-only shape `add_encode` has today (the asymmetry `media-design.md` §7 flags).
+- [x] DQ.4 - `PUT /media/<ref>` (json `{title, min_role}`) — replace item metadata (the `rename` + `visibility` merge); `DELETE /media/<ref>` (item, CASCADE) + `DELETE /media/<ref>/variants/<url_key>` (one variant).
+- [x] DQ.5 - `GET /media` — the admin-only item listing behind its OWN `require_admin` (the safe-method default would leak the whole library — §4a); JSON collection.
+- [x] DQ.6 - Tests (each verb + the 201/Location + the `GET /media` admin gate + the re-verb preserves DO's behavior + the manifest controls appear for Admin / hidden for a public caller) + docs flips.
+- [x] DQ.7 - Extend `build_manifest` with the ROLE-AWARE `controls` block (`add` / `replace-all` / `metadata` / `delete`, Admin-only) + each variant's `remove` link, now that the write routes (DQ.1–DQ.4) exist — deferred here from DP so the manifest never advertised dead links. `OPTIONS` + `GET(json)` + the `201` create body all carry it; a non-admin caller sees only `variants[].href` (`media-design.md` §4a/§5, the HATEOAS mirror of the mutation gate).
+
+
+---
+
+## 2026-07-18
+
+## Phase DR - Migrate the admin media UI onto the canonical surface
+
+*Fold the parallel `/admin/media/*` vocabulary onto the `/media[/<ref>/variants]` REST surface so the library UI and fab-gui share ONE contract (`docs/media-design.md` §11). Behind the DQ surface — the external contract ships first, the admin swap lands after, no fab-scad blocker.*
+
+- [x] DR.0 - Phase exit: the admin library drives the canonical `/media` surface (upload→`POST /media`, add→`POST …/variants`, rename+visibility→`PUT /media/<ref>`, delete→`DELETE`, per-variant→`DELETE …/variants/<key>`); the `/admin/media/*` mutation routes retire; COVERING browser e2e on every admin-UI flow green; docs; shipped.
+- [x] DR.1 - Templates (`media.html`) emit `data-media-ref` (+ per-variant `data-url-key`) so the JS addresses by ref/key, not numeric id; `media-upload.js` + `editor-support.js` swap to the new verbs/URLs (upload progress + drop-group + inline-editor insert behavior unchanged; the inline upload re-reads the manifest `ref`, not the old `{media_id, media_ref, markdown}`).
+- [x] DR.2 - Retire the `/admin/media/{upload,encode,rename,visibility,delete,variant}` handlers (thin shims first if needed, then drop); keep `GET /admin/media` as the library PAGE (HTML), distinct from `GET /media` (JSON collection). The DAO cores (`ingest_new_item` / `append_variants` / metadata / delete) stay — the canonical `/media` handlers own them now.
+- [x] DR.3 - **COVERING browser e2e** (`tests/e2e_browser.rs`, real Chrome as Admin via the virtual authenticator, serialized on `E2E_LOCK`): the admin media library — drop-upload a file → the card appears; add-encode a variant → the encode shows; rename → the title persists; change visibility → the gate badge/selector reflects; delete a variant → it's gone; delete the item → the card disappears. PLUS the inline editor upload (drop on the markdown box → `![](/media/<ref>)` inserted at the cursor, no page refresh). Each asserts the UI drove the new `/media` surface end-to-end (a `no_ignored_tests` guard keeps them live).
+- [x] DR.4 - Cleanup: `cover_url_for` / `cover_hero_for` adopt the shared `media_select` (`image_ladder` / `largest`) instead of their own inline image-variant picks — the embed AND covers then pick from ONE selector (the last duplicate after DP.3's mesh + srcset unification). Existing cover/hero tests unchanged (behavior identical); `media-design.md` §8 note flip.
+- [x] DR.5 - Docs: `media-design.md` §7/§8 flips (the admin UI now drives the canonical surface; the `/admin/media/*` mutation vocabulary retired) + CLAUDE.md media/admin delta.
+
+
+---
+
+## 2026-07-18
+
+## Phase DS - Authored references normalize to the stable `media_ref`
+
+*A hardening on the media-reference philosophy (`docs/media-design.md` §8): an author must NEVER bake a per-save `url_key` into content. On SAVE, rewrite any pasted `/media/file/<url_key>` → `/media/<ref>` (stable + per-viewer-gated), so a variant re-encode / round-trip `PUT …/variants` (which mints new `url_key`s) never strands a link, and gated media stays gate-correct (a `![](/media/<ref>)` embed is fetched per viewer; a baked byte URL is shared for everyone). Covers are ALREADY ref-stable (`page_cover_media_id`, resolved fresh); content markdown is the gap.*
+
+- [x] DS.0 - Phase exit: a pasted `/media/file/<url_key>` in page content is rewritten to `/media/<ref>` on save (unresolvable left ALONE); covers/hero verified ref-stable across a variant replace; tests; shipped.
+- [x] DS.1 - `rewrite_site_links` (in `put_page`) rewrites `/media/file/<url_key>` → `/media/<ref>` — resolve the `url_key` → owning `media` item → its `media_ref` (a miss leaves the string alone, typo-tolerant like the cover-ref parse); handles both the `![](…)` embed + `[…](…)` link forms; preserves the rest of the author's markdown byte-for-byte (longest-match, like the existing site-link relativize).
+- [x] DS.2 - Cover/hero ref-stability LOCK: a test that a cover set from EITHER form (`/media/<ref>` or `/media/file/<url_key>`) stores the `media_id` and re-renders correctly AFTER the item's variants are replaced (the hero `<img>`/srcset byte URLs are recomputed each render, never stale). Confirms covers need no rewrite — pins the doc's claim.
+- [x] DS.3 - Editor: confirm the drop-upload inserts `![](/media/<ref>)` (it does) + the library copy affordances lead with the ref-embed (`![](/media/<ref>)`), the byte `/media/file/<key>` "Copy link" kept as the explicit-download secondary. No-op if already so; else a small template/JS tweak.
+- [x] DS.4 - Tests (the save-rewrite: pasted byte URL → ref, unresolvable untouched, both `![]` + `[]` forms; the cover round-trip) + `media-design.md` note flip + CLAUDE.md delta.
+
+
+---
+
+## 2026-07-18
+
+## Phase DU - Auto-exempt the operator's own public IP from the greylist
+
+*The mini lives on the operator's home network, so its public IP — the one `IpProviderService` already tracks for the Cloudflare DNS updates — IS the operator's browsing IP, and the greylist was tolling it (an R3 flood from home traffic; a manual release doesn't stick because the next 15-min sweep re-adds it). Auto-exempt the server's OWN public IP(s) from BOTH enforcement points: detection (never scored → never added) and enforcement (never tolled, the allowlist WINS over any snapshot/pinned entry). Zero config, self-maintaining — it follows a residential IP rotation via the same broadcast the DNS service reads. From any OTHER network the operator just authenticates (an `is_authenticated()` session is never tolled), so auto-only fully covers it.*
+
+- [x] DU.0 - Phase exit: the server's own public IP(s) are never greylisted or tolled — `GreylistSet` consults an auto-maintained allowlist fed by the `IpProviderService` broadcast, the sweep skips + releases them, the admin surface shows the exempt IP; tests; shipped.
+- [x] DU.1 - `GreylistSet` gains an `allow` set (the server's public IP(s)) with `set_public_ips(&HashSet<IpAddr>)` / `is_allowlisted` / `allowlisted()`; `is_greylisted` returns false for an allowlisted IP — the allowlist WINS over any snapshot/pinned entry (defense in depth). Unit test: an allowlisted IP isn't greylisted even after `insert`.
+- [x] DU.2 - Coordinator wiring: carry a `GreylistSet` clone onto `ServiceCoordinator`; in `start()` spawn a DETACHED task subscribed to the `ip_provider_sender` broadcast (a 2nd receiver alongside DNS) that calls `set_public_ips` on every update — the allowlist follows the residential IP with no restart. Debug forces `127.0.0.1` (already RFC-skipped, harmless).
+- [x] DU.3 - Sweep: skip scoring an allowlisted IP (`build_features` runs `should_evaluate`, which skips RFC1918 but NOT the public IP), and release any stale persisted entry for the operator IP(s) each pass (`GreylistDao::release`) so the table + admin view stay clean. Test: a public IP that trips R1 is neither greylisted nor left persisted once allowlisted.
+- [x] DU.4 - Admin `/admin/greylist`: show the auto-exempted operator IP(s) so it's visible WHY they're never tolled — a small `allowlisted: Vec<String>` on the template.
+- [x] DU.5 - Docs: `docs/greylist-challenge-design.md` (the auto-allowlist — source, both enforcement points, the from-elsewhere-just-login rationale) + CLAUDE.md greylist delta.
+
