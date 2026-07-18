@@ -62,6 +62,15 @@ atomic temp+rename, dedup by content.
   file moved. An unmounted root → that variant 404s. Backblaze covers off-site backup
   at the filesystem level, so the app never copies media for backup.
 - The `.staging` dir is `--exclude`d from the prod→beta media rsync.
+- **Defaults + beta/prod:** the default single root is `app_support/media`; `media_min_free_bytes`
+  headroom defaults to 10 GiB. Prod uses the default unless drives are ADDED to `media_paths`.
+  **Rename beta's `media_path` → `media_paths` (a one-element array) before deploying** or it
+  silently falls back to the default (= prod's) dir. The prod→beta snapshot PRESERVES
+  `crypto_keys` id 2 (so beta's HMAC `url_key`s match prod's — WHY a prod/beta key mismatch
+  still serves, §6) and rsyncs prod media into beta's OWN dir (beta config points
+  `media_paths`/`backup_path` under `io.hotchkiss.web.beta/`, since `app_support` is hardcoded
+  to `io.hotchkiss.web`). A per-root stat error falls THROUGH to the next root (L1), never
+  aborting the whole upload.
 
 ---
 
@@ -75,10 +84,19 @@ atomic temp+rename, dedup by content.
   (NON-unique index — content dedup means many rows share a key; see §4 strictest-wins),
   `mime`, `codecs`, `bytes`, `storage_root` (hint), `width`/`height` (this ENCODING's
   pixels, for an image's srcset).
-- Migrations of note: `0016` api_keys · `0017` storage_root · `0018` variant width/height
-  · `0026` media.min_role · `0027` chapters. The retired `attachments` table + the dead
-  `page_cover_attachment_id` column intentionally remain (circular FK — a future
-  `-- no-transaction` rebuild drops them).
+- Migrations of note: `0014` `content_pages.page_cover_media_id` (covers) · `0016` api_keys
+  · `0017` storage_root · `0018` variant width/height · `0026` media.min_role · `0027`
+  chapters. `0015` emptied the retired `attachments` table — the one-shot
+  `coordinator/migrate_media.rs` (now removed) copied every BLOB → store + `media` rows,
+  rewrote `/attachments/…`→`/media/<ref>` (both URL forms), re-homed covers (backup-first,
+  defer-on-fail), then deleted the `/attachments` route + `AttachmentDao` (Phase BZ.8, prod
+  v0.0.63→v0.0.64). The now-empty `attachments` table + the dead `page_cover_attachment_id`
+  column intentionally remain (circular FK — a future `-- no-transaction` rebuild drops them).
+- **DJ.4 newtype BOUNDARY:** the DAO signatures / struct fields stay `&str`/`String` and the
+  `Path<String>` extractors stay UNTYPED on purpose — a `Path<UrlKey>` deserialize-reject
+  would be a `400` (an existence oracle) vs the required identical-to-miss `404`; generation
+  sites stay `String` (trusted-by-construction). The newtypes gate at the PARSE boundary
+  (`UrlKey::parse` = the 64-hex gate), not everywhere.
 - **Typed tokens (DJ.4):** `MediaRef<'a>` (`[A-Za-z0-9_-]`, never UUID-shaped so legacy
   slug refs resolve) and `UrlKey<'a>` (whose constructor `UrlKey::parse` IS the 64-hex
   gate). `ModelFormat` (`Scad`/`Stl`/`ThreeMf` + `from_mime`/`is_mesh`) replaced fragile
@@ -138,6 +156,18 @@ string). Gates all read paths:
   `/media/embed/<ref>` returns the byte-identical bad-ref error-span at 200 (HTMX still
   swaps; the per-viewer embed fetch means the content-keyed render_cache never captures
   a role decision).
+- **Embed HTTP `Cache-Control: no-store` is a SECURITY invariant** (`embed_response`, on
+  the element AND the miss/error/denial spans): the embed HTML is ROLE-DEPENDENT, so a
+  shared/browser cache must never hand one viewer's embed to another — a cached Family
+  embed would leak its gated `url_key` to anon (an oracle), a cached anon miss would blank
+  a Family view. HTMX refetches per load anyway. The miss and denial spans carry the SAME
+  no-store so a header difference isn't itself the oracle.
+- **`render_embed_html` bytes-by-`url_key`-ONLY invariant:** the embed/302 handlers gate
+  on the item's OWN (possibly LOOSER) `min_role`, while the byte route re-gates
+  strictest-wins across `url_key`-sharing items — so the embed must reference bytes ONLY
+  via `/media/file/<url_key>` URLs and NEVER inline a `data:` URI or server-read content,
+  or it would leak deduped gated bytes through a public item. The looser embed gate is
+  safe precisely BECAUSE the byte fetch re-gates.
 - **Gated bytes** ship `Cache-Control: private, …, immutable` (browser + range cache
   stay; shared caches cut out); public media unchanged.
 - New variants INHERIT the item's gate (they carry no `min_role` of their own — create,
@@ -147,12 +177,17 @@ string). Gates all read paths:
 ### 4c. Executable-content hardening (CL)
 
 The byte route always sends `X-Content-Type-Options: nosniff` and forces
-`Content-Disposition: attachment` on executable mimes (`html`/`svg`/`xml`/`js`) — a
-`MediaKind::File` carries a filename-guessed mime on a public same-origin route, so an
-admin-uploaded `.svg`/`.html` must not run as active script (stored XSS). Probe-verified
-image/video/stl/audio render inline. The `application/x-openscad` byte route also sends
-`Cross-Origin-Resource-Policy: cross-origin` so the COEP-isolated `/3d/editor` can fetch
-model bytes (CORP does NOT bypass `min_role` — that's checked first).
+`Content-Disposition: attachment` on executable mimes (`is_active_content_mime`:
+`text/html`/`xhtml`/`image/svg+xml`/`*+xml`/`application|text/xml`/`javascript`/
+`ecmascript`) — a `MediaKind::File` carries a filename-guessed mime on a public
+same-origin route, so an admin-uploaded `.svg`/`.html` must not run as active script
+(stored XSS). Probe-verified image/video/stl/audio kinds never hit that set → render
+inline. **`Cross-Origin-Resource-Policy: cross-origin` is sent UNCONDITIONALLY** on every
+byte response (inserted BEFORE the active-mime check), so ALL public media — images,
+video, models, files — is cross-origin hotlinkable/embeddable; this is what lets the
+COEP-`require-corp` `/3d/editor` fetch a model's SCAD/mesh bytes (Phase DN / CW.4). CORP
+does NOT bypass `min_role` — the gate is enforced ABOVE via `required_rank`, so a denied
+request never reaches these headers.
 
 ---
 
@@ -229,16 +264,18 @@ is an object (not a bare array).
 ### `GET /media/<ref>` — read, content-negotiated  [TARGET; SHIPPED = largest-only]
 
 Precedence **`?format=` (explicit) > `Accept` (preference) > largest (default)**:
-- **`?format=<token>`** — `scad`/`stl`/`3mf`/`avif`/`mp4`/… → mime → 302 to the LARGEST
-  variant of that mime. Unknown token or absent format → **406** (OPTIONS to discover).
-- **`Accept: <mime>`** — 302 to the largest ACCEPTABLE variant. A browser's `…,*/*`
-  matches everything → largest overall, so a plain download link is UNCHANGED (no
-  implied-state surprise — this is what killed the scad-first heuristic). A specific,
-  unsatisfiable Accept with no `*/*` → **406**.
+- **`?format=<token>`** — `scad`/`stl`/`3mf`/`avif`/`mp4`/… → mime → the LARGEST variant
+  of that mime. Unknown token or absent format → **406** (OPTIONS to discover).
+- **`Accept: <mime>`** — the largest ACCEPTABLE variant. A browser's `…,*/*` matches
+  everything → largest overall, so a plain download link is UNCHANGED (no implied-state
+  surprise — this is what killed the scad-first heuristic). A specific, unsatisfiable
+  Accept with no `*/*` → **406**. `Accept: application/json` → the item state (§ above).
 - **neither** → largest.
-302 to the chosen `/media/file/<url_key>`; response carries `Vary: Accept` +
-`Content-Location`. TODAY (SHIPPED) this route ignores negotiation and always redirects
-to the largest variant — the rationalization adds `?format=`/`Accept`.
+Redirects with **HTTP 307** (`Redirect::temporary` — as shipped, NOT 302) to the chosen
+`/media/file/<url_key>`; `Vary: Accept` + `Content-Location`. TODAY (SHIPPED,
+`serve_media_by_ref`) this route ignores negotiation and always 307-redirects to the
+largest variant (a zero-variant item → `404` "no downloadable file for this media"); the
+rationalization adds `?format=`/`Accept`.
 
 ### `PUT /media/<ref>/variants` — replace all (the round-trip SAVE)  [SHIPPED as `PATCH /media/<ref>`; DP re-verbs]
 
@@ -312,6 +349,33 @@ bail → File — AAC m4b is canonical). Visibility: `upload_media` takes a `min
 multipart field (known gate roles only; absent/garbage → public — `fab publish` sends
 nothing); the editor drop sends the page's current visibility.
 
+**Shipped ingest contracts + asymmetries:**
+- **Response bodies (consumers depend on these):** `upload_media` → `200 {media_id,
+  media_ref, markdown:"![](/media/<ref>)"}`; `patch_media_by_ref` → `200 {media_ref, kind,
+  variants:[{url_key,mime,bytes}]}` (fab-gui's confirm-swap); `add_encode` / `rename` /
+  `visibility` / `delete_media` / `delete_variant` → `htmx_refresh()`. DQ moves these onto
+  `201`+`Location`+manifest.
+- **`add_encode` is ASYMMETRIC with upload/patch:** it does NOT call `add_derived_variants`
+  (an image added via add-encode gets NO responsive ladder; a video/audio gets NO poster)
+  and does NO tx / NO `update_facts` re-derive. DQ.3 (`POST …/variants`) must decide: match
+  upload's derivation, or keep the append-only shape.
+- **Title fallback:** `title` field → a field literally named `media_ref` used as a TITLE
+  candidate (NOT the ref — the ref is always a fresh UUIDv7) → filename via
+  `strip_media_suffixes` (drops ext + a trailing codec tag). Empty file parts are silently
+  skipped.
+- **Audio-classification incident (DD):** an m4b/mp3 whose cover art ships as an mjpeg/png
+  stream was pre-DD misread as an unsupported VIDEO and silently degraded to a download
+  button; the fix classifies by the first AUDIO stream while EXCLUDING `disposition.attached_pic`.
+- **Responsive backfill:** `coordinator/backfill_responsive_images.rs` — DETACHED, idempotent
+  startup backfill (never in `try_join!`, backup-first, per-item non-fatal) generating the
+  AVIF ladder + stamping widths for pre-CN images.
+- **Storage panel:** the admin library renders `roots_status` per configured root (humanized
+  free/total, `is_write_target`, `below_margin`) so multi-drive placement isn't silent —
+  shares `probe_root` with `pick_write_root`, so the panel and the writer always agree.
+- **Tooling:** `ffprobe`/`ffmpeg` must be installed (dev + mini, like `d2`/`weasyprint`); the
+  probe KAT runs real ffprobe against `tests/fixtures/chapters.m4b` (aac + attached_pic cover
+  + 2 chapters, ffmpeg-generated).
+
 ---
 
 ## 8. Embed (presentation) `/media/embed/<ref>`  [SHIPPED]
@@ -335,6 +399,40 @@ hx-trigger="load" hx-swap="outerHTML">`; `render_embed_html` dispatches by kind:
 srcset) is presentation and STAYS here — but it and the resource manifest (§5) should
 share ONE variant-selection vocabulary rather than duplicate the `bytes`/`mime` logic.
 
+**Shipped embed specifics (the real-device-hardened details):**
+- **Audio player** (`audio-player.js`, first-party, `defer`, re-scans on `htmx:afterSettle`):
+  a `hidden`-class chapter toggle — NOT `<details>` (invalid inside the embed's `<p>`) —
+  ±30s skips, a rate cycle 1/1.25/1.5/1.6/2× persisted GLOBALLY (`localStorage audio-rate`,
+  re-asserted on first play — iOS resets it at stream load), `localStorage audio-pos:<ref>`
+  resume applied at `loadedmetadata` AND re-asserted once on first play (iOS drops
+  pre-metadata seeks), never autoplay on load, degrades to bare native `<audio controls>`
+  without JS. MediaSession lock-screen controls fetch gated artwork via a **credentialed-
+  fetch→blob** fallback (the lock screen's own fetch may go out cookieless → a gated cover
+  would 401).
+- **Series playlist (DG) track ADOPTION** — phone-proven necessary: iOS keeps a gesture-less
+  `<audio>` MUTED until unlock, so `next.play()` advances silently. Screen-VISIBLE `ended`
+  plays the real next element (starting any player pauses the rest). Screen-HIDDEN advance
+  ADOPTS the finished element (owner of the live audio session): swaps its `src` to the next
+  book, files saves under the ADOPTED book's resume key, presents adopted lock-screen metadata
+  (per-ref blob cache); lock-screen next/prev adopt in BOTH directions while hidden. On
+  `visibilitychange`→visible, playback hands back to the real per-book player at the carried
+  position — **pause-BEFORE-clearing-adopted is load-bearing** (the pause-save must file under
+  the adopted key), and if iOS blocks the gesture-less hand-back play the player sits paused
+  (one tap resumes). Validated on a real iPhone as an installed **PWA** — Safari-tab vs PWA
+  have SEPARATE cookie jars, so the PWA is the supported mode for gated audiobooks.
+- **STL/3MF viewer:** color via a vendored `3MFLoader` + `fflate` matched to three.js **r173**;
+  a colorless STL defaults its material to the site yellow `#ffc935` (overridable via
+  `data-color`). Emitted with `<span>` block/flex wrappers, NOT `<div>` (a standalone
+  `![](x.stl)` sits inside a `<p>`, where a block `<div>` is invalid HTML).
+- **Covers are media** (migration `0014` `content_pages.page_cover_media_id`): `cover_url_for`
+  = smallest thumbnail, `cover_hero_for` = largest hero. A pasted cover field runs through
+  `parse_cover_reference` → `resolve_cover_media_id` (tolerates markdown-embed / bare-ref /
+  full-URL / bare-token); empty clears, a non-empty-UNRESOLVABLE ref is LEFT ALONE (a typo
+  can't wipe the cover — the old exact-match `find_by_ref` on the raw string silently wiped it).
+- **Inline editor upload** (`editor-support.js`): drop on the markdown box (or the 🎞 button)
+  → async `POST /admin/media/upload` → inserts `![](/media/<ref>)` at the cursor with NO page
+  refresh (the old attachment upload `htmx_refresh()`'d + ate unsaved edits).
+
 ---
 
 ## 9. Kinds — the variant profile
@@ -348,6 +446,21 @@ share ONE variant-selection vocabulary rather than duplicate the `bytes`/`mime` 
 | file  | the one file | its own type |
 
 `bytes` is the fidelity key everywhere (decimation/downscale is monotonic).
+
+**Producer contract + selection load-bearers:**
+- `fab publish`'s Downloads links use `/media/<ref>` (the upload API returns a `media_ref`,
+  not a `url_key`) — a bare `GET /media/<ref>` used to 404 (the "bowtie" regression), which
+  is WHY the one-segment ref route resolves to bytes at all (§5).
+- The site does NOT decimate — `fab publish` provides the low-res mesh (grouped item or
+  `add_encode`), like it provides video encodes. STL variants carry no `width`, so `bytes`
+  is the fidelity key, and because `variant_id` fetch order is insertion order, the render's
+  `sort_by_key(bytes)` is LOAD-BEARING for the viewer(smallest) / download(largest) picks.
+- **`fab publish` initial-upload contract** (distinct from §10's round-trip export): upload
+  the full + decimated STL as ONE item (grouped drop or item+encode); ship 3MF / OpenSCAD
+  source as SEPARATE `MediaKind::File` items, each its own download button, by `title`.
+- **Bambu PLATES stay download buttons** NOT via kind detection but because `fab` lists them
+  as plain markdown LINKS — only an `![](/media/<ref>)` EMBED hits the kind dispatch (where
+  intent is always "show it"); a plain link never does.
 
 ---
 
