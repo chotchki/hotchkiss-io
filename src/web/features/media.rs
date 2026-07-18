@@ -896,6 +896,73 @@ pub(crate) async fn resolve_cover_media_id(
     }
 }
 
+/// Save-time media normalization (Phase DS): rewrite any `/media/file/<url_key>`
+/// (a per-save byte URL — the library's "Copy link") in page content to the stable,
+/// per-viewer-gated `/media/<ref>`. A `url_key` is MINTED FRESH on every variant
+/// re-encode / round-trip `PUT …/variants`, so a baked byte URL strands on the next
+/// save; a `/media/<ref>` embed instead resolves to the current bytes each render
+/// AND re-gates per viewer (a baked byte URL is shared for everyone). Runs AFTER
+/// `rewrite_site_links` (which already relativized any absolute site byte URL to
+/// `/media/file/<key>`). A `url_key` we can't resolve is LEFT ALONE (typo-tolerant,
+/// like the cover-ref parse). Byte-for-byte elsewhere: only the matched target URLs
+/// are string-replaced, longest-first (like `rewrite_site_links`).
+pub(crate) async fn rewrite_media_byte_urls(
+    pool: &sqlx::SqlitePool,
+    markdown: &str,
+) -> anyhow::Result<String> {
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for url in crate::web::markdown::links::collect_link_urls(markdown)? {
+        let Some((key, suffix)) = split_media_byte_url(&url) else {
+            continue;
+        };
+        // UrlKey::parse IS the 64-lowercase-hex gate — a non-key `/media/file/…`
+        // (a typo, a `../` probe) never reaches a DB lookup.
+        let Some(url_key) = UrlKey::parse(key) else {
+            continue;
+        };
+        if let Some(media_ref) = media_ref_for_url_key(pool, url_key.as_str()).await? {
+            pairs.push((url.clone(), format!("/media/{media_ref}{suffix}")));
+        }
+    }
+    pairs.sort_by_key(|p| std::cmp::Reverse(p.0.len()));
+    let mut out = markdown.to_string();
+    for (from, to) in pairs {
+        out = out.replace(&from, &to);
+    }
+    Ok(out)
+}
+
+/// Split a `/media/file/<url_key>[?q#f]` target into `(url_key, suffix)`, or `None`
+/// if it isn't a single-segment byte URL. Query/fragment (usually absent on a byte
+/// URL) are carried onto the rewritten `/media/<ref>`.
+fn split_media_byte_url(url: &str) -> Option<(&str, &str)> {
+    let cut = url.find(['?', '#']).unwrap_or(url.len());
+    let (path, suffix) = url.split_at(cut);
+    let key = path.strip_prefix("/media/file/")?;
+    if key.is_empty() || key.contains('/') {
+        return None;
+    }
+    Some((key, suffix))
+}
+
+/// A `url_key` → its owning item's `media_ref`. A content-addressed `url_key` can be
+/// shared across items (byte dedup) → `LIMIT 1` picks one deterministically; the
+/// byte route's strictest-wins gate is the enforcement point regardless of which
+/// ref renders, so the choice affects only the embed's KIND dispatch, never gating.
+async fn media_ref_for_url_key(
+    pool: &sqlx::SqlitePool,
+    url_key: &str,
+) -> anyhow::Result<Option<String>> {
+    Ok(sqlx::query_scalar!(
+        r#"SELECT m.media_ref FROM media_variant v
+           JOIN media m ON m.media_id = v.media_id
+           WHERE v.url_key = ?1 LIMIT 1"#,
+        url_key
+    )
+    .fetch_optional(pool)
+    .await?)
+}
+
 /// `<source>` ordering preference by hardware-decode likelihood (lower first):
 /// HEVC (Apple HW) → AV1 (royalty-free, but software-decoded on most devices) →
 /// H.264 → unknown. The browser plays the first source it can decode, so this
@@ -921,6 +988,21 @@ fn attr_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_media_byte_url_extracts_key_and_suffix() {
+        // A clean byte URL → (key, empty suffix).
+        assert_eq!(split_media_byte_url("/media/file/abc123"), Some(("abc123", "")));
+        // Query / fragment ride onto the suffix (carried to the rewritten ref).
+        assert_eq!(split_media_byte_url("/media/file/abc?w=1"), Some(("abc", "?w=1")));
+        assert_eq!(split_media_byte_url("/media/file/abc#f"), Some(("abc", "#f")));
+        // Not a single-segment byte URL → None (left alone).
+        assert_eq!(split_media_byte_url("/media/file/"), None, "empty key");
+        assert_eq!(split_media_byte_url("/media/file/a/b"), None, "extra segment");
+        assert_eq!(split_media_byte_url("/media/embed/abc"), None, "embed route");
+        assert_eq!(split_media_byte_url("/media/abc"), None, "ref route, not byte");
+        assert_eq!(split_media_byte_url("/blog/x"), None, "unrelated");
+    }
 
     fn media(kind: &str) -> MediaDao {
         MediaDao {

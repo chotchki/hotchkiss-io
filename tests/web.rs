@@ -3453,6 +3453,75 @@ async fn url_key_for_ref(pool: &sqlx::SqlitePool, media_ref: &str) -> String {
     .get("url_key")
 }
 
+/// DS.1: on save, a pasted `/media/file/<url_key>` byte URL in page content is
+/// rewritten to the stable `/media/<ref>` — the `![]()` embed AND the `[]()` link
+/// forms — while an unresolvable byte URL is LEFT ALONE. So a variant re-encode
+/// (which mints a new url_key) never strands a content link, and gated media stays
+/// gate-correct (a `/media/<ref>` embed is fetched per viewer). Needs ffprobe (upload).
+#[tokio::test]
+async fn save_rewrites_media_byte_urls_to_stable_refs() {
+    if !ffprobe_available() {
+        eprintln!("skipping media-byte-url rewrite test: ffprobe not found");
+        return;
+    }
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // Upload → a real item (ref R) + resolve its per-save byte url_key K.
+    let media_ref = upload_test_file(&server, &admin, None).await;
+    let url_key = url_key_for_ref(&server.pool, &media_ref).await;
+    // A valid-SHAPED (64 lowercase hex) but UNKNOWN key → must be left alone.
+    let bogus_key = "0".repeat(64);
+
+    server
+        .seed_content_page("RewritePage", "# Rewrite Page\n\nseed")
+        .await
+        .expect("seed page");
+
+    let markdown = format!(
+        "![img](/media/file/{url_key})\n\n[download](/media/file/{url_key})\n\n![gone](/media/file/{bogus_key})"
+    );
+    let resp = admin
+        .put(server.url("/pages/RewritePage"))
+        .header("HX-Request", "true")
+        .form(&[
+            ("page_category", ""),
+            ("page_markdown", markdown.as_str()),
+            ("page_cover_media_ref", ""),
+            ("page_order", "0"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success(), "page PUT should succeed: {}", resp.status());
+
+    // Re-open the editor → the STORED markdown is in the textarea.
+    let edit = admin
+        .get(server.url("/pages/RewritePage?edit=1"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    // Both resolvable byte URLs → the stable ref; the byte form is GONE.
+    assert!(
+        edit.contains(&format!("/media/{media_ref}")),
+        "the resolvable byte URL(s) rewritten to the stable ref"
+    );
+    assert!(
+        !edit.contains(&format!("/media/file/{url_key}")),
+        "the per-save byte url_key must be gone from stored content"
+    );
+    // The unresolvable byte URL is untouched (typo-tolerant, like the cover-ref parse).
+    assert!(
+        edit.contains(&format!("/media/file/{bogus_key}")),
+        "an unresolvable byte URL is left alone"
+    );
+}
+
 /// DC end-to-end: an upload carrying min_role=Family mints a GATED item — anon
 /// and Registered get miss-shaped denials on all three routes, Family gets the
 /// bytes with PRIVATE caching; a plain upload stays public with shared caching.

@@ -186,8 +186,15 @@ pub async fn update_page(
 
     lp.page_title = input.title;
     lp.page_category = input.category;
-    lp.page_markdown =
+    // Save-time link normalization: absolute site links → root-relative
+    // (`rewrite_site_links`), then per-save `/media/file/<url_key>` byte URLs →
+    // the stable, per-viewer-gated `/media/<ref>` (Phase DS), so a variant
+    // re-encode never strands a content link.
+    let relativized =
         rewrite_site_links(&input.markdown, site_host).map_err(PageWriteError::Internal)?;
+    lp.page_markdown = crate::web::features::media::rewrite_media_byte_urls(pool, &relativized)
+        .await
+        .map_err(PageWriteError::Internal)?;
     lp.page_order = input.order;
     if let Some(dt) = input.creation_date.as_deref().and_then(parse_local_datetime) {
         lp.page_creation_date = dt;

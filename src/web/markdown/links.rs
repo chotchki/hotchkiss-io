@@ -39,6 +39,38 @@ pub fn rewrite_site_links(markdown: &str, site_host: &str) -> Result<String> {
     Ok(out)
 }
 
+/// Collect every distinct link / image / reference-definition target URL in the
+/// markdown — the same node kinds `rewrite_site_links` rewrites. Used by the
+/// media-byte-URL → ref save pass (`media::rewrite_media_byte_urls`, Phase DS) so
+/// it rewrites only real link targets, never code-block or prose text that happens
+/// to contain a `/media/file/` string.
+pub fn collect_link_urls(markdown: &str) -> Result<Vec<String>> {
+    let ast = to_mdast(markdown, &Default::default())
+        .map_err(|m: markdown::message::Message| anyhow!("Failed to parse markdown {}", m))?;
+    let mut urls: Vec<String> = Vec::new();
+    collect_all(&ast, &mut urls);
+    Ok(urls)
+}
+
+fn collect_all(node: &Node, urls: &mut Vec<String>) {
+    let url = match node {
+        Node::Link(l) => Some(&l.url),
+        Node::Image(i) => Some(&i.url),
+        Node::Definition(d) => Some(&d.url),
+        _ => None,
+    };
+    if let Some(u) = url
+        && !urls.contains(u)
+    {
+        urls.push(u.clone());
+    }
+    if let Some(children) = node.children() {
+        for child in children {
+            collect_all(child, urls);
+        }
+    }
+}
+
 /// Collect distinct (absolute, relative) URL pairs for every site-matching
 /// link / image / reference-definition target in the tree.
 fn collect(node: &Node, site_host: &str, pairs: &mut Vec<(String, String)>) {

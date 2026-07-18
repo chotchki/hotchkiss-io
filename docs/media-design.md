@@ -413,21 +413,27 @@ covers pick variants the same way. `cover_url_for` = `image_ladder().first()` (s
 `cover_hero_for` = `image_ladder().last()` (largest) + the ≥2-sizes srcset, each with a
 first-image fallback for a legacy unresized cover (DR.4 retired their hand-rolled SQL).
 
-**Authored references normalize to the stable `media_ref` (→ Phase DS).** On SAVE,
-`rewrite_site_links` (already relativizes site links) ALSO rewrites any
-`/media/file/<url_key>` in the content → `/media/<ref>` (resolve `url_key` → owning item →
-ref; an unresolvable key is left alone, typo-tolerant like the cover-ref parse). Why: the
+**Authored references normalize to the stable `media_ref`  [SHIPPED, Phase DS].** On SAVE,
+`update_page` runs `rewrite_site_links` (relativizes site links) THEN
+`media::rewrite_media_byte_urls` — a sibling async pass (it needs a DB lookup, so it stays
+OUT of the pure sync `rewrite_site_links`) that rewrites any `/media/file/<url_key>` in the
+content → `/media/<ref>` (resolve `url_key` → owning item → ref via a `media_variant⋈media`
+join; an unresolvable or non-64-hex key is left alone, typo-tolerant like the cover-ref
+parse; both the `![]()` embed + `[]()` link forms, byte-for-byte elsewhere via longest-first
+string-replace over AST-collected link targets only — never code-block text). Why: the
 library's "Copy link" hands out a `/media/file/<url_key>`, and a pasted byte URL bakes a
 PER-SAVE key into the content-hash-cached HTML + the feed — it goes STALE the moment that
 variant is re-encoded / round-trip-replaced (a `PUT …/variants` mints new `url_key`s) AND
 it can't per-viewer-gate (a `![](/media/<ref>)` embed is fetched per viewer; a baked byte
-URL is shared for everyone, and for gated media it just 404s from cache). **Covers are
-already ref-stable** — stored as a `page_cover_media_id` (`media_id`) via
-`parse_cover_reference`, resolved FRESH at render (the hero `<img srcset>` byte URLs are
-computed each render, never baked). Content markdown is the gap DS closes; the editor's
-drop-upload already inserts `![](/media/<ref>)`, and the save-rewrite backstops a pasted
-byte URL. **The rule:** an author never bakes a `url_key`; every authored reference
-resolves through the stable ref.
+URL is shared for everyone, and for gated media it just 404s from cache). A shared
+(content-deduped) `url_key` resolves via `LIMIT 1` — the byte route's strictest-wins gate is
+the enforcement point regardless of which ref renders, so the choice only affects the
+embed's KIND dispatch, never gating. **Covers are already ref-stable** — stored as a
+`page_cover_media_id` (`media_id`) via `parse_cover_reference`, resolved FRESH at render (the
+hero `<img srcset>` byte URLs are computed each render, never baked; `cover_is_ref_stable_across_a_variant_replace`
+pins that a cover set from EITHER form survives a variant replace). The editor's drop-upload
+already inserts `![](/media/<ref>)`, and the save-rewrite backstops a pasted byte URL. **The
+rule:** an author never bakes a `url_key`; every authored reference resolves through the stable ref.
 
 **Shipped embed specifics (the real-device-hardened details):**
 - **Audio player** (`audio-player.js`, first-party, `defer`, re-scans on `htmx:afterSettle`):
