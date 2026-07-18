@@ -428,6 +428,26 @@ impl MediaVariantDao {
         Ok(())
     }
 
+    /// Delete ONE variant by its `url_key` WITHIN an item (Phase DQ —
+    /// `DELETE /media/<ref>/variants/<url_key>`). Scoped to `media_id` because a
+    /// `url_key` is shared across items (content dedup) but unique within one.
+    /// Returns whether a row was removed, so the route can `404` an unknown key.
+    pub async fn delete_by_url_key_in_item(
+        executor: impl SqliteExecutor<'_>,
+        media_id: i64,
+        url_key: &str,
+    ) -> Result<bool> {
+        let affected = query!(
+            r#"DELETE FROM media_variant WHERE media_id = ?1 AND url_key = ?2"#,
+            media_id,
+            url_key
+        )
+        .execute(executor)
+        .await?
+        .rows_affected();
+        Ok(affected > 0)
+    }
+
     /// The serve route's lookup: public HMAC token → the variant (mime + sha).
     /// Not unique (dedup'd content shares a url_key), so take the first.
     #[allow(dead_code)] // wired by the range serve route (BZ.2)

@@ -191,7 +191,7 @@ request never reaches these headers.
 
 ---
 
-## 5. The resource — collection, item, variants  [mixed]
+## 5. The resource — collection, item, variants  [SHIPPED, Phases DP + DQ]
 
 The read + write surface, uniform across every kind. FOUR resources, and a verb
 discipline that keeps it HATEOAS-clean: **every write is an idempotent PUT (replace)
@@ -230,15 +230,16 @@ min_role). Same shape in and out. Media BYTES are negotiated alternates
 (`Accept: image/avif` → 302). `OPTIONS` owns pure control-discovery — it carries the
 `controls` block; `GET(json)` carries state.
 
-### The manifest — `OPTIONS /media/<ref>`  [SHIPPED read shape (Phase DP); `controls` = DQ]
+### The manifest — `OPTIONS /media/<ref>`  [SHIPPED, Phase DP (read) + DQ.7 (controls)]
 
 Every variant a followable link + the controls the caller may use. `min_role`-gated
-(denied ≡ 404). This same body is the `GET(json)` state (and, at DQ, the `201` create
-response). **DP SHIPS the read shape** — `{ref, self, kind, title, min_role, variants:
-[{type, bytes, width?, height?, href}]}` (`build_manifest`, served by `OPTIONS` +
-`GET … Accept: application/json`). **DQ adds** the **ROLE-AWARE** `controls` block +
-each variant's `remove` link (an Admin sees the write controls; a public caller sees
-only `variants[].href`) — once the write surface those controls point at exists.
+(denied ≡ 404). `build_manifest(media, variants, viewer)` — served by `OPTIONS`, by
+`GET … Accept: application/json` (the item state), and as the `201` create /
+`200` write response body. **ROLE-AWARE** (DQ.7): a non-admin sees only
+`{ref, self, kind, title, min_role, variants:[{type, bytes, width?, height?, href}]}`;
+an Admin ALSO sees each variant's `remove` link + the `controls` block (`add` /
+`replace-all` / `metadata` / `delete`) — the HATEOAS mirror of the mutation gate
+(`serde skip_serializing_if` drops both for a non-admin).
 
 ```json
 {
@@ -280,7 +281,7 @@ Redirects with **HTTP 307** (`Redirect::temporary`, NOT 302) to the chosen
 delegates to `media_select::negotiate` (the ONE selector, §5 / DP.3), which the embed
 (§8) and the manifest also use.
 
-### `PUT /media/<ref>/variants` — replace all (the round-trip SAVE)  [SHIPPED as `PATCH /media/<ref>`; DP re-verbs]
+### `PUT /media/<ref>/variants` — replace all (the round-trip SAVE)  [SHIPPED, Phase DQ.1 (re-verbed from DO's PATCH)]
 
 The fab-scad round-trip SAVE + general update-in-place. `multipart/form-data`, SAME shape
 as create — one file part per file, typed by EXTENSION (`.scad`→`application/x-openscad`,
@@ -296,7 +297,7 @@ variants (a render thumbnail) are DROPPED; replaced blobs go cold (no in-line sw
 (an additive `superseded_at` doesn't break this). **SHIPPED today as `PATCH /media/<ref>`
 (Phase DO); DP re-verbs to `PUT …/variants` — inert, no consumer breaks.**
 
-### `POST /media` — create item  ·  `POST /media/<ref>/variants` — add one  [TARGET]
+### `POST /media` — create item  ·  `POST /media/<ref>/variants` — add one  [SHIPPED, Phase DQ.2/DQ.3]
 
 Both mint a SERVER-assigned identity → both POST → `201` + `Location`. `POST /media`
 creates an ITEM (mints the UUIDv7 `ref`, initial variants in the multipart); `POST
@@ -307,7 +308,7 @@ multipart ingest as the PUT; content-dedup makes a repeat add an idempotent no-o
 not contract). `POST /media` takes an optional `min_role`/`title`; a variant inherits the
 item's gate.
 
-### `PUT /media/<ref>` — edit metadata  ·  `DELETE …` — remove  [TARGET]
+### `PUT /media/<ref>` — edit metadata  ·  `DELETE …` — remove  [SHIPPED, Phase DQ.4]
 
 `PUT /media/<ref>` (JSON `{title, min_role}`) REPLACES the item's writable metadata — the
 honest home for the old `rename` + `visibility` POSTs, idempotent (no PATCH).
@@ -498,7 +499,7 @@ resource, nothing model-special:
   GET 307-redirects `?format=scad` to the scad source; the `ref` lives in the URL's PATH,
   so the SAVE target is derivable by dropping the query (`PUT /media/<ref>/variants`, DQ)
   or via the OPTIONS manifest. Emits the STABLE ref, never the per-save `url_key`.
-- **Save [SHIPPED as `PATCH /media/<ref>`; DP re-verbs to `PUT /media/<ref>/variants`]:**
+- **Save [SHIPPED, Phase DQ.1 — `PUT /media/<ref>/variants`]:**
   replace the whole variant collection (§5). The opaque ref never changes, so every
   `![](/media/<ref>)` embed stays valid across edits — no supersession pointer.
 - **fab-gui side (upstream):** export low-res mesh (3MF multicolor / STL single-color,
@@ -527,12 +528,15 @@ The deltas between SHIPPED and TARGET — the code-alignment work (Phase DP), sc
   point (`build_manifest`, `.options()` on the `/{media_ref}` method-router;
   safe-method-public + `min_role`-gated). **DQ adds** the ROLE-AWARE `controls` block +
   per-variant `remove` once the write surface exists.
-- **Write surface re-verb** — the full HATEOAS surface (§5): `POST /media` (create,
-  `201`+`Location`), `POST /media/<ref>/variants` (add), **`PUT /media/<ref>/variants`
-  (replace-all — RE-VERBS the shipped DO `PATCH /media/<ref>`; inert)**, `PUT /media/<ref>`
-  (metadata), `DELETE /media/<ref>` + `…/variants/<key>`. **Zero PATCH.**
-- **`GET /media` admin gate** — the list-all is a NON-public GET; give it its own
-  `require_admin` (the safe-method default would leak the whole library — §4a).
+- **✓ SHIPPED (DQ): write surface** — the full HATEOAS surface (§5): `POST /media`
+  (create, `201`+`Location`+manifest), `POST /media/<ref>/variants` (add, append-only),
+  `PUT /media/<ref>/variants` (replace-all — re-verbed from DO's `PATCH /media/<ref>`),
+  `PUT /media/<ref>` (metadata, absent-keeps), `DELETE /media/<ref>` + `…/variants/<key>`.
+  **Zero PATCH.** `POST /media` + the `PUT …/variants` re-verb share the ingest cores
+  with the admin `upload_media` / `add_encode`, so they can't drift (DR migrates the
+  admin UI onto them).
+- **✓ SHIPPED (DQ.5): `GET /media` admin gate** — the list-all self-gates to Admin
+  (`403` for a non-admin — the safe-method default would leak the whole library, §4a).
 - **Admin-route migration** — fold `/admin/media/{upload,encode,rename,visibility,delete,
   variant}` onto the `/media/<ref>[/variants]` surface (templates + `media-upload.js` +
   `editor-support.js`). SCOPE CALL: inside DP, or a follow-on so DP stays "canonical

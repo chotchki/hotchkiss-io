@@ -1822,15 +1822,15 @@ async fn media_streams_large_generic_file_and_serves_it_back() {
     assert!(lib.contains(&url_key), "library card carries the share url_key");
 }
 
-/// Phase DO: the fab-scad round-trip SAVE — `PATCH /media/<ref>` COMPLETELY
-/// replaces an item's variant set in place. The stable ref + title survive (so
-/// `![](/media/<ref>)` embeds don't break), the new bytes serve, and the OLD
-/// variant's url_key is GONE (a genuine replace, not an append). Generic-file
-/// payloads keep it fast + deterministic; needs ffprobe (the ingest probes).
+/// Phase DO/DQ: the fab-scad round-trip SAVE — `PUT /media/<ref>/variants`
+/// COMPLETELY replaces an item's variant collection. The stable ref + title survive
+/// (so `![](/media/<ref>)` embeds don't break), the new bytes serve, and the OLD
+/// variant's url_key is GONE (a genuine replace, not an append). Returns the
+/// manifest. Generic-file payloads keep it fast; needs ffprobe (the ingest probes).
 #[tokio::test]
 async fn media_patch_replaces_variant_set_in_place() {
     if !ffprobe_available() {
-        eprintln!("skipping media PATCH test: ffprobe not found");
+        eprintln!("skipping media replace-variants test: ffprobe not found");
         return;
     }
     let server = spawn_test_server().await.expect("spawn");
@@ -1883,20 +1883,25 @@ async fn media_patch_replaces_variant_set_in_place() {
         StatusCode::OK
     );
 
-    // PATCH the SAME ref with the new bytes → complete replace.
+    // PUT the SAME ref's variant collection with the new bytes → complete replace.
     let form = reqwest::multipart::Form::new().part("file", bin_part(new_bytes.clone(), "model.new.bin"));
     let resp = admin
-        .patch(server.url(&format!("/media/{media_ref}")))
+        .put(server.url(&format!("/media/{media_ref}/variants")))
         .multipart(form)
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "admin PATCH should succeed");
+    assert_eq!(resp.status(), StatusCode::OK, "admin PUT /variants (replace-all) should succeed");
     let j: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(j["media_ref"].as_str().unwrap(), media_ref, "ref unchanged");
-    let variants = j["variants"].as_array().expect("variants array");
+    assert_eq!(j["ref"].as_str().unwrap(), media_ref, "ref unchanged (the manifest)");
+    let variants = j["variants"].as_array().expect("manifest variants array");
     assert_eq!(variants.len(), 1, "exactly the one new variant");
-    let new_key = variants[0]["url_key"].as_str().unwrap().to_string();
+    let new_key = variants[0]["href"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("/media/file/")
+        .expect("variant href is a byte URL")
+        .to_string();
     assert_ne!(new_key, old_key, "the url_key changed with the bytes");
 
     // The new bytes serve byte-for-byte.
@@ -1927,22 +1932,22 @@ async fn media_patch_replaces_variant_set_in_place() {
     assert!(lib.contains("Widget"), "title preserved across the swap");
 }
 
-/// Phase DO guards: the PATCH is Admin-only (inherited from the mutation layer, no
-/// /media-specific rule), 404s an unknown ref, 400s an empty body (a replace-to-
-/// nothing is a DELETE not a PATCH), and the freshly-minted variants INHERIT the
+/// Phase DO/DQ guards: `PUT /media/<ref>/variants` is Admin-only (inherited from the
+/// mutation layer, no /media-specific rule), 404s an unknown ref, 400s an empty body
+/// (a replace-to-nothing is a DELETE), and the freshly-minted variants INHERIT the
 /// item's PRESERVED gate. Needs ffprobe.
 #[tokio::test]
 async fn media_patch_authz_guards_and_gate_preserved() {
     if !ffprobe_available() {
-        eprintln!("skipping media PATCH guard test: ffprobe not found");
+        eprintln!("skipping media replace-variants guard test: ffprobe not found");
         return;
     }
     let server = spawn_test_server().await.expect("spawn");
 
-    // Anonymous PATCH → 401 (missing identity): gated FOR FREE by the non-safe-method
+    // Anonymous PUT → 401 (missing identity): gated FOR FREE by the non-safe-method
     // admin fallback, no /media-specific rule.
     let anon = reqwest::Client::new()
-        .patch(server.url("/media/anything"))
+        .put(server.url("/media/anything/variants"))
         .send()
         .await
         .unwrap();
@@ -1954,7 +1959,7 @@ async fn media_patch_authz_guards_and_gate_preserved() {
     // Unknown ref → 404.
     let bytes: Vec<u8> = (0..1024u32).map(|i| i as u8).collect();
     let miss = admin
-        .patch(server.url("/media/does-not-exist"))
+        .put(server.url("/media/does-not-exist/variants"))
         .multipart(reqwest::multipart::Form::new().part("file", bin_part(bytes.clone(), "x.bin")))
         .send()
         .await
@@ -1976,20 +1981,20 @@ async fn media_patch_authz_guards_and_gate_preserved() {
         .unwrap();
     let media_ref = up["media_ref"].as_str().unwrap().to_string();
 
-    // Empty PATCH (no file parts) → 400, and it's rejected BEFORE the destructive
+    // Empty PUT (no file parts) → 400, and it's rejected BEFORE the destructive
     // tx (a replace to zero variants is a DELETE).
     let empty = admin
-        .patch(server.url(&format!("/media/{media_ref}")))
+        .put(server.url(&format!("/media/{media_ref}/variants")))
         .multipart(reqwest::multipart::Form::new().text("min_role", "Public"))
         .send()
         .await
         .unwrap();
     assert_eq!(empty.status(), StatusCode::BAD_REQUEST, "empty replace rejected");
 
-    // Real PATCH with new bytes → the new variant must INHERIT the Family gate.
+    // Real PUT with new bytes → the new variant must INHERIT the Family gate.
     let new_bytes: Vec<u8> = (0..777u32).map(|i| (i.wrapping_mul(3)) as u8).collect();
     let j: serde_json::Value = admin
-        .patch(server.url(&format!("/media/{media_ref}")))
+        .put(server.url(&format!("/media/{media_ref}/variants")))
         .multipart(reqwest::multipart::Form::new().part("file", bin_part(new_bytes, "book.v2.bin")))
         .send()
         .await
@@ -1997,7 +2002,12 @@ async fn media_patch_authz_guards_and_gate_preserved() {
         .json()
         .await
         .unwrap();
-    let new_key = j["variants"][0]["url_key"].as_str().unwrap().to_string();
+    let new_key = j["variants"][0]["href"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("/media/file/")
+        .expect("variant href")
+        .to_string();
 
     // Anonymous fetch of the new bytes → 404 (gated, denied ≡ miss): the gate carried
     // onto the freshly-minted variant.
@@ -2012,6 +2022,176 @@ async fn media_patch_authz_guards_and_gate_preserved() {
         StatusCode::OK,
         "admin reaches the gated new bytes"
     );
+}
+
+/// Phase DQ: the RESTful write-surface lifecycle — `POST /media` (create, 201 +
+/// Location + manifest) → `POST …/variants` (add, 201) → `PUT /media/<ref>` (metadata,
+/// absent field KEPT) → `DELETE …/variants/<key>` → `DELETE /media/<ref>`. Two POSTs
+/// for the server-assigns-identity creates, PUT for replace/metadata, DELETE — zero
+/// PATCH. Needs ffprobe.
+#[tokio::test]
+async fn media_write_surface_lifecycle() {
+    if !ffprobe_available() {
+        eprintln!("skipping DQ lifecycle test: ffprobe not found");
+        return;
+    }
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // CREATE — POST /media → 201 + Location + manifest.
+    let a: Vec<u8> = (0..2000u32).map(|i| i as u8).collect();
+    let resp = admin
+        .post(server.url("/media"))
+        .multipart(
+            reqwest::multipart::Form::new()
+                .part("file", bin_part(a, "one.bin"))
+                .text("title", "Doc"),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "POST /media → 201 Created");
+    let loc = location(&resp).expect("Location header");
+    assert!(loc.starts_with("/media/"), "Location points at the new item: {loc}");
+    let m: serde_json::Value = resp.json().await.unwrap();
+    let r = m["ref"].as_str().unwrap().to_string();
+    assert_eq!(m["self"].as_str().unwrap(), format!("/media/{r}"));
+    assert_eq!(m["title"].as_str().unwrap(), "Doc");
+    assert_eq!(m["controls"]["add"]["method"].as_str(), Some("POST"), "admin manifest carries controls");
+    assert_eq!(m["variants"].as_array().unwrap().len(), 1);
+
+    // ADD — POST /media/<ref>/variants → 201, now 2 variants.
+    let b: Vec<u8> = (0..3000u32).map(|i| (i.wrapping_mul(7)) as u8).collect();
+    let add = admin
+        .post(server.url(&format!("/media/{r}/variants")))
+        .multipart(reqwest::multipart::Form::new().part("file", bin_part(b, "two.bin")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(add.status(), StatusCode::CREATED, "POST /variants → 201");
+    let m2: serde_json::Value = add.json().await.unwrap();
+    let variants = m2["variants"].as_array().unwrap().clone();
+    assert_eq!(variants.len(), 2, "the added variant appears");
+
+    // METADATA — PUT /media/<ref> {min_role: Family}; title ABSENT → KEEPS "Doc" (fail-safe).
+    let put = admin
+        .put(server.url(&format!("/media/{r}")))
+        .json(&serde_json::json!({ "min_role": "Family" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(put.status(), StatusCode::OK);
+    let m3: serde_json::Value = put.json().await.unwrap();
+    assert_eq!(m3["min_role"].as_str(), Some("Family"), "gate set");
+    assert_eq!(m3["title"].as_str(), Some("Doc"), "absent title KEPT (fail-safe, never silently clears)");
+
+    // DELETE a variant — DELETE /media/<ref>/variants/<key> → 204; re-delete → 404.
+    let key = variants[0]["href"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("/media/file/")
+        .unwrap()
+        .to_string();
+    let del = admin.delete(server.url(&format!("/media/{r}/variants/{key}"))).send().await.unwrap();
+    assert_eq!(del.status(), StatusCode::NO_CONTENT, "delete variant → 204");
+    let del2 = admin.delete(server.url(&format!("/media/{r}/variants/{key}"))).send().await.unwrap();
+    assert_eq!(del2.status(), StatusCode::NOT_FOUND, "re-delete a gone variant → 404");
+
+    // DELETE the item — DELETE /media/<ref> → 204; then the item is gone.
+    let ditem = admin.delete(server.url(&format!("/media/{r}"))).send().await.unwrap();
+    assert_eq!(ditem.status(), StatusCode::NO_CONTENT, "delete item → 204");
+    assert_eq!(
+        admin.request(reqwest::Method::OPTIONS, server.url(&format!("/media/{r}"))).send().await.unwrap().status(),
+        StatusCode::NOT_FOUND,
+        "the item is gone"
+    );
+}
+
+/// Phase DQ.5/DQ.7: `GET /media` is admin-only (403 for a non-admin — the whole
+/// library is an admin capability), and the OPTIONS manifest's write `controls` +
+/// per-variant `remove` appear ONLY for an Admin (the HATEOAS mirror of the gate).
+/// Needs ffprobe.
+#[tokio::test]
+async fn media_list_admin_only_and_manifest_controls_role_aware() {
+    if !ffprobe_available() {
+        eprintln!("skipping DQ list/controls test: ffprobe not found");
+        return;
+    }
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+    let up: serde_json::Value = admin
+        .post(server.url("/media"))
+        .multipart(reqwest::multipart::Form::new().part("file", bin_part(vec![1, 2, 3, 4], "pub.bin")))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let r = up["ref"].as_str().unwrap().to_string();
+
+    // GET /media: admin → 200 + lists it; anon → 403 (not the DATA 404-oracle).
+    let list = admin.get(server.url("/media")).send().await.unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let lj: serde_json::Value = list.json().await.unwrap();
+    assert!(
+        lj["items"].as_array().unwrap().iter().any(|i| i["ref"].as_str() == Some(r.as_str())),
+        "admin list includes the item"
+    );
+    assert_eq!(
+        reqwest::Client::new().get(server.url("/media")).send().await.unwrap().status(),
+        StatusCode::FORBIDDEN,
+        "anon GET /media → 403"
+    );
+
+    // OPTIONS a PUBLIC item: admin sees controls + remove; anon sees neither.
+    let am: serde_json::Value = admin
+        .request(reqwest::Method::OPTIONS, server.url(&format!("/media/{r}")))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(am["controls"].is_object(), "admin manifest has controls");
+    assert!(am["variants"][0]["remove"].is_string(), "admin variant has a remove link");
+    let anon_m: serde_json::Value = reqwest::Client::new()
+        .request(reqwest::Method::OPTIONS, server.url(&format!("/media/{r}")))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(anon_m["controls"].is_null(), "anon manifest has NO controls");
+    assert!(anon_m["variants"][0]["remove"].is_null(), "anon variant has NO remove link");
+    assert!(anon_m["variants"][0]["href"].is_string(), "anon still sees the variant href");
+}
+
+/// Phase DQ: every write verb on the `/media` surface is Admin-gated FOR FREE by the
+/// mutation layer (anon → 401), with NO /media-specific rule. No upload → no ffprobe.
+#[tokio::test]
+async fn media_write_surface_is_admin_gated() {
+    let server = spawn_test_server().await.expect("spawn");
+    let anon = reqwest::Client::new();
+    for (method, path) in [
+        (reqwest::Method::POST, "/media"),
+        (reqwest::Method::PUT, "/media/x"),
+        (reqwest::Method::DELETE, "/media/x"),
+        (reqwest::Method::POST, "/media/x/variants"),
+        (reqwest::Method::PUT, "/media/x/variants"),
+        (reqwest::Method::DELETE, "/media/x/variants/deadbeef"),
+    ] {
+        let status = anon
+            .request(method.clone(), server.url(path))
+            .send()
+            .await
+            .unwrap()
+            .status();
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "anon {method} {path} → 401");
+    }
 }
 
 /// Phase DP: `GET /media/<ref>` content-negotiates (`?format=` > wildcard-free

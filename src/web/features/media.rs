@@ -12,7 +12,7 @@
 
 use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
-use axum::routing::get;
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,7 @@ use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
 use crate::db::dao::media::{MediaDao, MediaKind, MediaVariantDao, ModelFormat};
+use crate::db::dao::roles::Role;
 use crate::web::features::media_select::{self, Negotiation};
 use crate::web::util::media_ref::UrlKey;
 use crate::web::app_state::AppState;
@@ -29,22 +30,42 @@ use crate::web::session::SessionData;
 const MAX_IMAGE_HEIGHT_PX: u32 = 480;
 
 pub fn media_router() -> Router<AppState> {
+    use crate::web::features::admin::media as m;
     Router::new()
         .route("/file/{url_key}", get(serve_media_file))
         .route("/embed/{media_ref}", get(render_media_embed))
-        // Download by the author ref (one path segment — never collides with the
-        // two-segment /file/ and /embed/ routes above). PATCH on the same identity
-        // is the fab-scad round-trip SAVE (Phase DO): complete variant replace in
-        // place, Admin-gated FOR FREE by `require_admin_for_mutations` (GET public,
-        // PATCH → admin fallback). `DefaultBodyLimit::disable()` for the multi-GB
-        // model set, same as the /admin/media/upload route.
+        // The HATEOAS resource surface (Phase DQ, docs/media-design.md §5). Writes
+        // are Admin-gated FOR FREE by `require_admin_for_mutations` (any non-safe
+        // method → the admin fallback); GET/OPTIONS are safe-public (`GET /media`
+        // self-gates to Admin, §4a). `DefaultBodyLimit::disable()` on the multipart
+        // routes (create + variant collection) for multi-GB uploads.
+        //
+        // The item COLLECTION: create (POST) + admin list (GET).
+        .route(
+            "/",
+            post(m::create_media)
+                .get(list_media)
+                .layer(DefaultBodyLimit::disable()),
+        )
+        // An ITEM (one path segment — never collides with /file/ or /embed/):
+        // negotiated read (GET), manifest (OPTIONS), metadata (PUT json), delete.
         .route(
             "/{media_ref}",
             get(serve_media_by_ref)
                 .options(media_manifest)
-                .patch(crate::web::features::admin::media::patch_media_by_ref)
+                .put(m::update_media_metadata)
+                .delete(m::delete_media_item),
+        )
+        // The VARIANT COLLECTION: add one (POST) + replace all (PUT — the round-trip
+        // SAVE, re-verbed from DO's PATCH).
+        .route(
+            "/{media_ref}/variants",
+            post(m::add_media_variant)
+                .put(m::replace_media_variants)
                 .layer(DefaultBodyLimit::disable()),
         )
+        // A VARIANT: delete one by its url_key (scoped to the item).
+        .route("/{media_ref}/variants/{url_key}", delete(m::delete_media_variant))
 }
 
 /// `?format=<token>` query on `GET /media/<ref>` (Phase DP) — the explicit,
@@ -55,12 +76,12 @@ struct FormatQuery {
     format: Option<String>,
 }
 
-/// The hypermedia manifest for `/media/<ref>` (Phase DP §5) — the item's state +
-/// its variants as followable links. DP ships the READ shape; DQ adds the
-/// role-aware `controls` block + per-variant `remove` links once the write surface
-/// exists.
+/// The hypermedia manifest for `/media/<ref>` (§5) — the item's state, its variants
+/// as followable links, and (for an Admin caller) the write `controls`. ROLE-AWARE
+/// (DQ.7): a non-admin sees only `variants[].href`; an Admin also sees each variant's
+/// `remove` link + the `controls` block — the HATEOAS mirror of the mutation gate.
 #[derive(Serialize)]
-struct Manifest {
+pub(crate) struct Manifest {
     #[serde(rename = "ref")]
     media_ref: String,
     #[serde(rename = "self")]
@@ -70,6 +91,8 @@ struct Manifest {
     title: Option<String>,
     min_role: Option<String>,
     variants: Vec<VariantEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    controls: Option<Controls>,
 }
 
 #[derive(Serialize)]
@@ -82,12 +105,43 @@ struct VariantEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     height: Option<i64>,
     href: String,
+    /// Admin only — the `DELETE …/variants/<url_key>` link.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remove: Option<String>,
 }
 
-fn build_manifest(media: &MediaDao, variants: &[MediaVariantDao]) -> Manifest {
+/// The Admin-only write affordances (DQ) — advertised in the manifest for an Admin
+/// caller, the HATEOAS mirror of `require_admin_for_mutations`.
+#[derive(Serialize)]
+struct Controls {
+    add: Control,
+    #[serde(rename = "replace-all")]
+    replace_all: Control,
+    metadata: Control,
+    delete: Control,
+}
+
+#[derive(Serialize)]
+struct Control {
+    href: String,
+    method: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accepts: Option<&'static str>,
+}
+
+/// Build the manifest for `viewer` — the write `controls` + per-variant `remove`
+/// appear ONLY for an Admin (§4a/§5). `pub(crate)` so the DQ write handlers
+/// (`admin::media`) can return it as their `201`/`200` body.
+pub(crate) fn build_manifest(
+    media: &MediaDao,
+    variants: &[MediaVariantDao],
+    viewer: Role,
+) -> Manifest {
+    let is_admin = viewer == Role::Admin;
+    let base = format!("/media/{}", media.media_ref);
     Manifest {
         media_ref: media.media_ref.clone(),
-        self_url: format!("/media/{}", media.media_ref),
+        self_url: base.clone(),
         kind: media.kind.clone(),
         title: media.title.clone(),
         min_role: media.min_role.clone(),
@@ -99,8 +153,31 @@ fn build_manifest(media: &MediaDao, variants: &[MediaVariantDao]) -> Manifest {
                 width: v.width,
                 height: v.height,
                 href: format!("/media/file/{}", v.url_key),
+                remove: is_admin.then(|| format!("{base}/variants/{}", v.url_key)),
             })
             .collect(),
+        controls: is_admin.then(|| Controls {
+            add: Control {
+                href: format!("{base}/variants"),
+                method: "POST",
+                accepts: Some("multipart/form-data"),
+            },
+            replace_all: Control {
+                href: format!("{base}/variants"),
+                method: "PUT",
+                accepts: Some("multipart/form-data"),
+            },
+            metadata: Control {
+                href: base.clone(),
+                method: "PUT",
+                accepts: Some("application/json"),
+            },
+            delete: Control {
+                href: base.clone(),
+                method: "DELETE",
+                accepts: None,
+            },
+        }),
     }
 }
 
@@ -138,8 +215,42 @@ async fn media_manifest(
     Path(media_ref): Path<String>,
 ) -> Response {
     match resolve_visible(&state, &media_ref, &session_data).await {
-        Ok((media, variants)) => Json(build_manifest(&media, &variants)).into_response(),
+        Ok((media, variants)) => Json(build_manifest(&media, &variants, session_data.auth_state.role())).into_response(),
         Err(resp) => resp,
+    }
+}
+
+/// `GET /media` — the ADMIN-ONLY item listing (Phase DQ.5). This is the one media
+/// GET the safe-method-public default would wrongly expose: enumerating the whole
+/// library is an admin capability (the opaque ref / HMAC key design exists to stop
+/// non-admins discovering media), so it SELF-GATES to Admin. A non-admin gets a
+/// `403` (not the DATA routes' 404-oracle — the route name ships in the public
+/// source, so hiding its existence buys nothing). Lightweight JSON collection; a
+/// client `OPTIONS`es an item for its variants.
+async fn list_media(State(state): State<AppState>, session_data: SessionData) -> Response {
+    if session_data.auth_state.role() != Role::Admin {
+        return (StatusCode::FORBIDDEN, "Admin only").into_response();
+    }
+    match MediaDao::find_all(&state.pool).await {
+        Ok(items) => {
+            let list: Vec<_> = items
+                .iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "ref": m.media_ref,
+                        "self": format!("/media/{}", m.media_ref),
+                        "kind": m.kind,
+                        "title": m.title,
+                        "min_role": m.min_role,
+                    })
+                })
+                .collect();
+            Json(serde_json::json!({ "items": list })).into_response()
+        }
+        Err(e) => {
+            tracing::error!("media list failed: {e:?}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "media list failed").into_response()
+        }
     }
 }
 
@@ -175,7 +286,7 @@ async fn serve_media_by_ref(
             }
             resp
         }
-        Negotiation::ItemState => Json(build_manifest(&media, &variants)).into_response(),
+        Negotiation::ItemState => Json(build_manifest(&media, &variants, session_data.auth_state.role())).into_response(),
         Negotiation::Empty => {
             (StatusCode::NOT_FOUND, "no downloadable file for this media").into_response()
         }

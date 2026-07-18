@@ -14,21 +14,35 @@ use askama::Template;
 use axum::extract::{Multipart, Path, State};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use http::StatusCode;
+use http::{header, StatusCode};
 use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::db::dao::crypto_key::CryptoKey;
 use crate::db::dao::media::{MediaDao, MediaKind, MediaVariantDao};
+use crate::db::dao::roles::Role;
 use crate::media::poster::generate_poster;
 use crate::media::probe::{probe, Probed};
 use crate::media::resize::{responsive_avif_variants, ResizeResult};
 use crate::media::{media_url_key, MediaStore};
 use crate::web::authentication_state::AuthenticationState;
-use crate::web::features::media::render_embed_html;
+use crate::web::features::media::{build_manifest, render_embed_html};
 use crate::web::features::top_bar::TopBar;
 use crate::web::htmx_responses::htmx_refresh;
 use crate::web::{app_error::AppError, app_state::AppState, html_template::HtmlTemplate, session::SessionData};
+
+/// `201 Created` + `Location` + the item manifest — the response for the DQ
+/// server-assigns-identity creates (`POST /media`, `POST …/variants`). The manifest
+/// is built with `Role::Admin` (the mutation gate guarantees the caller is Admin).
+fn created_manifest(media: &MediaDao, variants: &[MediaVariantDao]) -> Response {
+    let location = format!("/media/{}", media.media_ref);
+    (
+        StatusCode::CREATED,
+        [(header::LOCATION, location)],
+        Json(build_manifest(media, variants, Role::Admin)),
+    )
+        .into_response()
+}
 
 /// CryptoKey row id for the media-URL HMAC secret (session signing key is id 1).
 const MEDIA_HMAC_KEY_ID: i64 = 2;
@@ -279,20 +293,23 @@ async fn add_derived_variants(
     }
 }
 
-pub async fn upload_media(
-    State(state): State<AppState>,
+/// Ingest a multipart into a NEW item + its variants — the shared core of the
+/// admin `upload_media` and DQ's `create_media` (`POST /media`). Streams + probes,
+/// mints the opaque UUIDv7 ref, derives kind/dims from the dominant file, inserts
+/// the variants, runs the best-effort derived variants (image srcset / A-V poster),
+/// and returns the item + its FINAL variant set. `None` = no files in the upload
+/// (the caller returns a `400`).
+async fn ingest_new_item(
+    state: &AppState,
     multipart: Multipart,
-) -> Result<Response, AppError> {
+) -> Result<Option<(MediaDao, Vec<MediaVariantDao>)>> {
     let (ingested, fields) = ingest_multipart(&state.media_store, multipart).await?;
-
     if ingested.is_empty() {
-        return Ok((StatusCode::BAD_REQUEST, "No files in the upload").into_response());
+        return Ok(None);
     }
-
     // The URL ref is an OPAQUE, unguessable token (NOT a slug) — the byte route is
-    // already HMAC'd; this closes the slug-guess gap for unpublished media. The
-    // human name lives in `title` (library display / search / rename), derived
-    // from the filename when not given.
+    // already HMAC'd; this closes the slug-guess gap. The human name lives in
+    // `title` (library display / search), derived from the filename when not given.
     let media_ref = uuid::Uuid::now_v7().simple().to_string();
     let title = fields
         .title
@@ -305,17 +322,15 @@ pub async fn upload_media(
         .key_value;
 
     // The item's kind is the DOMINANT kind across the grouped files (a model/video
-    // beats an image), NOT just the first file's — so a render image grouped with a
-    // model is its THUMBNAIL, not the item's type, order-independently. Dims/duration
-    // come from the first variant OF that kind (an image grouped into a model item
-    // must not set the model's dims).
+    // beats an image), NOT just the first file's. Dims/duration come from the first
+    // variant OF that kind (an image grouped into a model must not set model dims).
     let kinds: Vec<MediaKind> = ingested.iter().map(|f| f.probed.kind).collect();
     let kind = dominant_kind(&kinds);
     let primary = ingested.iter().find(|f| f.probed.kind == kind).unwrap_or(&ingested[0]);
     let (primary_sha, primary_probed) = (primary.sha.clone(), &primary.probed);
     let media = MediaDao::create(
         &state.pool,
-        media_ref.clone(),
+        media_ref,
         kind,
         title,
         primary_probed.width,
@@ -341,32 +356,57 @@ pub async fn upload_media(
         )
         .await?;
     }
+    add_derived_variants(state, &hmac_key, media.media_id, kind, primary_sha).await;
 
-    add_derived_variants(&state, &hmac_key, media.media_id, kind, primary_sha).await;
+    let variants = MediaVariantDao::find_by_media_id(&state.pool, media.media_id).await?;
+    Ok(Some((media, variants)))
+}
 
+/// `POST /admin/media/upload` — the admin library's create (htmx). Returns the
+/// `media_id` / `media_ref` / ready-to-paste markdown the editor JS inserts. The
+/// canonical REST create is `create_media` (`POST /media`, DQ.2); both share
+/// `ingest_new_item`, so they can't drift. (DR migrates the library onto that.)
+pub async fn upload_media(
+    State(state): State<AppState>,
+    multipart: Multipart,
+) -> Result<Response, AppError> {
+    let Some((media, _variants)) = ingest_new_item(&state, multipart).await? else {
+        return Ok((StatusCode::BAD_REQUEST, "No files in the upload").into_response());
+    };
     Ok(Json(json!({
         "media_id": media.media_id,
-        "media_ref": media_ref,
-        "markdown": format!("![](/media/{media_ref})"),
+        "media_ref": media.media_ref,
+        "markdown": format!("![](/media/{})", media.media_ref),
     }))
     .into_response())
 }
 
-/// `PATCH /media/<ref>` — the fab-scad round-trip SAVE target (Phase DO). A
-/// logged-in Admin's fab-gui edit re-uploads the model's files here; the item's
-/// ENTIRE variant set is COMPLETELY REPLACED in place, keeping the stable
-/// `media_ref` / `title` / `min_role` so every `![](/media/<ref>)` embed + the
-/// gate survive the swap with zero rewrite. Same multipart shape as
-/// `/admin/media/upload` (file parts typed by extension), just PATCH +
-/// ref-targeted + replace-not-mint. Anything not re-uploaded (e.g. a render-image
-/// thumbnail) is dropped — the uploaded set is authoritative. Old blobs go cold
-/// on disk (content-addressed, no in-line sweep — same contract as delete).
+/// `POST /media` — the canonical REST create (DQ.2). Ingests a new item (server
+/// mints the UUIDv7 ref) → `201 Created` + `Location: /media/<ref>` + the manifest.
+/// Admin-gated FOR FREE by `require_admin_for_mutations` (a POST → the admin
+/// fallback). Shares `ingest_new_item` with the admin `upload_media`.
+pub async fn create_media(
+    State(state): State<AppState>,
+    multipart: Multipart,
+) -> Result<Response, AppError> {
+    match ingest_new_item(&state, multipart).await? {
+        Some((media, variants)) => Ok(created_manifest(&media, &variants)),
+        None => Ok((StatusCode::BAD_REQUEST, "No files in the upload").into_response()),
+    }
+}
+
+/// `PUT /media/<ref>/variants` — REPLACE the item's entire variant collection
+/// (Phase DQ.1, re-verbed from DO's `PATCH /media/<ref>`; the fab-scad round-trip
+/// SAVE). A logged-in Admin re-uploads the model's files; the variant set is
+/// COMPLETELY REPLACED, keeping the item's identity (`media_ref` / `title` /
+/// `min_role`) untouched BY CONSTRUCTION — it lives on the PARENT `/media/<ref>`,
+/// not this collection. Multipart file parts typed by extension. Anything not
+/// re-uploaded is dropped — the uploaded set is authoritative. Old blobs go cold
+/// (content-addressed, no in-line sweep — same as delete). Returns the manifest.
 ///
-/// Wired on the PUBLIC `/media` nest but Admin-gated by
-/// `require_admin_for_mutations` (a non-safe method → the admin fallback; the
-/// WebAuthn + role-scoped allowlists are POST-only, so a PATCH structurally
-/// can't slip past) — NOT the `/admin` nest's `require_admin`.
-pub async fn patch_media_by_ref(
+/// Admin-gated FOR FREE by `require_admin_for_mutations` (a non-safe method → the
+/// admin fallback) — NOT the `/admin` nest's `require_admin`.
+pub async fn replace_media_variants(
     State(state): State<AppState>,
     Path(media_ref): Path<String>,
     multipart: Multipart,
@@ -429,26 +469,24 @@ pub async fn patch_media_by_ref(
     // inherit the item's preserved gate (they carry no min_role of their own).
     add_derived_variants(&state, &hmac_key, item.media_id, kind, primary_sha).await;
 
-    // Reflect the final variant set back so fab-gui can confirm the swap.
+    // Reflect the final variant set back (the manifest) so fab-gui can confirm the swap.
+    let item = MediaDao::find_by_ref(&state.pool, &media_ref).await?.unwrap_or(item);
     let variants = MediaVariantDao::find_by_media_id(&state.pool, item.media_id).await?;
-    let variant_json: Vec<_> = variants
-        .iter()
-        .map(|v| json!({ "url_key": v.url_key, "mime": v.mime, "bytes": v.bytes }))
-        .collect();
-    Ok(Json(json!({
-        "media_ref": media_ref,
-        "kind": kind.as_str(),
-        "variants": variant_json,
-    }))
-    .into_response())
+    Ok(Json(build_manifest(&item, &variants, Role::Admin)).into_response())
 }
 
-/// Append a variant (another encode, or an image → poster) to an existing item.
-pub async fn add_encode(
-    State(state): State<AppState>,
-    Path(media_id): Path<i64>,
+/// APPEND variants to an EXISTING item (Phase DQ.3 shared core) — stream + probe
+/// each file part and insert it, DEDUP'ing bytes already on the item. **APPEND-ONLY**
+/// (the DQ.3 decision): unlike upload/replace it does NOT run `add_derived_variants`
+/// (no poster / no responsive srcset) and does NOT re-derive the item's kind/dims —
+/// you're adding a SPECIFIC variant (another codec, a poster, a mesh LOD), not
+/// re-ingesting the item (use `PUT …/variants` to replace + re-derive). Returns
+/// whether any file part was seen, so the caller `400`s an empty body.
+async fn append_variants(
+    state: &AppState,
+    media_id: i64,
     mut multipart: Multipart,
-) -> Result<Response, AppError> {
+) -> Result<bool> {
     let hmac_key = CryptoKey::get_or_create(&state.pool, MEDIA_HMAC_KEY_ID)
         .await?
         .key_value;
@@ -480,13 +518,8 @@ pub async fn add_encode(
                 continue;
             }
             let root = root.to_string_lossy().into_owned();
-            let probed = probe_stored(
-                state.media_store.clone(),
-                sha.clone(),
-                fname,
-                Some(root.clone()),
-            )
-            .await?;
+            let probed =
+                probe_stored(state.media_store.clone(), sha.clone(), fname, Some(root.clone())).await?;
             create_variant(
                 &state.pool,
                 &hmac_key,
@@ -502,12 +535,42 @@ pub async fn add_encode(
             .await?;
         }
     }
+    Ok(saw_file)
+}
 
-    if !saw_file {
+/// `POST /admin/media/{media_id}/encode` — append a variant to an item BY id (the
+/// admin library, htmx). Shares `append_variants` with the canonical
+/// `add_media_variant` (`POST /media/<ref>/variants`, DQ.3).
+pub async fn add_encode(
+    State(state): State<AppState>,
+    Path(media_id): Path<i64>,
+    multipart: Multipart,
+) -> Result<Response, AppError> {
+    if !append_variants(&state, media_id, multipart).await? {
         return Ok((StatusCode::BAD_REQUEST, "No file in the upload").into_response());
     }
     // A file present but fully deduped is an idempotent no-op — still refresh.
     Ok(htmx_refresh())
+}
+
+/// `POST /media/<ref>/variants` — ADD one variant to an existing item (Phase DQ.3):
+/// the `add_encode` semantics addressed BY ref. The server mints the content-addressed
+/// `url_key`, so it's a POST → `201` + `Location` + the manifest. APPEND-ONLY (see
+/// `append_variants`). Admin-gated by the mutation layer. `404` unknown ref, `400`
+/// empty body.
+pub async fn add_media_variant(
+    State(state): State<AppState>,
+    Path(media_ref): Path<String>,
+    multipart: Multipart,
+) -> Result<Response, AppError> {
+    let Some(item) = MediaDao::find_by_ref(&state.pool, &media_ref).await? else {
+        return Ok((StatusCode::NOT_FOUND, "No such media item").into_response());
+    };
+    if !append_variants(&state, item.media_id, multipart).await? {
+        return Ok((StatusCode::BAD_REQUEST, "No file in the upload").into_response());
+    }
+    let variants = MediaVariantDao::find_by_media_id(&state.pool, item.media_id).await?;
+    Ok(created_manifest(&item, &variants))
 }
 
 pub async fn delete_media(
@@ -569,6 +632,73 @@ pub async fn set_media_visibility(
 ) -> Result<Response, AppError> {
     MediaDao::set_min_role(&state.pool, media_id, parse_media_visibility(&form.min_role)).await?;
     Ok(htmx_refresh())
+}
+
+/// The `PUT /media/<ref>` metadata body (DQ.4). An ABSENT field KEEPS the current
+/// value — fail-safe: a partial write must never silently clear a title or,
+/// security-critical, LOOSEN the gate (mirrors the DB.5 visibility rule).
+#[derive(serde::Deserialize)]
+pub struct MetadataBody {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub min_role: Option<String>,
+}
+
+/// `PUT /media/<ref>` — replace the item's writable metadata (DQ.4; the `rename` +
+/// `visibility` merge). JSON `{title?, min_role?}`; an absent field keeps its value.
+/// `min_role`: `"Public"` clears, a known role sets, absent/garbage keeps (never
+/// silently loosens). Returns the manifest; `404` unknown ref.
+pub async fn update_media_metadata(
+    State(state): State<AppState>,
+    Path(media_ref): Path<String>,
+    Json(body): Json<MetadataBody>,
+) -> Result<Response, AppError> {
+    let Some(item) = MediaDao::find_by_ref(&state.pool, &media_ref).await? else {
+        return Ok((StatusCode::NOT_FOUND, "No such media item").into_response());
+    };
+    if let Some(title) = &body.title {
+        MediaDao::update_title(&state.pool, item.media_id, title).await?;
+    }
+    match body.min_role.as_deref().map(str::trim) {
+        Some("Public") => MediaDao::set_min_role(&state.pool, item.media_id, None).await?,
+        Some(v @ ("Registered" | "Family" | "Admin")) => {
+            MediaDao::set_min_role(&state.pool, item.media_id, Some(v.to_string())).await?
+        }
+        _ => {} // absent / unrecognized → keep (never silently loosen)
+    }
+    let item = MediaDao::find_by_ref(&state.pool, &media_ref).await?.unwrap_or(item);
+    let variants = MediaVariantDao::find_by_media_id(&state.pool, item.media_id).await?;
+    Ok(Json(build_manifest(&item, &variants, Role::Admin)).into_response())
+}
+
+/// `DELETE /media/<ref>` — delete the item (CASCADE its variants; DQ.4). `204`, or
+/// `404` for an unknown ref.
+pub async fn delete_media_item(
+    State(state): State<AppState>,
+    Path(media_ref): Path<String>,
+) -> Result<Response, AppError> {
+    let Some(item) = MediaDao::find_by_ref(&state.pool, &media_ref).await? else {
+        return Ok((StatusCode::NOT_FOUND, "No such media item").into_response());
+    };
+    MediaDao::delete_by_id(&state.pool, item.media_id).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// `DELETE /media/<ref>/variants/<url_key>` — remove ONE variant (DQ.4). `204`, or
+/// `404` if the ref OR the key (within that item) is unknown.
+pub async fn delete_media_variant(
+    State(state): State<AppState>,
+    Path((media_ref, url_key)): Path<(String, String)>,
+) -> Result<Response, AppError> {
+    let Some(item) = MediaDao::find_by_ref(&state.pool, &media_ref).await? else {
+        return Ok((StatusCode::NOT_FOUND, "No such media item").into_response());
+    };
+    if MediaVariantDao::delete_by_url_key_in_item(&state.pool, item.media_id, &url_key).await? {
+        Ok(StatusCode::NO_CONTENT.into_response())
+    } else {
+        Ok((StatusCode::NOT_FOUND, "No such variant").into_response())
+    }
 }
 
 /// ffprobe an ALREADY-stored file (its bytes are on disk — storing now happens via
