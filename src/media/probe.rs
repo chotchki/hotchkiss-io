@@ -11,7 +11,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::LazyLock;
 
-use crate::db::dao::media::MediaKind;
+use crate::db::dao::media::{MediaKind, SCAD_MIME};
 
 /// Derived facts about a media file — feeds the `media` + `media_variant` rows
 /// and the eventual `<source>` / `<img>` / `<object>` tags.
@@ -85,6 +85,23 @@ pub fn probe(path: &Path, original_name: &str) -> Result<Probed> {
         return Ok(Probed {
             kind: MediaKind::Stl,
             mime: "model/3mf".to_string(),
+            codecs: None,
+            width: None,
+            height: None,
+            duration_ms: None,
+            chapters: None,
+        });
+    }
+    // `.scad` is OpenSCAD SOURCE — the input fab-gui SLICES, NOT a viewable mesh
+    // (three.js can't render it, so it must NOT be `MediaKind::Stl` or it'd hit the
+    // mesh viewer). Stored as a downloadable `File` tagged `application/x-openscad`
+    // so the embed dispatch offers "Open in the slicer" (Phase DN). Grouped with a
+    // mesh, `dominant_kind` keeps the ITEM `Stl`; the scad rides as a variant.
+    // ffprobe can't read it either.
+    if lower.ends_with(".scad") {
+        return Ok(Probed {
+            kind: MediaKind::File,
+            mime: SCAD_MIME.to_string(),
             codecs: None,
             width: None,
             height: None,
@@ -317,6 +334,16 @@ mod tests {
         let mf = probe(Path::new("/nope"), "plate.3mf").unwrap();
         assert_eq!(mf.kind, MediaKind::Stl);
         assert_eq!(mf.mime, "model/3mf");
+    }
+
+    // `.scad` is OpenSCAD SOURCE (Phase DN): a downloadable File, NOT a mesh kind,
+    // tagged application/x-openscad so the embed can offer "Open in the slicer".
+    #[test]
+    fn scad_is_typed_as_openscad_source_by_extension() {
+        let scad = probe(Path::new("/nope"), "bracket.SCAD").unwrap();
+        assert_eq!(scad.kind, MediaKind::File);
+        assert_eq!(scad.mime, SCAD_MIME);
+        assert_eq!(scad.mime, "application/x-openscad");
     }
 
     // Fixtures match the REAL shapes from skylander dev-data + the cat AVIF

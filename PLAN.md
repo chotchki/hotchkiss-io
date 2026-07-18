@@ -1,4 +1,4 @@
-<!-- plan-bridge:phase-high-water=DM -->
+<!-- plan-bridge:phase-high-water=DN -->
 # Plan
 
 Completed phases are in `PLAN_ARCHIVE.md` (most recent: Phase 12 — beta deployment on the mini (inverted `main`→beta / `v*`tag→prod flow); Phase 1 — `get_recs_by_name` `type=A` filter fix (ACME renewal hang); Phase 9 — Tailwind cleanup / dropped DaisyUI; Phase 8 — local/e2e test harness; Phase 7 — admin analytics dashboard; Phase 2 — DNS module testability; Phase 5 — dropped the `cookie-rs` fork; Phase 3 — `ifconfig.me` → Cloudflare `cdn-cgi/trace`; Phase 0 — push-to-deploy on the Mac mini; Phase 4 — `tray-wrapper` 0.4.1 bump).
@@ -96,6 +96,17 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] DG.3 - Up-next affordance: on page open, highlight/scroll to the last-listened volume (per-ref saved positions decide it)
 - [ ] DG.4 - Tests + CLAUDE.md delta + real-phone validation: screen-off auto-advance, lock-screen volume skip, series authoring convention documented
 - [x] DG.5 - Audio embed: cover-art + title header replaces the download button
+
+## Phase DN - Open a model in the slicer (public load widget)
+
+*Half 1 of the fab-scad model round-trip. fab-gui is a SCAD SLICER — it already loads `?model=<scad-url>` as TEXT on boot (agent-verified in the pinned web-v0.16.x); STL/3MF mesh-import is a hard-stub on the wasm worker. So this half is the PUBLIC READ path: store the SCAD (public, `application/x-openscad`), surface an "Open in the slicer" button that hands fab-gui the SCAD URL. The EDIT round-trip (fab-scad export of STL/3MF + authenticated same-origin upload + update-in-place on the STABLE `media_ref`, so content links never go stale) is chris's UPSTREAM fab-scad work + a later phase — NOT this one.*
+
+- [ ] DN.0 - Phase exit: a public "Open in the slicer" button on a model page opens fab-gui at `/3d/editor?model=/media/file/<scad-url_key>` and the model loads + slices; SCAD stored as `application/x-openscad`; the three.js mesh viewer is unaffected by the scad variant; tests + docs; shipped.
+- [x] DN.1 - `ModelFormat` enum (`Scad`/`Stl`/`ThreeMf`) + `from_mime` + `is_mesh()` — the typed discriminator replacing the fragile `mime == "model/3mf"` / `starts_with("model/")` string-matching in the embed dispatch (strong-type-from-the-start). No migration — reads the existing `media_variant.mime` column.
+- [x] DN.2 - Ingest: probe `.scad` (by extension, like `.stl`/`.3mf`) → mime `application/x-openscad`, kind `MediaKind::File` (a standalone scad is a downloadable source; grouped with a mesh, `dominant_kind` keeps the item `Stl`). Unit test beside the `.stl`/`.3mf` probe test.
+- [x] DN.3 - Byte route: serve `application/x-openscad` as-is (fab-gui reads text; a browser downloads the source), + add `cross-origin-resource-policy: cross-origin` so the COEP:require-corp editor can fetch it (resurrects the deferred CW.4; `cross-origin` keeps public media hotlinkable — NOT `same-origin`; CORP doesn't bypass the `min_role` gate, which is enforced separately). Verify the editor fetch end-to-end.
+- [x] DN.4 - Embed dispatch (`render_embed_html`): the `Stl` arm's mesh selection goes through `ModelFormat::is_mesh` (scad excluded by its `application/` prefix anyway), and when the item has a scad variant, render an **"Open in the slicer"** button → `/3d/editor?model=/media/file/<scad-url_key>`; the `File` arm renders the slicer button (not a plain download) when the file IS a scad. New `open_in_slicer_button()` helper beside `download_button`.
+- [x] DN.5 - Tests + e2e + docs: unit (`ModelFormat::from_mime`; `.scad` probe); embed (slicer button for a scad-carrying `Stl` item AND a standalone scad `File`; mesh-viewer selection unaffected by the scad variant; button URL correct); e2e (`/3d/editor?model=/media/file/<key>` boots + fab-gui loads the scad); CLAUDE.md delta.
 
 ## Backlog (not yet phased)
 

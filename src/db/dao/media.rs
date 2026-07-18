@@ -38,6 +38,43 @@ impl MediaKind {
     }
 }
 
+/// OpenSCAD source is served as `application/x-openscad` (Phase DN) — the
+/// community de-facto type; NOT the invented `model/scad`, and NOT `text/plain`
+/// (ambiguous — can't be told apart from any other text). Its `application/`
+/// prefix ALSO keeps it out of the `model/*` mesh-selection glob for free.
+pub const SCAD_MIME: &str = "application/x-openscad";
+
+/// The format of a 3D-model variant, derived from its MIME (Phase DN). Replaces
+/// the fragile `mime == "model/3mf"` / `starts_with("model/")` string-matching in
+/// the embed dispatch. `Stl`/`ThreeMf` are the viewable/printable MESHES (the
+/// viewer + download select over these); `Scad` is the OpenSCAD SOURCE fab-gui
+/// SLICES — never a mesh (three.js can't render it), so it's excluded from mesh
+/// selection and instead gets an "Open in the slicer" button. No column of its
+/// own — it reads the existing `media_variant.mime`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelFormat {
+    Scad,
+    Stl,
+    ThreeMf,
+}
+
+impl ModelFormat {
+    pub fn from_mime(mime: &str) -> Option<ModelFormat> {
+        match mime {
+            SCAD_MIME => Some(ModelFormat::Scad),
+            "model/stl" => Some(ModelFormat::Stl),
+            "model/3mf" => Some(ModelFormat::ThreeMf),
+            _ => None,
+        }
+    }
+
+    /// A renderable/printable MESH (STL or 3MF) — the three.js viewer + the
+    /// download select over these; the SCAD source is not one.
+    pub fn is_mesh(self) -> bool {
+        matches!(self, ModelFormat::Stl | ModelFormat::ThreeMf)
+    }
+}
+
 /// A logical media item — one row, N [`MediaVariantDao`]. The bytes live in the
 /// disk store; this is just metadata.
 #[derive(Clone, Debug, FromRow, PartialEq)]

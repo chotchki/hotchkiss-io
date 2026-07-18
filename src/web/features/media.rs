@@ -14,11 +14,11 @@ use axum::extract::{Path, Request, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
-use http::{header, HeaderValue, StatusCode};
+use http::{header, HeaderName, HeaderValue, StatusCode};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
-use crate::db::dao::media::{MediaDao, MediaKind, MediaVariantDao};
+use crate::db::dao::media::{MediaDao, MediaKind, MediaVariantDao, ModelFormat};
 use crate::web::util::media_ref::UrlKey;
 use crate::web::app_state::AppState;
 use crate::web::session::SessionData;
@@ -173,6 +173,16 @@ async fn serve_media_file(
                 header::X_CONTENT_TYPE_OPTIONS,
                 HeaderValue::from_static("nosniff"),
             );
+            // CORP so the COOP/COEP cross-origin-isolated editor (`/3d/editor`,
+            // require-corp) can fetch a model's SCAD/mesh bytes (Phase DN;
+            // resurrects the deferred CW.4). `cross-origin` (NOT `same-origin`)
+            // also keeps public media hotlinkable/embeddable elsewhere; it does
+            // NOT bypass the `min_role` gate — that's enforced above via
+            // `required_rank`, so a denied request never reaches here.
+            headers.insert(
+                HeaderName::from_static("cross-origin-resource-policy"),
+                HeaderValue::from_static("cross-origin"),
+            );
             if is_active_content_mime(&variant.mime) {
                 headers.insert(
                     header::CONTENT_DISPOSITION,
@@ -262,6 +272,11 @@ fn embed_response(html: String) -> Response {
 pub(crate) fn render_embed_html(media: &MediaDao, variants: &[MediaVariantDao]) -> String {
     let alt = attr_escape(media.title.as_deref().unwrap_or(&media.media_ref));
     let kind = media.kind().unwrap_or(MediaKind::File);
+    // The OpenSCAD source variant, if any (Phase DN) — the input fab-gui SLICES.
+    // Surfaced as an "Open in the slicer" button in the Stl / File arms below.
+    let scad = variants
+        .iter()
+        .find(|v| ModelFormat::from_mime(&v.mime) == Some(ModelFormat::Scad));
     match kind {
         MediaKind::Image => {
             let Some(fallback) = variants.first() else {
@@ -349,11 +364,15 @@ Your browser can't play this video.</video>"
             )
         }
         MediaKind::Stl => {
-            // Select ONLY over `model/*` variants (STL/3MF) — an image variant on a
-            // model item is a THUMBNAIL/poster (library card, page cover), NEVER the
-            // mesh, so it must not be mis-picked as the viewer or download.
-            let models: Vec<&MediaVariantDao> =
-                variants.iter().filter(|v| v.mime.starts_with("model/")).collect();
+            // Select ONLY over MESH variants (STL/3MF via `ModelFormat::is_mesh`) —
+            // an image variant is a THUMBNAIL/poster and the SCAD source is the
+            // SLICER input, NEVER the mesh, so neither may be mis-picked as the
+            // viewer or download (Phase DN; scad is `application/…`, so the old
+            // `model/*` glob already excluded it — this makes it explicit + typed).
+            let models: Vec<&MediaVariantDao> = variants
+                .iter()
+                .filter(|v| ModelFormat::from_mime(&v.mime).is_some_and(ModelFormat::is_mesh))
+                .collect();
             if models.is_empty() {
                 return error_span("stl has no stored mesh");
             }
@@ -376,10 +395,16 @@ Your browser can't play this video.</video>"
                 .unwrap_or_else(|| models.iter().copied().min_by_key(|v| v.bytes).unwrap());
             let fmt = if viewer.mime == "model/3mf" { "3mf" } else { "stl" };
             let full = models.iter().copied().max_by_key(|v| v.bytes).unwrap();
+            // If the model carries its OpenSCAD source, offer to open it in the
+            // slicer (Phase DN) — under the viewer + full-res download.
+            let slicer = scad
+                .map(|v| open_in_slicer_button(&v.url_key))
+                .unwrap_or_default();
             format!(
-                "<span class=\"flex flex-col items-center gap-2 my-4\">{}{}</span>",
+                "<span class=\"flex flex-col items-center gap-2 my-4\">{}{}{}</span>",
                 stl_viewer_block(&format!("/media/file/{}", viewer.url_key), fmt),
                 download_button(&full.url_key, &alt, full.bytes),
+                slicer,
             )
         }
         MediaKind::Audio => {
@@ -443,7 +468,18 @@ Your browser can't play this audio.</audio></span>",
             let Some(v) = variants.first() else {
                 return error_span("file has no content");
             };
-            download_button(&v.url_key, &alt, v.bytes)
+            // A standalone OpenSCAD source (no grouped mesh): lead with the slicer
+            // button — the point — and keep a download for the raw source (Phase DN).
+            // Any other file is just a download.
+            if let Some(s) = scad {
+                format!(
+                    "<span class=\"flex flex-col items-center gap-2 my-4\">{}{}</span>",
+                    open_in_slicer_button(&s.url_key),
+                    download_button(&v.url_key, &alt, v.bytes),
+                )
+            } else {
+                download_button(&v.url_key, &alt, v.bytes)
+            }
         }
     }
 }
@@ -492,6 +528,21 @@ href=\"/media/file/{url_key}\" download=\"{label}\">{DOWNLOAD_ICON_SVG}<span>Dow
 /// built as a Rust string, not askama, so the `icons::*` macros aren't reachable
 /// here — this is the equivalent hand-inlined SVG, sized to the text (`1em`).
 const DOWNLOAD_ICON_SVG: &str = "<svg viewBox=\"0 0 16 16\" width=\"1em\" height=\"1em\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M8 2v8\"/><path d=\"M4.5 7 8 10.5 11.5 7\"/><path d=\"M2.5 13.5h11\"/></svg>";
+
+/// Inline "stacked layers" glyph for the Open-in-the-slicer button (a sliced model).
+const SLICER_ICON_SVG: &str = "<svg viewBox=\"0 0 16 16\" width=\"1em\" height=\"1em\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M8 1.5 14.5 5 8 8.5 1.5 5 8 1.5Z\"/><path d=\"M1.5 8 8 11.5 14.5 8\"/><path d=\"M1.5 11 8 14.5 14.5 11\"/></svg>";
+
+/// "Open in the slicer" button (Phase DN): hands fab-gui the SCAD source URL via
+/// its `?model=` deep-link. Root-relative so fab-gui's `fetch_text` resolves it
+/// same-origin (the editor is COEP-isolated; the byte route carries CORP). Yellow
+/// (not the navy download) so the "open the tool" action reads distinct from
+/// "download the file". The url_key is 64-hex — no query metacharacters to escape.
+fn open_in_slicer_button(scad_url_key: &str) -> String {
+    format!(
+        "<a class=\"media-slice inline-flex items-center gap-2 my-2 px-4 py-2 bg-yellow text-navy rounded no-underline hover:bg-yellow/90\" \
+href=\"/3d/editor?model=/media/file/{scad_url_key}\">{SLICER_ICON_SVG}<span>Open in the slicer</span></a>"
+    )
+}
 
 /// Human-readable byte size for the download button (1024-based). Bytes below 1 KiB
 /// stay exact; KB whole, MB/GB one decimal.
@@ -778,6 +829,78 @@ mod tests {
         assert!(html.contains("data-filename=\"/media/file/mfkey\""), "{html}");
         assert!(html.contains("data-format=\"3mf\""), "loads via 3MFLoader: {html}");
         assert!(html.contains("href=\"/media/file/mfkey\""), "the 3mf is also downloadable: {html}");
+    }
+
+    #[test]
+    fn model_with_scad_variant_offers_open_in_slicer() {
+        // A model carrying a mesh + its OpenSCAD source (Phase DN): the mesh still
+        // drives the viewer/download, and the scad adds an "Open in the slicer"
+        // button — the scad must NEVER be mis-picked as the mesh.
+        let mut mesh = variant("meshkey", "model/3mf", None);
+        mesh.bytes = 400_000;
+        let scad = variant("scadkey", "application/x-openscad", None);
+        let html = render_embed_html(&media("stl"), &[mesh, scad]);
+        assert!(
+            html.contains("data-filename=\"/media/file/meshkey\""),
+            "viewer is the mesh: {html}"
+        );
+        assert!(
+            !html.contains("data-filename=\"/media/file/scadkey\""),
+            "scad is never loaded into the mesh viewer: {html}"
+        );
+        assert!(
+            html.contains("href=\"/3d/editor?model=/media/file/scadkey\""),
+            "Open-in-the-slicer targets the scad source: {html}"
+        );
+        assert!(html.contains("Open in the slicer"), "{html}");
+    }
+
+    #[test]
+    fn standalone_scad_file_offers_slicer_and_download() {
+        // A `.scad` uploaded alone probes as a File (application/x-openscad); its
+        // embed leads with the slicer button and keeps a source download — not a
+        // bare download (Phase DN).
+        let html = render_embed_html(
+            &media("file"),
+            &[variant("scadkey", "application/x-openscad", None)],
+        );
+        assert!(
+            html.contains("href=\"/3d/editor?model=/media/file/scadkey\""),
+            "standalone scad opens in the slicer: {html}"
+        );
+        assert!(html.contains("Open in the slicer"), "{html}");
+        assert!(
+            html.contains("href=\"/media/file/scadkey\""),
+            "raw source still downloadable: {html}"
+        );
+    }
+
+    #[test]
+    fn multicolor_model_views_low_3mf_downloads_high_3mf_with_slicer() {
+        // A MULTICOLOR model can't use a low-res STL for the web viewer (STL carries
+        // no color), so it ships SCAD + low-res 3MF + high-res 3MF. The viewer picks
+        // the SMALLEST 3MF (color + fast), the download the LARGEST, the slicer the
+        // source — all from one item.
+        let mut low = variant("low3mf", "model/3mf", None);
+        low.bytes = 120_000;
+        let mut high = variant("high3mf", "model/3mf", None);
+        high.bytes = 2_400_000;
+        let scad = variant("scadkey", "application/x-openscad", None);
+        // Shuffled insert order — selection is by type+size, never order.
+        let html = render_embed_html(&media("stl"), &[high, scad, low]);
+        assert!(
+            html.contains("data-filename=\"/media/file/low3mf\""),
+            "viewer = the low-res 3MF (color + fast): {html}"
+        );
+        assert!(html.contains("data-format=\"3mf\""), "viewer loads via 3MFLoader (color): {html}");
+        assert!(
+            html.contains("href=\"/media/file/high3mf\""),
+            "download = the high-res 3MF: {html}"
+        );
+        assert!(
+            html.contains("href=\"/3d/editor?model=/media/file/scadkey\""),
+            "slicer button targets the source: {html}"
+        );
     }
 
     #[test]

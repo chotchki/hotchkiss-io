@@ -4016,3 +4016,81 @@ async fn stranded_credential_login_is_a_clean_401_not_500() {
     let body = resp.text().await.unwrap();
     assert!(body.contains("register"), "actionable message: {body}");
 }
+
+// ---- Phase DN: open a model in the slicer ----------------------------------
+
+/// A `.scad` upload is typed as OpenSCAD source, served with the right
+/// Content-Type + CORP (so the COEP-isolated `/3d/editor` can fetch it), and its
+/// embed offers the "Open in the slicer" button. Extension-typed, so no ffprobe.
+#[tokio::test]
+async fn scad_upload_serves_openscad_with_corp_and_slicer_embed() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(b"cube([10,10,10]);\n".to_vec())
+            .file_name("bracket.scad")
+            .mime_str("text/plain")
+            .unwrap(),
+    );
+    let resp = admin
+        .post(server.url("/admin/media/upload"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "admin scad upload succeeds");
+    let j: serde_json::Value = resp.json().await.unwrap();
+    let media_ref = j["media_ref"].as_str().expect("media_ref").to_string();
+
+    // The embed offers the slicer button; pull the served url_key from its href.
+    let embed = admin
+        .get(server.url(&format!("/media/embed/{media_ref}")))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(embed.contains("Open in the slicer"), "embed offers slicer: {embed}");
+    let marker = "/3d/editor?model=/media/file/";
+    let start = embed.find(marker).expect("slicer href present") + marker.len();
+    let url_key: String = embed[start..]
+        .chars()
+        .take_while(char::is_ascii_alphanumeric)
+        .collect();
+    assert!(!url_key.is_empty(), "extracted a url_key: {embed}");
+
+    // The byte route serves it as OpenSCAD source WITH CORP (public → the editor
+    // can fetch it under COEP:require-corp).
+    let bytes_resp = admin
+        .get(server.url(&format!("/media/file/{url_key}")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bytes_resp.status(), StatusCode::OK);
+    assert!(
+        bytes_resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .starts_with("application/x-openscad"),
+        "served as OpenSCAD source: {:?}",
+        bytes_resp.headers().get("content-type")
+    );
+    assert_eq!(
+        bytes_resp
+            .headers()
+            .get("cross-origin-resource-policy")
+            .and_then(|v| v.to_str().ok()),
+        Some("cross-origin"),
+        "CORP lets the isolated editor fetch it"
+    );
+}
