@@ -15,6 +15,7 @@ use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, MutexGuard};
 
+use chromiumoxide::cdp::browser_protocol::dom::SetFileInputFilesParams;
 use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
 use chromiumoxide::cdp::browser_protocol::web_authn::{
     AddVirtualAuthenticatorParams, AuthenticatorProtocol, AuthenticatorTransport, EnableParams,
@@ -295,6 +296,113 @@ async fn js<T: serde::de::DeserializeOwned>(page: &Page, expr: &str) -> T {
         .unwrap_or_else(|e| panic!("evaluate `{expr}`: {e}"))
         .into_value()
         .unwrap_or_else(|e| panic!("into_value `{expr}`: {e}"))
+}
+
+// ── Admin media library e2e helpers (DR.3) ──────────────────────────────────
+
+/// ffprobe gate — the media ingest shells out to it even for a generic file (it
+/// types the upload, falling back to `MediaKind::File`). Absent → skip, like the
+/// HTTP-level media tests. NOT `#[ignore]` (the `no_ignored_tests` guard holds).
+fn ffprobe_available() -> bool {
+    std::process::Command::new("ffprobe")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Write a throwaway fixture file — `DOM.setFileInputFiles` needs a real path on
+/// disk. Distinct bytes per call, so two uploads don't content-address-dedup.
+fn write_temp_fixture(prefix: &str, bytes: &[u8]) -> std::path::PathBuf {
+    let p = std::env::temp_dir().join(format!("{prefix}-{}.bin", uuid::Uuid::new_v4()));
+    std::fs::write(&p, bytes).expect("write temp fixture");
+    p
+}
+
+/// Register the first user via the REAL passkey ceremony → Admin (the first
+/// registrant is auto-promoted). Leaves the browser on `/` with an Admin session.
+async fn register_first_admin(page: &Page, server: &TestServer, username: &str) {
+    page.goto(server.url("/login")).await.expect("goto /login");
+    let u = page.find_element("#username").await.expect("#username");
+    u.click().await.expect("focus #username");
+    u.type_str(username).await.expect("type username");
+    page.find_element("button[type=submit]")
+        .await
+        .expect("submit button")
+        .click()
+        .await
+        .expect("click submit");
+    wait_until_left_login(page).await;
+}
+
+/// Set a file input's files over CDP (`DOM.setFileInputFiles`, keyed by the
+/// element's backend node id) — the browser-faithful way to drive an upload.
+/// Chrome fires the input's own `change` event, which is what the media JS listens
+/// on; we deliberately do NOT dispatch a second one — the drop-zone handler POSTs a
+/// fresh item per change, so a double-fire would mint two items.
+async fn set_file_input(page: &Page, selector: &str, paths: &[&std::path::Path]) {
+    let el = page
+        .find_element(selector)
+        .await
+        .unwrap_or_else(|e| panic!("find {selector}: {e}"));
+    let files = paths.iter().map(|p| p.to_string_lossy().into_owned());
+    page.execute(
+        SetFileInputFilesParams::builder()
+            .files(files)
+            .backend_node_id(el.backend_node_id)
+            .build()
+            .expect("build SetFileInputFilesParams"),
+    )
+    .await
+    .expect("DOM.setFileInputFiles");
+}
+
+/// Non-panicking evaluate — tolerant of the transient "context destroyed" an
+/// evaluate hits mid-navigation (each media mutation reloads the page). Poll on
+/// these so a reload in flight is a retry, not a spurious failure.
+async fn try_bool(page: &Page, expr: &str) -> bool {
+    page.evaluate(expr).await.ok().and_then(|r| r.into_value().ok()).unwrap_or(false)
+}
+async fn try_string(page: &Page, expr: &str) -> String {
+    page.evaluate(expr).await.ok().and_then(|r| r.into_value().ok()).unwrap_or_default()
+}
+
+/// Poll a boolean JS expression until true (or panic at the 20s deadline).
+async fn wait_true(page: &Page, expr: &str, ctx: &str) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        assert!(Instant::now() < deadline, "timed out waiting for: {ctx}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if try_bool(page, expr).await {
+            return;
+        }
+    }
+}
+
+/// Poll a string JS expression until non-empty (or panic at the 20s deadline).
+async fn wait_nonempty(page: &Page, expr: &str, ctx: &str) -> String {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        assert!(Instant::now() < deadline, "timed out waiting for: {ctx}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let v = try_string(page, expr).await;
+        if !v.trim().is_empty() {
+            return v;
+        }
+    }
+}
+
+/// Click the first element matching `selector` (re-found fresh — element handles
+/// go stale across the reloads each mutation triggers).
+async fn click_selector(page: &Page, selector: &str) {
+    page.find_element(selector)
+        .await
+        .unwrap_or_else(|e| panic!("find {selector} to click: {e}"))
+        .click()
+        .await
+        .unwrap_or_else(|e| panic!("click {selector}: {e}"));
 }
 
 #[tokio::test]
@@ -918,4 +1026,178 @@ async fn editor_boots_in_browser() {
         booted,
         "the boot splash never lifted — fab-gui:ready did not fire within 30s (the app failed to boot)"
     );
+}
+
+// ── Admin media UI e2e (Phase DR.3) ──────────────────────────────────────────
+
+/// The admin media library, driven end-to-end in a REAL browser as Admin, exercises
+/// EVERY mutation over the canonical `/media` REST surface (DR): drop-upload
+/// (`POST /media`), add-encode (`POST …/variants`), rename + visibility
+/// (`PUT /media/<ref>`), per-variant delete (`DELETE …/variants/<key>`), and item
+/// delete (`DELETE /media/<ref>`). Generic `.bin` payloads ingest as
+/// `MediaKind::File` → exactly one variant each (no derived srcset), so the variant
+/// counts are deterministic. Every assertion is a SERVER-RENDERED truth observed
+/// AFTER the mutation's reload — never the pre-reload DOM the JS itself just
+/// touched — so a broken write can't false-pass. `window.prompt`/`confirm` are
+/// stubbed (headless auto-dismisses them, which would no-op the JS).
+#[tokio::test]
+async fn admin_media_library_full_crud_in_browser() {
+    if !ffprobe_available() {
+        eprintln!("skipping admin media library e2e: ffprobe not found");
+        return;
+    }
+    let _e2e = e2e_lock().await;
+    let server: TestServer = spawn_test_server().await.expect("spawn harness");
+    let (mut browser, handle, profile) = launch().await;
+    let page = browser.new_page("about:blank").await.expect("new page");
+    add_virtual_authenticator(&page).await;
+    register_first_admin(&page, &server, "e2e-media-admin").await;
+
+    let file_a = write_temp_fixture("e2e-media-a", b"e2e media library upload A");
+    let file_b = write_temp_fixture(
+        "e2e-media-b",
+        &(0..2048u32).map(|i| i.wrapping_mul(7) as u8).collect::<Vec<u8>>(),
+    );
+
+    page.goto(server.url("/admin/media")).await.expect("goto /admin/media");
+
+    // ── Upload → a card appears carrying its server-minted media_ref.
+    set_file_input(&page, "#media-file-input", &[&file_a]).await;
+    let media_ref = wait_nonempty(
+        &page,
+        "(function(){var c=document.querySelector('.media-card');return c?c.getAttribute('data-media-ref'):'';})()",
+        "upload → a media card with a data-media-ref appears",
+    )
+    .await;
+    let media_ref = media_ref.trim().to_string();
+    // Selectors scoped to THIS card (a UUIDv7 ref is a safe attribute-selector value).
+    let variants = format!(
+        "document.querySelectorAll('.delete-variant[data-media-ref=\"{media_ref}\"]').length"
+    );
+    let card = format!("!!document.querySelector('.media-card[data-media-ref=\"{media_ref}\"]')");
+    wait_true(&page, &format!("{variants} === 1"), "the uploaded item has one variant").await;
+
+    // ── Add-encode a second file → the card gains a second variant row.
+    set_file_input(
+        &page,
+        &format!(".add-encode-input[data-media-ref=\"{media_ref}\"]"),
+        &[&file_b],
+    )
+    .await;
+    wait_true(&page, &format!("{variants} === 2"), "add-encode → a second variant appears").await;
+
+    // ── Rename → the new title renders on the card (prompt() stubbed to return it;
+    // the string only reaches the DOM once the server persists + the card reloads).
+    let _: bool =
+        js(&page, "(function(){window.prompt=function(){return 'Renamed By E2E';};return true;})()").await;
+    click_selector(&page, &format!(".rename-media[data-media-ref=\"{media_ref}\"]")).await;
+    wait_true(
+        &page,
+        "document.body.textContent.indexOf('Renamed By E2E') >= 0",
+        "rename → the new title renders after reload",
+    )
+    .await;
+
+    // ── Change visibility → the SERVER re-renders the Family option as `selected`
+    // (an attribute the JS-set .value can't fake; only the PUT + reload adds it).
+    let _: bool = js(
+        &page,
+        &format!(
+            "(function(){{var s=document.querySelector('.media-visibility[data-media-ref=\"{media_ref}\"]');s.value='Family';s.dispatchEvent(new Event('change',{{bubbles:true}}));return true;}})()"
+        ),
+    )
+    .await;
+    wait_true(
+        &page,
+        &format!(
+            "(function(){{var o=document.querySelector('.media-visibility[data-media-ref=\"{media_ref}\"] option[value=\"Family\"]');return !!(o&&o.hasAttribute('selected'));}})()"
+        ),
+        "visibility change persisted (Family server-rendered as selected)",
+    )
+    .await;
+
+    // ── Delete one variant → the card drops to a single variant (confirm() stubbed).
+    let _: bool = js(&page, "(function(){window.confirm=function(){return true;};return true;})()").await;
+    click_selector(&page, &format!(".delete-variant[data-media-ref=\"{media_ref}\"]")).await;
+    wait_true(&page, &format!("{variants} === 1"), "delete-variant → one variant remains").await;
+
+    // ── Delete the item → the card disappears.
+    let _: bool = js(&page, "(function(){window.confirm=function(){return true;};return true;})()").await;
+    click_selector(&page, &format!(".delete-media[data-media-ref=\"{media_ref}\"]")).await;
+    wait_true(&page, &format!("{card} === false"), "delete-item → the card is gone").await;
+
+    browser.close().await.ok();
+    handle.await.ok();
+    let _ = std::fs::remove_dir_all(&profile);
+    let _ = std::fs::remove_file(&file_a);
+    let _ = std::fs::remove_file(&file_b);
+    drop(server);
+}
+
+/// The inline editor upload (the 🎞 button / drop on the markdown box) drives
+/// `POST /media`, reads the manifest `ref`, and inserts `![](/media/<ref>)` at the
+/// cursor with NO page reload — the DR contract for editor-support.js re-reading
+/// `ref` (not the retired `{media_id, media_ref, markdown}`) AND the no-refresh
+/// promise (a page reload would eat unsaved markdown). We seed a marker into the
+/// textarea and assert BOTH the embed and the marker coexist afterward.
+#[tokio::test]
+async fn inline_editor_upload_inserts_media_ref_in_browser() {
+    if !ffprobe_available() {
+        eprintln!("skipping inline editor upload e2e: ffprobe not found");
+        return;
+    }
+    let _e2e = e2e_lock().await;
+    let server: TestServer = spawn_test_server().await.expect("spawn harness");
+    let (mut browser, handle, profile) = launch().await;
+    let page = browser.new_page("about:blank").await.expect("new page");
+    add_virtual_authenticator(&page).await;
+    register_first_admin(&page, &server, "e2e-inline-admin").await;
+
+    // Create a page via the admin hub → the create handler redirects to
+    // `<page>?edit=1`, landing us in the editor (markdown box + media input).
+    page.goto(server.url("/admin/pages")).await.expect("goto /admin/pages");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let title = page
+        .find_element("form[hx-post='/pages'] input[name='page_title']")
+        .await
+        .expect("new-page title input");
+    title.click().await.expect("focus title");
+    title.type_str("E2E Inline Media").await.expect("type title");
+    click_selector(&page, "form[hx-post='/pages'] button[type=submit]").await;
+    wait_true(
+        &page,
+        "!!document.getElementById('page_markdown') && !!document.getElementById('media-upload-input')",
+        "create → the page editor renders",
+    )
+    .await;
+
+    // Seed a marker so we can prove the embed is APPENDED and no reload wiped it.
+    let _: bool = js(
+        &page,
+        "(function(){var t=document.getElementById('page_markdown');t.value='before-edit-marker';return true;})()",
+    )
+    .await;
+
+    // Inline upload → POST /media, read the manifest ref, insert ![](/media/<ref>).
+    let f = write_temp_fixture("e2e-inline", b"inline editor media bytes");
+    set_file_input(&page, "#media-upload-input", &[&f]).await;
+    wait_true(
+        &page,
+        "document.getElementById('page_markdown').value.indexOf('![](/media/') >= 0",
+        "inline upload → an ![](/media/<ref>) embed is inserted",
+    )
+    .await;
+    // The pre-existing text survived → no reload ate the edit (the DR no-refresh promise).
+    let survived: bool = js(
+        &page,
+        "document.getElementById('page_markdown').value.indexOf('before-edit-marker') >= 0",
+    )
+    .await;
+    assert!(survived, "the inline upload must NOT reload the page (unsaved markdown survives)");
+
+    browser.close().await.ok();
+    handle.await.ok();
+    let _ = std::fs::remove_dir_all(&profile);
+    let _ = std::fs::remove_file(&f);
+    drop(server);
 }

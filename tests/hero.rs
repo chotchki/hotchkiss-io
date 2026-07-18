@@ -68,14 +68,14 @@ async fn page_with_cover_renders_a_hero() {
             .unwrap(),
     );
     let resp = admin
-        .post(server.url("/admin/media/upload"))
+        .post(server.url("/media"))
         .multipart(form)
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "admin upload should succeed");
+    assert_eq!(resp.status(), StatusCode::CREATED, "admin upload should succeed");
     let j: serde_json::Value = resp.json().await.unwrap();
-    let media_ref = j["media_ref"].as_str().expect("media_ref in response").to_string();
+    let media_ref = j["ref"].as_str().expect("ref in manifest").to_string();
 
     // Set it as the page's cover through the editor save path. The editor is htmx,
     // so send HX-Request — the DI.3 responder returns a native 303 (not a 200) to a

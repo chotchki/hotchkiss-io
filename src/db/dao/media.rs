@@ -167,8 +167,8 @@ impl MediaDao {
         })
     }
 
-    /// Set just the visibility gate — the library UI's per-item control
-    /// (`POST /admin/media/{id}/visibility`). `None` = public.
+    /// Set just the visibility gate — the library UI's per-item control, now
+    /// driven through `PUT /media/<ref> {min_role}` (Phase DR). `None` = public.
     pub async fn set_min_role(
         executor: impl SqliteExecutor<'_>,
         media_id: i64,
@@ -398,23 +398,11 @@ impl MediaVariantDao {
         Ok(variants)
     }
 
-    /// Delete one stored encoding. The disk bytes are NOT swept here — the same
-    /// sha may back another media item (content-addressed dedup); an orphan sweep
-    /// handles unreferenced files (BZ.8).
-    pub async fn delete_by_id(executor: impl SqliteExecutor<'_>, variant_id: i64) -> Result<()> {
-        query!(
-            r#"DELETE FROM media_variant WHERE variant_id = ?1"#,
-            variant_id
-        )
-        .execute(executor)
-        .await?;
-        Ok(())
-    }
-
     /// Wipe every variant of an item — the first half of a complete-replace
     /// (Phase DO). Executor-generic so it shares the PATCH handler's transaction
-    /// with the re-inserts + `MediaDao::update_facts`. Disk bytes go cold (same
-    /// content-addressed no-sweep contract as `delete_by_id`).
+    /// with the re-inserts + `MediaDao::update_facts`. Disk bytes go cold — the
+    /// same sha may back another media item (content-addressed dedup); an orphan
+    /// sweep handles unreferenced files (BZ.8), never an inline delete.
     pub async fn delete_all_for_media(
         executor: impl SqliteExecutor<'_>,
         media_id: i64,

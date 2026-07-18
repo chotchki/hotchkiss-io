@@ -1,5 +1,4 @@
 use axum::{
-    extract::DefaultBodyLimit,
     middleware::from_fn,
     routing::{delete, get, post},
     Router,
@@ -37,23 +36,12 @@ pub fn admin_router() -> Router<AppState> {
         // draft (Phase CU) — same two-path-segment shape as /feature.
         .route("/pages/{page_id}/publish", post(pages::publish_now))
         .route("/pages/{page_id}/unpublish", post(pages::unpublish))
-        // Media library (Phase BZ). Upload disables the body limit for video.
+        // Media library PAGE (Phase BZ) — the HTML admin UI. All MUTATIONS moved to
+        // the canonical `/media` REST surface (Phase DR): the library JS drives
+        // `POST /media`, `POST /media/<ref>/variants`, `PUT`/`DELETE /media/<ref>`,
+        // `DELETE /media/<ref>/variants/<url_key>`. This route is the page only,
+        // distinct from `GET /media` (the JSON collection).
         .route("/media", get(media::show_media_library))
-        .route(
-            "/media/upload",
-            post(media::upload_media).layer(DefaultBodyLimit::disable()),
-        )
-        .route(
-            "/media/{media_id}/encode",
-            post(media::add_encode).layer(DefaultBodyLimit::disable()),
-        )
-        .route("/media/{media_id}/rename", post(media::rename_media))
-        .route(
-            "/media/{media_id}/visibility",
-            post(media::set_media_visibility),
-        )
-        .route("/media/variant/{variant_id}", delete(media::delete_variant))
-        .route("/media/{media_id}", delete(media::delete_media))
         // API keys (Phase CA): generate (shown once) / list / revoke your own.
         .route(
             "/api-keys",

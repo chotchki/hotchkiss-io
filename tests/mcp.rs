@@ -331,7 +331,12 @@ async fn media_upload_recipe_gives_a_curl() {
         json!({}),
     )
     .await;
-    assert!(body.contains("/admin/media/upload"), "targets the upload endpoint: {body}");
+    assert!(body.contains("POST https://"), "the recipe curls POST to the server: {body}");
+    assert!(body.contains("/media"), "targets the /media surface: {body}");
+    assert!(
+        !body.contains("/admin/media/upload"),
+        "the retired /admin/media/upload route must be gone: {body}"
+    );
     assert!(body.contains("curl"), "it's a curl: {body}");
 }
 

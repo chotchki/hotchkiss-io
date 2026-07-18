@@ -331,38 +331,44 @@ runs once the stat passed). Gating + nosniff + CORP per §4b/4c. EXCLUDED from
 
 ---
 
-## 7. Ingest — `/admin/media` (admin-gated)  [SHIPPED]
+## 7. Ingest — the media library (`GET /admin/media` page + the canonical `/media` surface)  [SHIPPED; admin UI migrated onto `/media` in DR]
 
-`upload_media` streams each file part through `ingest_multipart` → stage → commit →
-`ffprobe` (never trusting the filename: `.stl`/`.3mf`/`.scad` by ext, image-vs-video by
-`format.duration`, audio by its first non-`attached_pic` AUDIO stream). All parts in one
-upload GROUP into one item; the item kind is the **DOMINANT** kind (`dominant_kind`: a
-model/video/audio beats an image — so a render grouped with a model stays a viewer,
-order-independent). Then best-effort derived variants:
+`GET /admin/media` is the HTML library PAGE; every MUTATION goes through the canonical
+`/media` REST surface (§5) — the admin JS (`media-upload.js`) drives `POST /media`,
+`POST …/variants`, `PUT`/`DELETE /media/<ref>`, `DELETE …/variants/<key>` (DR). The
+shared ingest core `ingest_new_item` (behind `POST /media`) streams each file part through
+`ingest_multipart` → stage → commit → `ffprobe` (never trusting the filename:
+`.stl`/`.3mf`/`.scad` by ext, image-vs-video by `format.duration`, audio by its first
+non-`attached_pic` AUDIO stream). All parts in one upload GROUP into one item; the item
+kind is the **DOMINANT** kind (`dominant_kind`: a model/video/audio beats an image — so a
+render grouped with a model stays a viewer, order-independent). Then best-effort derived
+variants:
 - **Poster** (video + audio): ffmpeg frame-grab → AVIF (video thumbnail; audio pulls the
   `attached_pic` cover art → library thumb + lock-screen artwork).
 - **Responsive ladder** (image, CN): width-stepped AVIF downscales (480/960, skip ≥
   source), each a content-addressed `image/avif` variant carrying its pixel width.
-`add_encode` appends a variant to an existing item BY id (another codec, or a poster).
-Uploads POST via `XMLHttpRequest` for a native `<progress>` bar (CK). A file ffprobe
-can't type → `MediaKind::File` (mime by extension, octet-stream fallback) — a graceful
-download, not a rejection; but a MISSING ffprobe errors loudly (deploy misconfig).
-Codec policy: video sources ordered HEVC-before-AV1 (Safari AV1 `<video>` is jerky);
-audio UNIVERSAL-only (aac→audio/mp4, mp3→audio/mpeg, flac→audio/flac; opus/vorbis/alac
-bail → File — AAC m4b is canonical). Visibility: `upload_media` takes a `min_role`
+`append_variants` (behind `POST /media/<ref>/variants`) adds a variant to an existing item
+(another codec, or a poster). Uploads POST via `XMLHttpRequest` for a native `<progress>`
+bar (CK). A file ffprobe can't type → `MediaKind::File` (mime by extension, octet-stream
+fallback) — a graceful download, not a rejection; but a MISSING ffprobe errors loudly
+(deploy misconfig). Codec policy: video sources ordered HEVC-before-AV1 (Safari AV1
+`<video>` is jerky); audio UNIVERSAL-only (aac→audio/mp4, mp3→audio/mpeg, flac→audio/flac;
+opus/vorbis/alac bail → File — AAC m4b is canonical). Visibility: ingest takes a `min_role`
 multipart field (known gate roles only; absent/garbage → public — `fab publish` sends
 nothing); the editor drop sends the page's current visibility.
 
 **Shipped ingest contracts + asymmetries:**
-- **Response bodies (consumers depend on these):** `upload_media` → `200 {media_id,
-  media_ref, markdown:"![](/media/<ref>)"}`; `patch_media_by_ref` → `200 {media_ref, kind,
-  variants:[{url_key,mime,bytes}]}` (fab-gui's confirm-swap); `add_encode` / `rename` /
-  `visibility` / `delete_media` / `delete_variant` → `htmx_refresh()`. DQ moves these onto
-  `201`+`Location`+manifest.
-- **`add_encode` is ASYMMETRIC with upload/patch:** it does NOT call `add_derived_variants`
-  (an image added via add-encode gets NO responsive ladder; a video/audio gets NO poster)
-  and does NO tx / NO `update_facts` re-derive. DQ.3 (`POST …/variants`) must decide: match
-  upload's derivation, or keep the append-only shape.
+- **Response bodies (consumers depend on these):** the server-mints-identity creates
+  (`POST /media`, `POST …/variants`) → `201` + `Location: /media/<ref>` + the item manifest
+  (`{ref, title, min_role, variants:[{href,mime,bytes,…}], controls}`); `PUT /media/<ref>`
+  (metadata) + `PUT …/variants` (replace-all) → `200` + the manifest; `DELETE …` → `204`.
+  The retired `/admin/media/{upload,encode,rename,visibility,delete,variant}` htmx handlers
+  (which returned `htmx_refresh()` / an ad-hoc `{media_id, media_ref, markdown}`) are GONE
+  (DR.2) — the library reloads on the REST responses instead.
+- **`append_variants` is APPEND-ONLY (DQ.3 decision):** unlike upload/replace it does NOT
+  call `add_derived_variants` (an added image gets NO responsive ladder; a video/audio gets
+  NO poster) and does NO tx / NO `update_facts` re-derive — you're adding a SPECIFIC variant
+  (a codec, a poster, a mesh LOD), not re-ingesting. Use `PUT …/variants` to replace + re-derive.
 - **Title fallback:** `title` field → a field literally named `media_ref` used as a TITLE
   candidate (NOT the ref — the ref is always a fresh UUIDv7) → filename via
   `strip_media_suffixes` (drops ext + a trailing codec tag). Empty file parts are silently
@@ -399,13 +405,13 @@ hx-trigger="load" hx-swap="outerHTML">`; `render_embed_html` dispatches by kind:
   variants only (an image variant is thumbnail, never mis-loaded as mesh).
 - **file** → a styled `download_button` (glyph + name + size, `download` attr).
 
-**Selector sharing (DP.3 / DR):** the embed's Stl arm (`media_select::viewer_mesh` /
-`largest_mesh`) and Image arm (`media_select::image_ladder`) now delegate to the ONE
-shared selector (DP.3), so the negotiation (§5), the manifest, and the embed pick
-variants the same way. **STILL inline (→ DR cleanup):** the COVER helpers `cover_url_for`
-(smallest image thumbnail) / `cover_hero_for` (largest image + srcset) roll their own
-image-variant picks — DR folds them onto `media_select` (`image_ladder` / `largest`) so
-covers share the selector too.
+**Selector sharing (DP.3 / DR.4):** the embed's Stl arm (`media_select::viewer_mesh` /
+`largest_mesh`), Image arm (`media_select::image_ladder`), AND the COVER helpers
+`cover_url_for` (smallest image thumbnail) / `cover_hero_for` (largest image + srcset) all
+delegate to the ONE shared selector — so the negotiation (§5), the manifest, the embed, and
+covers pick variants the same way. `cover_url_for` = `image_ladder().first()` (smallest),
+`cover_hero_for` = `image_ladder().last()` (largest) + the ≥2-sizes srcset, each with a
+first-image fallback for a legacy unresized cover (DR.4 retired their hand-rolled SQL).
 
 **Authored references normalize to the stable `media_ref` (→ Phase DS).** On SAVE,
 `rewrite_site_links` (already relativizes site links) ALSO rewrites any
@@ -454,8 +460,8 @@ resolves through the stable ref.
   full-URL / bare-token); empty clears, a non-empty-UNRESOLVABLE ref is LEFT ALONE (a typo
   can't wipe the cover — the old exact-match `find_by_ref` on the raw string silently wiped it).
 - **Inline editor upload** (`editor-support.js`): drop on the markdown box (or the 🎞 button)
-  → async `POST /admin/media/upload` → inserts `![](/media/<ref>)` at the cursor with NO page
-  refresh (the old attachment upload `htmx_refresh()`'d + ate unsaved edits).
+  → async `POST /media` → reads the manifest `ref` → inserts `![](/media/<ref>)` at the cursor
+  with NO page refresh (DR; the old attachment upload `htmx_refresh()`'d + ate unsaved edits).
 
 ---
 
@@ -476,7 +482,7 @@ resolves through the stable ref.
   not a `url_key`) — a bare `GET /media/<ref>` used to 404 (the "bowtie" regression), which
   is WHY the one-segment ref route resolves to bytes at all (§5).
 - The site does NOT decimate — `fab publish` provides the low-res mesh (grouped item or
-  `add_encode`), like it provides video encodes. STL variants carry no `width`, so `bytes`
+  `POST …/variants`), like it provides video encodes. STL variants carry no `width`, so `bytes`
   is the fidelity key, and because `variant_id` fetch order is insertion order, the render's
   `sort_by_key(bytes)` is LOAD-BEARING for the viewer(smallest) / download(largest) picks.
 - **`fab publish` initial-upload contract** (distinct from §10's round-trip export): upload
@@ -532,15 +538,17 @@ The deltas between SHIPPED and TARGET — the code-alignment work (Phase DP), sc
   (create, `201`+`Location`+manifest), `POST /media/<ref>/variants` (add, append-only),
   `PUT /media/<ref>/variants` (replace-all — re-verbed from DO's `PATCH /media/<ref>`),
   `PUT /media/<ref>` (metadata, absent-keeps), `DELETE /media/<ref>` + `…/variants/<key>`.
-  **Zero PATCH.** `POST /media` + the `PUT …/variants` re-verb share the ingest cores
-  with the admin `upload_media` / `add_encode`, so they can't drift (DR migrates the
-  admin UI onto them).
+  **Zero PATCH.** The create + add-variant handlers share the ingest cores
+  (`ingest_new_item` / `append_variants`), so the surface can't drift.
 - **✓ SHIPPED (DQ.5): `GET /media` admin gate** — the list-all self-gates to Admin
   (`403` for a non-admin — the safe-method default would leak the whole library, §4a).
-- **Admin-route migration** — fold `/admin/media/{upload,encode,rename,visibility,delete,
-  variant}` onto the `/media/<ref>[/variants]` surface (templates + `media-upload.js` +
-  `editor-support.js`). SCOPE CALL: inside DP, or a follow-on so DP stays "canonical
-  `/media` surface + fab-gui contract".
+- **✓ SHIPPED (DR): admin-route migration** — the admin library (`media.html` +
+  `media-upload.js`) + the inline editor upload (`editor-support.js`) drive the canonical
+  `/media` surface; the `/admin/media/{upload,encode,rename,visibility,delete,variant}`
+  htmx handlers + routes are RETIRED (DR.2), and the covers adopt the shared selector
+  (DR.4). `GET /admin/media` stays as the library PAGE. Covered by HTTP tests + real-Chrome
+  e2e (`admin_media_library_full_crud_in_browser`, `inline_editor_upload_inserts_media_ref_in_browser`).
+  Kept-as-JS-not-htmx is deliberate — revisit at htmx v4 (see the decision note).
 - **✓ SHIPPED (DP): the slicer button** emits `?model=/media/<ref>?format=scad` (ref in
   the path, format explicit) instead of the per-save `url_key`.
 - **✓ SHIPPED (DP): shared variant selector** — `web/features/media_select.rs` (format

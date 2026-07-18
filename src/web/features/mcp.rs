@@ -666,7 +666,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "How to upload NEW media (images/video/files) out-of-band: returns a ready-to-run curl for POST /admin/media/upload with your API key. The MCP tools reference EXISTING media (list_media + cover_ref); this is the lane for adding new bytes. The response gives a media_ref to reference."
+        description = "How to upload NEW media (images/video/files) out-of-band: returns a ready-to-run curl for POST /media with your API key. The MCP tools reference EXISTING media (list_media + cover_ref); this is the lane for adding new bytes. The response is the item manifest, whose `ref` you reference."
     )]
     async fn media_upload_recipe(
         &self,
@@ -674,14 +674,14 @@ impl McpServer {
     ) -> Result<Json<MediaUploadRecipe>, ErrorData> {
         let host = crate::web::util::host::request_host(&parts.headers, &parts.uri);
         let curl = format!(
-            "curl -X POST https://{host}/admin/media/upload \\\n  \
+            "curl -X POST https://{host}/media \\\n  \
              -H \"Authorization: Bearer $HIO_TOKEN\" \\\n  \
              -F \"file=@/path/to/your-file\" \\\n  \
              -F \"title=Optional title\" \\\n  \
              -F \"min_role=Family\"   # optional gate; omit for public"
         );
-        let notes = "Response JSON: {\"media_id\":.., \"media_ref\":\"<ref>\", \"markdown\":\"![](/media/<ref>)\"}. \
-             Reference <media_ref> via create_page/update_page cover_ref, or embed ![](/media/<ref>) in markdown."
+        let notes = "Returns 201 + the item manifest JSON: {\"ref\":\"<ref>\", \"title\":.., \"variants\":[..], ..}. \
+             Reference <ref> via create_page/update_page cover_ref, or embed ![](/media/<ref>) in markdown."
             .to_string();
         Ok(Json(MediaUploadRecipe { curl, notes }))
     }

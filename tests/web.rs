@@ -1609,7 +1609,7 @@ async fn media_upload_serve_and_embed_vertical() {
         StatusCode::UNAUTHORIZED
     );
     assert_eq!(
-        client().post(server.url("/admin/media/upload")).send().await.unwrap().status(),
+        client().post(server.url("/media")).send().await.unwrap().status(),
         StatusCode::UNAUTHORIZED
     );
 
@@ -1627,25 +1627,24 @@ async fn media_upload_serve_and_embed_vertical() {
             .unwrap(),
     );
     let resp = admin
-        .post(server.url("/admin/media/upload"))
+        .post(server.url("/media"))
         .multipart(form)
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "admin upload should succeed");
+    assert_eq!(resp.status(), StatusCode::CREATED, "admin upload should succeed");
     let j: serde_json::Value = resp.json().await.unwrap();
-    let media_ref = j["media_ref"].as_str().expect("media_ref in response").to_string();
+    let media_ref = j["ref"].as_str().expect("ref in manifest").to_string();
     assert!(!media_ref.is_empty());
 
     // The library lists it.
     let lib = admin.get(server.url("/admin/media")).send().await.unwrap().text().await.unwrap();
     assert!(lib.contains(&media_ref), "library should list {media_ref}");
 
-    // Rename → the new title shows in the library.
-    let media_id = j["media_id"].as_i64().expect("media_id in response");
+    // Rename → the new title shows in the library (PUT /media/<ref> {title}, DR).
     let resp = admin
-        .post(server.url(&format!("/admin/media/{media_id}/rename")))
-        .form(&[("title", "Bonnie Mugshot")])
+        .put(server.url(&format!("/media/{media_ref}")))
+        .json(&serde_json::json!({ "title": "Bonnie Mugshot" }))
         .send()
         .await
         .unwrap();
@@ -1668,30 +1667,35 @@ async fn media_upload_serve_and_embed_vertical() {
                 .unwrap(),
         );
         let resp = admin
-            .post(server.url(&format!("/admin/media/{media_id}/encode")))
+            .post(server.url(&format!("/media/{media_ref}/variants")))
             .multipart(form)
             .send()
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK, "add-encode (and dedup re-add) should be OK");
+        assert_eq!(
+            resp.status(),
+            StatusCode::CREATED,
+            "add-encode (and dedup re-add) should be 201"
+        );
     }
 
-    // Per-stream delete: pull a variant delete link from the library and use it.
+    // Per-stream delete: pull a variant's url_key from the library card and DELETE
+    // it via the canonical surface (DELETE /media/<ref>/variants/<url_key>, DR).
     let lib = admin.get(server.url("/admin/media")).send().await.unwrap().text().await.unwrap();
-    let variant_id = lib
-        .split("/admin/media/variant/")
+    let del_key = lib
+        .split("data-url-key=\"")
         .nth(1)
-        .expect("a variant delete link in the library")
+        .expect("a variant delete control in the library")
         .split('"')
         .next()
         .unwrap()
         .to_string();
     let resp = admin
-        .delete(server.url(&format!("/admin/media/variant/{variant_id}")))
+        .delete(server.url(&format!("/media/{media_ref}/variants/{del_key}")))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "per-stream delete should succeed");
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT, "per-stream delete should succeed");
 
     // The embed renders an <img> pointing at /media/file/<url_key>.
     let embed = reqwest::get(server.url(&format!("/media/embed/{media_ref}")))
@@ -1782,14 +1786,14 @@ async fn media_streams_large_generic_file_and_serves_it_back() {
             .unwrap(),
     );
     let resp = admin
-        .post(server.url("/admin/media/upload"))
+        .post(server.url("/media"))
         .multipart(form)
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "streaming upload should succeed");
+    assert_eq!(resp.status(), StatusCode::CREATED, "streaming upload should succeed");
     let j: serde_json::Value = resp.json().await.unwrap();
-    let media_ref = j["media_ref"].as_str().expect("media_ref").to_string();
+    let media_ref = j["ref"].as_str().expect("ref").to_string();
 
     // It ingested as a generic File → the embed is a download <a>, not an img/video.
     let embed = reqwest::get(server.url(&format!("/media/embed/{media_ref}")))
@@ -1844,7 +1848,7 @@ async fn media_patch_replaces_variant_set_in_place() {
     // Upload the original → item ref R.
     let form = reqwest::multipart::Form::new().part("file", bin_part(old_bytes, "model.old.bin"));
     let up: serde_json::Value = admin
-        .post(server.url("/admin/media/upload"))
+        .post(server.url("/media"))
         .multipart(form)
         .send()
         .await
@@ -1852,13 +1856,12 @@ async fn media_patch_replaces_variant_set_in_place() {
         .json()
         .await
         .unwrap();
-    let media_ref = up["media_ref"].as_str().unwrap().to_string();
-    let media_id = up["media_id"].as_i64().unwrap();
+    let media_ref = up["ref"].as_str().unwrap().to_string();
 
-    // Title it, to prove the title survives the swap.
+    // Title it, to prove the title survives the swap (PUT /media/<ref> {title}).
     admin
-        .post(server.url(&format!("/admin/media/{media_id}/rename")))
-        .form(&[("title", "Widget")])
+        .put(server.url(&format!("/media/{media_ref}")))
+        .json(&serde_json::json!({ "title": "Widget" }))
         .send()
         .await
         .unwrap();
@@ -1971,7 +1974,7 @@ async fn media_patch_authz_guards_and_gate_preserved() {
         .part("file", bin_part(bytes, "book.bin"))
         .text("min_role", "Family");
     let up: serde_json::Value = admin
-        .post(server.url("/admin/media/upload"))
+        .post(server.url("/media"))
         .multipart(form)
         .send()
         .await
@@ -1979,7 +1982,7 @@ async fn media_patch_authz_guards_and_gate_preserved() {
         .json()
         .await
         .unwrap();
-    let media_ref = up["media_ref"].as_str().unwrap().to_string();
+    let media_ref = up["ref"].as_str().unwrap().to_string();
 
     // Empty PUT (no file parts) → 400, and it's rejected BEFORE the destructive
     // tx (a replace to zero variants is a DELETE).
@@ -2249,7 +2252,7 @@ async fn media_get_negotiates_and_options_manifest() {
     let scad = bin_part(b"cube([10,10,10]);".to_vec(), "model.scad");
     let mesh = bin_part((0..8000u32).map(|i| i as u8).collect(), "model.3mf");
     let up: serde_json::Value = admin
-        .post(server.url("/admin/media/upload"))
+        .post(server.url("/media"))
         .multipart(reqwest::multipart::Form::new().part("file", scad).part("file", mesh))
         .send()
         .await
@@ -2257,7 +2260,7 @@ async fn media_get_negotiates_and_options_manifest() {
         .json()
         .await
         .unwrap();
-    let r = up["media_ref"].as_str().unwrap().to_string();
+    let r = up["ref"].as_str().unwrap().to_string();
 
     // OPTIONS → the manifest; map each variant type → its href (the ground truth).
     let opts = admin
@@ -2330,7 +2333,7 @@ async fn media_get_negotiates_and_options_manifest() {
 
     // Gate: OPTIONS on a Family item → anon 404 (≡ miss), admin 200.
     let gated: serde_json::Value = admin
-        .post(server.url("/admin/media/upload"))
+        .post(server.url("/media"))
         .multipart(
             reqwest::multipart::Form::new()
                 .part("file", bin_part(b"secret".to_vec(), "g.bin"))
@@ -2342,7 +2345,7 @@ async fn media_get_negotiates_and_options_manifest() {
         .json()
         .await
         .unwrap();
-    let gr = gated["media_ref"].as_str().unwrap();
+    let gr = gated["ref"].as_str().unwrap();
     assert_eq!(
         reqwest::Client::new()
             .request(reqwest::Method::OPTIONS, server.url(&format!("/media/{gr}")))
@@ -2405,22 +2408,24 @@ async fn media_records_storage_root_hint() {
             .unwrap(),
     );
     let resp = admin
-        .post(server.url("/admin/media/upload"))
+        .post(server.url("/media"))
         .multipart(form)
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.status(), StatusCode::CREATED);
     let j: serde_json::Value = resp.json().await.unwrap();
-    let media_id = j["media_id"].as_i64().unwrap();
-    let media_ref = j["media_ref"].as_str().unwrap().to_string();
+    let media_ref = j["ref"].as_str().unwrap().to_string();
 
     // The variant carries a non-NULL storage_root pointing at a real media root dir.
-    let row = sqlx::query("SELECT storage_root FROM media_variant WHERE media_id = ?1")
-        .bind(media_id)
-        .fetch_one(&server.pool)
-        .await
-        .unwrap();
+    let row = sqlx::query(
+        "SELECT v.storage_root FROM media_variant v \
+         JOIN media m ON m.media_id = v.media_id WHERE m.media_ref = ?1",
+    )
+    .bind(&media_ref)
+    .fetch_one(&server.pool)
+    .await
+    .unwrap();
     let storage_root: Option<String> = row.get("storage_root");
     let root = storage_root.expect("storage_root hint persisted on the variant");
     assert!(
@@ -2484,14 +2489,14 @@ async fn media_serve_neutralizes_active_content() {
             .unwrap(),
     );
     let resp = admin
-        .post(server.url("/admin/media/upload"))
+        .post(server.url("/media"))
         .multipart(form)
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.status(), StatusCode::CREATED);
     let j: serde_json::Value = resp.json().await.unwrap();
-    let media_ref = j["media_ref"].as_str().unwrap().to_string();
+    let media_ref = j["ref"].as_str().unwrap().to_string();
 
     let embed = reqwest::get(server.url(&format!("/media/embed/{media_ref}")))
         .await
@@ -3424,13 +3429,13 @@ async fn upload_test_file(
         form = form.text("min_role", r.to_string());
     }
     let resp = admin
-        .post(server.url("/admin/media/upload"))
+        .post(server.url("/media"))
         .multipart(form)
         .send()
         .await
         .unwrap();
     assert!(resp.status().is_success(), "upload failed: {}", resp.status());
-    resp.json::<serde_json::Value>().await.unwrap()["media_ref"]
+    resp.json::<serde_json::Value>().await.unwrap()["ref"]
         .as_str()
         .unwrap()
         .to_string()
@@ -4659,14 +4664,14 @@ async fn scad_upload_serves_openscad_with_corp_and_slicer_embed() {
             .unwrap(),
     );
     let resp = admin
-        .post(server.url("/admin/media/upload"))
+        .post(server.url("/media"))
         .multipart(form)
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "admin scad upload succeeds");
+    assert_eq!(resp.status(), StatusCode::CREATED, "admin scad upload succeeds");
     let j: serde_json::Value = resp.json().await.unwrap();
-    let media_ref = j["media_ref"].as_str().expect("media_ref").to_string();
+    let media_ref = j["ref"].as_str().expect("ref").to_string();
 
     // The embed offers the slicer button; pull the served url_key from its href.
     let embed = admin

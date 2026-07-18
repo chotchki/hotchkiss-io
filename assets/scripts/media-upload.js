@@ -1,6 +1,8 @@
-// Media library upload (Phase BZ). Drag-drop or click-to-select → POST the files
-// to /admin/media/upload (multipart) → on success reload the library. Also wires
-// the "Copy ![]()" buttons. Zero deps; the page is admin-gated server-side.
+// Media library UI (Phase BZ; DR — driven off the canonical /media REST surface).
+// Drag-drop / click-to-select → POST /media; add-encode → POST /media/<ref>/variants;
+// rename/visibility → PUT /media/<ref>; delete → DELETE /media/<ref>[/variants/<key>].
+// On success we reload the library (the REST responses are JSON/204, not htmx). Zero
+// deps; the page is admin-gated server-side (the mutation layer gates the writes).
 (function () {
   const drop = document.getElementById("media-drop");
   const input = document.getElementById("media-file-input");
@@ -53,7 +55,7 @@
     const vis = document.getElementById("media-upload-visibility");
     if (vis && vis.value !== "Public") fd.append("min_role", vis.value);
     if (drop) drop.classList.add("opacity-50", "pointer-events-none");
-    UploadProgress.xhrUpload("/admin/media/upload", fd, showProgress)
+    UploadProgress.xhrUpload("/media", fd, showProgress)
       .then(() => location.reload())
       .catch((e) => {
         setStatus("Upload failed: " + e);
@@ -120,16 +122,12 @@
   // to an existing item. Fixes needing all encodes in one simultaneous drop.
   document.querySelectorAll(".add-encode-input").forEach((inp) => {
     inp.addEventListener("change", () => {
-      const id = inp.dataset.mediaId;
+      const ref = inp.dataset.mediaRef;
       const files = Array.from(inp.files || []);
       if (!files.length) return;
       const fd = new FormData();
       for (const f of files) fd.append("file", f, f.name);
-      UploadProgress.xhrUpload(
-        "/admin/media/" + id + "/encode",
-        fd,
-        showProgress,
-      )
+      UploadProgress.xhrUpload("/media/" + ref + "/variants", fd, showProgress)
         .then(() => location.reload())
         .catch((e) => {
           setStatus("Add failed: " + e);
@@ -138,22 +136,62 @@
     });
   });
 
-  // Rename the display title (the ref stays fixed so embeds don't break).
+  // Rename the display title (the ref stays fixed so embeds don't break) →
+  // PUT /media/<ref> {title}. An absent min_role KEEPS the gate (fail-safe).
   document.querySelectorAll(".rename-media").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const id = btn.dataset.mediaId;
+      const ref = btn.dataset.mediaRef;
       const next = window.prompt(
         "Rename media (display title):",
         btn.dataset.title || "",
       );
       if (next === null) return;
-      fetch("/admin/media/" + id + "/rename", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ title: next }),
+      fetch("/media/" + ref, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: next }),
       })
         .then((r) => (r.ok ? location.reload() : Promise.reject(r.status)))
         .catch((e) => setStatus("Rename failed: " + e));
+    });
+  });
+
+  // Change the per-item visibility gate → PUT /media/<ref> {min_role}. "Public"
+  // clears the gate; a role sets it. Reload so the badge + selector re-render.
+  document.querySelectorAll(".media-visibility").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      fetch("/media/" + sel.dataset.mediaRef, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ min_role: sel.value }),
+      })
+        .then((r) => (r.ok ? location.reload() : Promise.reject(r.status)))
+        .catch((e) => setStatus("Visibility change failed: " + e));
+    });
+  });
+
+  // Delete ONE stored stream → DELETE /media/<ref>/variants/<url_key>.
+  document.querySelectorAll(".delete-variant").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!window.confirm("Delete this stream?")) return;
+      fetch(
+        "/media/" + btn.dataset.mediaRef + "/variants/" + btn.dataset.urlKey,
+        {
+          method: "DELETE",
+        },
+      )
+        .then((r) => (r.ok ? location.reload() : Promise.reject(r.status)))
+        .catch((e) => setStatus("Delete failed: " + e));
+    });
+  });
+
+  // Delete the whole item → DELETE /media/<ref> (CASCADEs its variants).
+  document.querySelectorAll(".delete-media").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!window.confirm("Delete this media item?")) return;
+      fetch("/media/" + btn.dataset.mediaRef, { method: "DELETE" })
+        .then((r) => (r.ok ? location.reload() : Promise.reject(r.status)))
+        .catch((e) => setStatus("Delete failed: " + e));
     });
   });
 

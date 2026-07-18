@@ -15,7 +15,6 @@ use axum::extract::{Multipart, Path, State};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use http::{header, StatusCode};
-use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::db::dao::crypto_key::CryptoKey;
@@ -28,7 +27,6 @@ use crate::media::{media_url_key, MediaStore};
 use crate::web::authentication_state::AuthenticationState;
 use crate::web::features::media::{build_manifest, render_embed_html};
 use crate::web::features::top_bar::TopBar;
-use crate::web::htmx_responses::htmx_refresh;
 use crate::web::{app_error::AppError, app_state::AppState, html_template::HtmlTemplate, session::SessionData};
 
 /// `201 Created` + `Location` + the item manifest — the response for the DQ
@@ -68,7 +66,6 @@ pub struct StorageRow {
 }
 
 pub struct MediaCard {
-    pub media_id: i64,
     pub media_ref: String,
     pub title: String,
     pub kind: String,
@@ -89,7 +86,9 @@ pub struct MediaCard {
 }
 
 pub struct VariantRow {
-    pub variant_id: i64,
+    /// The public HMAC token — the per-variant `DELETE /media/<ref>/variants/<url_key>`
+    /// target the admin UI addresses (DR).
+    pub url_key: String,
     pub label: String,
     pub size: String,
 }
@@ -117,7 +116,7 @@ pub async fn show_media_library(
         let variant_rows = variants
             .iter()
             .map(|v| VariantRow {
-                variant_id: v.variant_id,
+                url_key: v.url_key.clone(),
                 label: v.codecs.clone().unwrap_or_else(|| v.mime.clone()),
                 size: format_bytes(v.bytes),
             })
@@ -129,7 +128,6 @@ pub async fn show_media_library(
         let visibility = m.visibility_label();
         let visibility_rank = m.min_role_rank();
         cards.push(MediaCard {
-            media_id: m.media_id,
             media_ref: m.media_ref,
             title,
             kind: m.kind,
@@ -219,9 +217,9 @@ struct MediaTextFields {
 /// Stream every file part straight to the content store (O(chunk) memory —
 /// hashed + written as it arrives, NEVER buffered whole, so a multi-GB upload
 /// works without OOMing) and ffprobe each stored file; collect the parsed text
-/// fields alongside. Shared by `upload_media` (mint a new item) and
-/// `patch_media_by_ref` (complete-replace an existing item's variants), so the
-/// one streaming path can't drift between the two.
+/// fields alongside. Shared by `ingest_new_item` (behind `POST /media`) and
+/// `replace_media_variants` (`PUT …/variants` — complete-replace an existing item's
+/// variants), so the one streaming path can't drift between the two.
 async fn ingest_multipart(
     store: &MediaStore,
     mut multipart: Multipart,
@@ -273,6 +271,18 @@ async fn ingest_multipart(
     Ok((files, fields))
 }
 
+/// Accept ONLY the known gate roles as a media visibility value; everything else —
+/// empty, "Public", garbage, absent — is public (`None`). The ingest `min_role`
+/// multipart field (upload default, DC.5) parses through this; per-item RE-gating
+/// after creation is `PUT /media/<ref> {min_role}` (`update_media_metadata`), which
+/// KEEPS an absent value rather than clearing.
+fn parse_media_visibility(value: &str) -> Option<String> {
+    match value.trim() {
+        v @ ("Registered" | "Family" | "Admin") => Some(v.to_string()),
+        _ => None,
+    }
+}
+
 /// After the variant rows exist, generate the derived variants that depend on the
 /// item's kind — width-stepped AVIFs for an image (srcset), a frame-grab poster
 /// for video/audio (thumbnail + lock-screen artwork). Best-effort (each logs on
@@ -293,8 +303,8 @@ async fn add_derived_variants(
     }
 }
 
-/// Ingest a multipart into a NEW item + its variants — the shared core of the
-/// admin `upload_media` and DQ's `create_media` (`POST /media`). Streams + probes,
+/// Ingest a multipart into a NEW item + its variants — the shared core behind
+/// `create_media` (`POST /media`; DR retired the old admin `upload_media`). Streams + probes,
 /// mints the opaque UUIDv7 ref, derives kind/dims from the dominant file, inserts
 /// the variants, runs the best-effort derived variants (image srcset / A-V poster),
 /// and returns the item + its FINAL variant set. `None` = no files in the upload
@@ -370,29 +380,10 @@ async fn ingest_new_item(
     Ok(Some((media, variants)))
 }
 
-/// `POST /admin/media/upload` — the admin library's create (htmx). Returns the
-/// `media_id` / `media_ref` / ready-to-paste markdown the editor JS inserts. The
-/// canonical REST create is `create_media` (`POST /media`, DQ.2); both share
-/// `ingest_new_item`, so they can't drift. (DR migrates the library onto that.)
-pub async fn upload_media(
-    State(state): State<AppState>,
-    multipart: Multipart,
-) -> Result<Response, AppError> {
-    let Some((media, _variants)) = ingest_new_item(&state, multipart).await? else {
-        return Ok((StatusCode::BAD_REQUEST, "No files in the upload").into_response());
-    };
-    Ok(Json(json!({
-        "media_id": media.media_id,
-        "media_ref": media.media_ref,
-        "markdown": format!("![](/media/{})", media.media_ref),
-    }))
-    .into_response())
-}
-
 /// `POST /media` — the canonical REST create (DQ.2). Ingests a new item (server
 /// mints the UUIDv7 ref) → `201 Created` + `Location: /media/<ref>` + the manifest.
 /// Admin-gated FOR FREE by `require_admin_for_mutations` (a POST → the admin
-/// fallback). Shares `ingest_new_item` with the admin `upload_media`.
+/// fallback). The admin library (DR) + the inline editor upload both drive this.
 pub async fn create_media(
     State(state): State<AppState>,
     multipart: Multipart,
@@ -557,26 +548,11 @@ async fn append_variants(
     Ok(saw_file)
 }
 
-/// `POST /admin/media/{media_id}/encode` — append a variant to an item BY id (the
-/// admin library, htmx). Shares `append_variants` with the canonical
-/// `add_media_variant` (`POST /media/<ref>/variants`, DQ.3).
-pub async fn add_encode(
-    State(state): State<AppState>,
-    Path(media_id): Path<i64>,
-    multipart: Multipart,
-) -> Result<Response, AppError> {
-    if !append_variants(&state, media_id, multipart).await? {
-        return Ok((StatusCode::BAD_REQUEST, "No file in the upload").into_response());
-    }
-    // A file present but fully deduped is an idempotent no-op — still refresh.
-    Ok(htmx_refresh())
-}
-
 /// `POST /media/<ref>/variants` — ADD one variant to an existing item (Phase DQ.3):
-/// the `add_encode` semantics addressed BY ref. The server mints the content-addressed
-/// `url_key`, so it's a POST → `201` + `Location` + the manifest. APPEND-ONLY (see
-/// `append_variants`). Admin-gated by the mutation layer. `404` unknown ref, `400`
-/// empty body.
+/// append another codec / a poster / a mesh LOD, addressed BY ref. The server mints
+/// the content-addressed `url_key`, so it's a POST → `201` + `Location` + the manifest.
+/// APPEND-ONLY (see `append_variants`). Admin-gated by the mutation layer. `404`
+/// unknown ref, `400` empty body. (The admin library's "+ add encode" drives this.)
 pub async fn add_media_variant(
     State(state): State<AppState>,
     Path(media_ref): Path<String>,
@@ -590,67 +566,6 @@ pub async fn add_media_variant(
     }
     let variants = MediaVariantDao::find_by_media_id(&state.pool, item.media_id).await?;
     Ok(created_manifest(&item, &variants))
-}
-
-pub async fn delete_media(
-    State(state): State<AppState>,
-    Path(media_id): Path<i64>,
-) -> Result<Response, AppError> {
-    MediaDao::delete_by_id(&state.pool, media_id).await?;
-    Ok(htmx_refresh())
-}
-
-/// Delete one stored encoding (per-stream). Leaves the rest of the item intact.
-pub async fn delete_variant(
-    State(state): State<AppState>,
-    Path(variant_id): Path<i64>,
-) -> Result<Response, AppError> {
-    MediaVariantDao::delete_by_id(&state.pool, variant_id).await?;
-    Ok(htmx_refresh())
-}
-
-#[derive(serde::Deserialize)]
-pub struct RenameForm {
-    pub title: String,
-}
-
-/// Rename the display title (the `media_ref` stays fixed — see DAO note).
-pub async fn rename_media(
-    State(state): State<AppState>,
-    Path(media_id): Path<i64>,
-    axum::Form(form): axum::Form<RenameForm>,
-) -> Result<Response, AppError> {
-    MediaDao::update_title(&state.pool, media_id, &form.title).await?;
-    Ok(htmx_refresh())
-}
-
-/// Accept ONLY the known gate roles as a media visibility value; everything
-/// else — empty, "Public", garbage, absent — is public (`None`). Media has no
-/// keep-the-existing-gate write path here: upload sets it at birth, and the
-/// explicit per-item selector always submits its full choice.
-fn parse_media_visibility(value: &str) -> Option<String> {
-    match value.trim() {
-        v @ ("Registered" | "Family" | "Admin") => Some(v.to_string()),
-        _ => None,
-    }
-}
-
-#[derive(serde::Deserialize)]
-pub struct VisibilityForm {
-    #[serde(default)]
-    pub min_role: String,
-}
-
-/// `POST /admin/media/{media_id}/visibility` — the library's per-item gate
-/// control (DC.5). "Public" (or anything unrecognized) clears; a known gate
-/// role sets. Refreshes so the card's badge + selector re-render.
-pub async fn set_media_visibility(
-    State(state): State<AppState>,
-    Path(media_id): Path<i64>,
-    axum::Form(form): axum::Form<VisibilityForm>,
-) -> Result<Response, AppError> {
-    MediaDao::set_min_role(&state.pool, media_id, parse_media_visibility(&form.min_role)).await?;
-    Ok(htmx_refresh())
 }
 
 /// The `PUT /media/<ref>` metadata body (DQ.4). An ABSENT field KEEPS the current

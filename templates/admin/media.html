@@ -37,7 +37,7 @@
         </ul>
     </section>
 
-    <!-- Drop zone (also click-to-select). media-upload.js POSTs to /admin/media/upload. -->
+    <!-- Drop zone (also click-to-select). media-upload.js POSTs to the canonical POST /media. -->
     <label id="media-drop" for="media-file-input"
         class="block border-2 border-dashed border-navy/40 rounded-lg p-8 text-center cursor-pointer mb-6 hover:bg-navy/5">
         <span class="text-3xl text-navy/60">{% call icons::cloud_arrow_up() %}</span>
@@ -70,7 +70,7 @@
     <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
         {% for c in cards %}
         <div class="media-card border border-navy/20 rounded-lg p-2 flex flex-col gap-2 bg-white/60"
-            data-search="{{ c.search }}">
+            data-media-ref="{{ c.media_ref }}" data-search="{{ c.search }}">
             {% if let Some(html) = c.play_html %}
             {{ html|safe }}
             {% else if let Some(key) = c.thumb_url_key %}
@@ -90,8 +90,8 @@
                 <div class="flex items-center gap-1 text-[10px] bg-navy/10 text-navy px-1.5 py-0.5 rounded">
                     <span class="font-mono break-all grow">{{ v.label }}</span>
                     <span class="text-navy/60 whitespace-nowrap">{{ v.size }}</span>
-                    <button type="button" class="text-red-700 hover:text-red-900 px-1 leading-none"
-                        hx-delete="/admin/media/variant/{{ v.variant_id }}" hx-confirm="Delete this stream?"
+                    <button type="button" class="delete-variant text-red-700 hover:text-red-900 px-1 leading-none"
+                        data-media-ref="{{ c.media_ref }}" data-url-key="{{ v.url_key }}"
                         title="Delete stream" aria-label="Delete stream">&times;</button>
                 </div>
                 {% endfor %}
@@ -102,10 +102,10 @@
                 title="Minimum role required to fetch this item's bytes">{{ v }}</span></p>
             {% endif %}
             <div class="flex flex-col gap-1 mt-auto">
-                {# Per-item gate control (DC.5) → POST /admin/media/{id}/visibility. #}
-                <form hx-post="/admin/media/{{ c.media_id }}/visibility" class="relative">
-                    <select name="min_role" onchange="this.form.dispatchEvent(new Event('submit', {cancelable: true, bubbles: true}))"
-                        class="w-full appearance-none border border-navy/30 rounded px-2 py-1 pr-7 text-xs"
+                {# Per-item gate control (DR) → media-upload.js PUTs /media/<ref> {min_role}. #}
+                <span class="relative block">
+                    <select class="media-visibility w-full appearance-none border border-navy/30 rounded px-2 py-1 pr-7 text-xs"
+                        data-media-ref="{{ c.media_ref }}"
                         title="Who can fetch this item's bytes">
                         <option value="Public"{% if c.visibility_rank == 0 %} selected{% endif %}>Public</option>
                         <option value="Registered"{% if c.visibility_rank == 1 %} selected{% endif %}>Registered</option>
@@ -113,7 +113,7 @@
                         <option value="Admin"{% if c.visibility_rank == 3 %} selected{% endif %}>Admin-only</option>
                     </select>
                     <span class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-navy/60">{% call icons::chevron_down() %}</span>
-                </form>
+                </span>
                 <button type="button" class="copy-ref text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
                     data-ref="{{ c.media_ref }}">Copy <code>![]()</code></button>
                 {% if let Some(key) = c.share_url_key %}
@@ -125,16 +125,16 @@
                 <div class="flex gap-1">
                     <button type="button"
                         class="rename-media grow text-xs bg-navy/80 hover:bg-navy text-div-grey px-2 py-1 rounded"
-                        data-media-id="{{ c.media_id }}" data-title="{{ c.title }}" title="Rename"
+                        data-media-ref="{{ c.media_ref }}" data-title="{{ c.title }}" title="Rename"
                         aria-label="Rename">{% call icons::pen() %}</button>
                     <label
                         class="grow text-center text-xs bg-navy/80 hover:bg-navy text-div-grey px-2 py-1 rounded cursor-pointer"
                         title="Add another encode (e.g. the HEVC), or an image as the poster">
                         {% call icons::plus() %}
-                        <input type="file" class="add-encode-input hidden" data-media-id="{{ c.media_id }}" multiple />
+                        <input type="file" class="add-encode-input hidden" data-media-ref="{{ c.media_ref }}" multiple />
                     </label>
-                    <button type="button" class="text-xs bg-red-600 hover:bg-red-700 text-div-grey px-2 py-1 rounded"
-                        hx-delete="/admin/media/{{ c.media_id }}" hx-confirm="Delete this media item?"
+                    <button type="button" class="delete-media text-xs bg-red-600 hover:bg-red-700 text-div-grey px-2 py-1 rounded"
+                        data-media-ref="{{ c.media_ref }}"
                         title="Delete" aria-label="Delete">{% call icons::trash_can() %}</button>
                 </div>
             </div>

@@ -781,27 +781,43 @@ fn error_span(msg: &str) -> String {
     )
 }
 
-/// The cover image URL for a page (Phase BZ.8): its `page_cover_media_id`'s first
-/// image variant — the image itself for an image cover, the poster for a video.
-/// `None` when no cover is set or it has no image variant. Used by the blog +
-/// project card indexes, replacing the old `/attachments/id/<n>` cover render.
-pub(crate) async fn cover_url_for(pool: &sqlx::SqlitePool, page_id: i64) -> Option<String> {
-    // Prefer the SMALLEST width-stepped variant (Phase CN): a card thumbnail is
-    // ~300px, so serving the 480px AVIF beats the full-res original. NULL-width
-    // variants (legacy / the original) sort last → still picked when no resize
-    // exists yet.
+/// The media_id of a page's cover, or `None` when unset. Shared by the cover
+/// helpers (DR.4) so each resolves the item ONCE, then picks a variant through the
+/// shared `media_select` — the SAME selector the embed uses, so covers + embeds
+/// can't drift on which image wins.
+async fn cover_media_id_for(pool: &sqlx::SqlitePool, page_id: i64) -> Option<i64> {
     sqlx::query_scalar!(
-        r#"SELECT v.url_key FROM content_pages c
-           JOIN media_variant v ON v.media_id = c.page_cover_media_id
-           WHERE c.page_id = ?1 AND v.mime LIKE 'image/%'
-           ORDER BY (v.width IS NULL), v.width ASC, v.variant_id LIMIT 1"#,
+        r#"SELECT page_cover_media_id AS "id!" FROM content_pages
+           WHERE page_id = ?1 AND page_cover_media_id IS NOT NULL"#,
         page_id
     )
     .fetch_optional(pool)
     .await
     .ok()
     .flatten()
-    .map(|k| format!("/media/file/{k}"))
+}
+
+/// First image variant of a cover's set — the legacy (unresized) fallback when the
+/// width ladder is empty (an image uploaded before Phase CN carries no widths).
+fn first_image(variants: &[MediaVariantDao]) -> Option<&MediaVariantDao> {
+    variants.iter().find(|v| v.mime.starts_with("image/"))
+}
+
+/// The cover image URL for a page (Phase BZ.8; DR.4 picks via `media_select`): the
+/// SMALLEST width-stepped image variant — a card thumbnail is ~300px, so the 480px
+/// AVIF beats the full-res original — falling back to the first image variant for a
+/// legacy (unresized) cover. `None` when no cover is set or it has no image variant.
+/// Used by the blog + project card indexes.
+pub(crate) async fn cover_url_for(pool: &sqlx::SqlitePool, page_id: i64) -> Option<String> {
+    let media_id = cover_media_id_for(pool, page_id).await?;
+    let variants = MediaVariantDao::find_by_media_id(pool, media_id).await.ok()?;
+    // Smallest sized image (the ladder is width-ASCENDING) → the thumbnail; a legacy
+    // no-width cover has an empty ladder, so fall back to its first image variant.
+    let key = media_select::image_ladder(&variants)
+        .first()
+        .map(|v| v.url_key.clone())
+        .or_else(|| first_image(&variants).map(|v| v.url_key.clone()))?;
+    Some(format!("/media/file/{key}"))
 }
 
 /// A page's cover rendered as a hero (Phase CV): the LARGEST width-stepped image
@@ -816,27 +832,22 @@ pub(crate) struct CoverHero {
     pub srcset: Option<String>,
 }
 
-/// `None` when the page has no cover or the cover has no image variant.
+/// `None` when the page has no cover or the cover has no image variant. DR.4: the
+/// LARGEST sized image (the hero is a full-width banner) via the SAME `image_ladder`
+/// the embed's image arm uses, with the same first-image fallback + ≥2-sizes srcset.
 pub(crate) async fn cover_hero_for(pool: &sqlx::SqlitePool, page_id: i64) -> Option<CoverHero> {
-    // Same cover join as `cover_url_for`, but LARGEST-first: a hero is a full-width
-    // banner, so the biggest sized AVIF is the src (a NULL-width original sorts
-    // last, so a real resize wins), with the sized variants as the srcset.
-    let rows = sqlx::query!(
-        r#"SELECT v.url_key AS "url_key!", v.width AS "width?: i64"
-           FROM content_pages c
-           JOIN media_variant v ON v.media_id = c.page_cover_media_id
-           WHERE c.page_id = ?1 AND v.mime LIKE 'image/%'
-           ORDER BY (v.width IS NULL), v.width DESC, v.variant_id"#,
-        page_id
-    )
-    .fetch_all(pool)
-    .await
-    .ok()?;
-    let largest = rows.first()?;
-    let src = format!("/media/file/{}", largest.url_key);
-    let sized: Vec<String> = rows
+    let media_id = cover_media_id_for(pool, page_id).await?;
+    let variants = MediaVariantDao::find_by_media_id(pool, media_id).await.ok()?;
+    let ladder = media_select::image_ladder(&variants);
+    // src = the largest sized image; a legacy no-width cover falls back to its first.
+    let src_key = ladder
+        .last()
+        .map(|v| v.url_key.clone())
+        .or_else(|| first_image(&variants).map(|v| v.url_key.clone()))?;
+    let src = format!("/media/file/{src_key}");
+    let sized: Vec<String> = ladder
         .iter()
-        .filter_map(|r| r.width.map(|w| format!("/media/file/{} {w}w", r.url_key)))
+        .map(|v| format!("/media/file/{} {}w", v.url_key, v.width.unwrap_or(0)))
         .collect();
     let srcset = (sized.len() >= 2).then(|| sized.join(", "));
     Some(CoverHero { src, srcset })

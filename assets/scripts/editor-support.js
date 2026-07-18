@@ -69,42 +69,38 @@ function uploadMediaFiles(files) {
     ?.querySelector('select[name="min_role"]');
   if (pageVis && pageVis.value !== "Public")
     fd.append("min_role", pageVis.value);
-  UploadProgress.xhrUpload(
-    "/admin/media/upload",
-    fd,
-    (phase, loaded, total) => {
-      if (phase === "uploading") {
-        const pct = total ? Math.round((loaded / total) * 100) : 0;
-        if (bar) {
-          bar.classList.remove("hidden");
-          bar.value = pct;
-        }
-        if (status)
-          status.textContent =
-            "Uploading " +
-            pct +
-            "% — " +
-            UploadProgress.fmtBytes(loaded) +
-            " / " +
-            UploadProgress.fmtBytes(total);
-      } else {
-        if (bar) {
-          bar.classList.remove("hidden");
-          bar.removeAttribute("value");
-        }
-        if (status) status.textContent = "Processing…";
+  UploadProgress.xhrUpload("/media", fd, (phase, loaded, total) => {
+    if (phase === "uploading") {
+      const pct = total ? Math.round((loaded / total) * 100) : 0;
+      if (bar) {
+        bar.classList.remove("hidden");
+        bar.value = pct;
       }
-    },
-  )
+      if (status)
+        status.textContent =
+          "Uploading " +
+          pct +
+          "% — " +
+          UploadProgress.fmtBytes(loaded) +
+          " / " +
+          UploadProgress.fmtBytes(total);
+    } else {
+      if (bar) {
+        bar.classList.remove("hidden");
+        bar.removeAttribute("value");
+      }
+      if (status) status.textContent = "Processing…";
+    }
+  })
     .then((text) => {
+      // POST /media returns the manifest (DR): the ref is `ref`, not `media_ref`.
       const j = JSON.parse(text);
-      insertMediaRef(j.media_ref);
+      insertMediaRef(j.ref);
       if (bar) {
         bar.classList.add("hidden");
         bar.value = 0;
       }
-      if (status)
-        status.textContent = "Inserted ![](/media/" + j.media_ref + ")";
+      if (status) status.textContent = "Inserted ![](/media/" + j.ref + ")";
     })
     .catch((e) => {
       if (bar) {
