@@ -398,9 +398,29 @@ hx-trigger="load" hx-swap="outerHTML">`; `render_embed_html` dispatches by kind:
   variants only (an image variant is thumbnail, never mis-loaded as mesh).
 - **file** → a styled `download_button` (glyph + name + size, `download` attr).
 
-**Rationalization note:** the embed's per-kind SELECTION (smallest-3MF, largest-mesh,
-srcset) is presentation and STAYS here — but it and the resource manifest (§5) should
-share ONE variant-selection vocabulary rather than duplicate the `bytes`/`mime` logic.
+**Selector sharing (DP.3 / DR):** the embed's Stl arm (`media_select::viewer_mesh` /
+`largest_mesh`) and Image arm (`media_select::image_ladder`) now delegate to the ONE
+shared selector (DP.3), so the negotiation (§5), the manifest, and the embed pick
+variants the same way. **STILL inline (→ DR cleanup):** the COVER helpers `cover_url_for`
+(smallest image thumbnail) / `cover_hero_for` (largest image + srcset) roll their own
+image-variant picks — DR folds them onto `media_select` (`image_ladder` / `largest`) so
+covers share the selector too.
+
+**Authored references normalize to the stable `media_ref` (→ Phase DS).** On SAVE,
+`rewrite_site_links` (already relativizes site links) ALSO rewrites any
+`/media/file/<url_key>` in the content → `/media/<ref>` (resolve `url_key` → owning item →
+ref; an unresolvable key is left alone, typo-tolerant like the cover-ref parse). Why: the
+library's "Copy link" hands out a `/media/file/<url_key>`, and a pasted byte URL bakes a
+PER-SAVE key into the content-hash-cached HTML + the feed — it goes STALE the moment that
+variant is re-encoded / round-trip-replaced (a `PUT …/variants` mints new `url_key`s) AND
+it can't per-viewer-gate (a `![](/media/<ref>)` embed is fetched per viewer; a baked byte
+URL is shared for everyone, and for gated media it just 404s from cache). **Covers are
+already ref-stable** — stored as a `page_cover_media_id` (`media_id`) via
+`parse_cover_reference`, resolved FRESH at render (the hero `<img srcset>` byte URLs are
+computed each render, never baked). Content markdown is the gap DS closes; the editor's
+drop-upload already inserts `![](/media/<ref>)`, and the save-rewrite backstops a pasted
+byte URL. **The rule:** an author never bakes a `url_key`; every authored reference
+resolves through the stable ref.
 
 **Shipped embed specifics (the real-device-hardened details):**
 - **Audio player** (`audio-player.js`, first-party, `defer`, re-scans on `htmx:afterSettle`):
