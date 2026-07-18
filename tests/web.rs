@@ -4295,6 +4295,42 @@ async fn js_required_fallback_renders_message() {
     );
 }
 
+/// DM follow-up: the anonymous passkey-ceremony-failure BEACON is reachable without
+/// auth (allowlisted in the mutation layer) and always `204`s (best-effort telemetry
+/// — a garbage body never errors the client). Only POST is anonymous; another verb
+/// hits the admin gate.
+#[tokio::test]
+async fn ceremony_error_beacon_is_anonymous_and_always_204() {
+    let server = spawn_test_server().await.expect("spawn");
+
+    // Anonymous POST with a real beacon body — NOT 401 (allowlisted), 204.
+    let resp = client()
+        .post(server.url("/login/ceremony_error"))
+        .header("content-type", "application/json")
+        .body(r#"{"action":"register","error_name":"NotAllowedError","error_message":"a request is already pending"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT, "anonymous beacon → 204, not 401");
+
+    // A garbage body still 204s (telemetry is best-effort, never a 400/500).
+    let junk = client()
+        .post(server.url("/login/ceremony_error"))
+        .body("not json at all")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(junk.status(), StatusCode::NO_CONTENT, "garbage beacon still 204");
+
+    // Only POST is anonymous-allowed; a PUT hits the mutation gate → 401.
+    let put = client()
+        .request(reqwest::Method::PUT, server.url("/login/ceremony_error"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(put.status(), StatusCode::UNAUTHORIZED, "only the POST beacon is anonymous");
+}
+
 /// DM.6: a taken display_name is rejected at `start_register` — BEFORE the
 /// passkey is minted — with a real 409, and the raw PK-constraint text never
 /// leaks (mirrors the duplicate-slug contract).

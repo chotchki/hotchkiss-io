@@ -217,6 +217,77 @@ async fn cancelled_registration_surfaces_a_visible_error() {
     drop(server);
 }
 
+/// DM follow-up: a CLIENT-side registration ceremony failure must now BEACON the
+/// server (`POST /login/ceremony_error`) so a phone-only failure is no longer
+/// invisible to the operator. We override `navigator.sendBeacon` to capture the
+/// call, patch `credentials.create` to reject (the concurrent-`create` "a request
+/// is already pending" shape — the Android theory), submit register, and assert
+/// the beacon fired with the action + error name in its body (AND the visible
+/// error still renders). No virtual authenticator — create() never runs for real.
+#[tokio::test]
+async fn cancelled_registration_beacons_the_failure() {
+    let _e2e = e2e_lock().await;
+    let server: TestServer = spawn_test_server().await.expect("spawn harness");
+    let (mut browser, handle, profile) = launch().await;
+    let page = browser.new_page("about:blank").await.expect("new page");
+    page.goto(server.url("/login")).await.expect("goto /login");
+
+    // Capture sendBeacon calls; reject create() with a "pending"-shaped error.
+    let _: bool = js(
+        &page,
+        "(() => { \
+           window.__beacons = []; \
+           navigator.sendBeacon = function (url, data) { \
+             const rec = { url: url, body: null }; window.__beacons.push(rec); \
+             try { if (data && data.text) { data.text().then(function (t) { rec.body = t; }); } } catch (e) {} \
+             return true; \
+           }; \
+           navigator.credentials.create = () => Promise.reject(\
+             Object.assign(new Error('a request is already pending'), { name: 'NotAllowedError' })); \
+           return true; })()",
+    )
+    .await;
+
+    let username = page.find_element("#username").await.expect("#username");
+    username.click().await.expect("focus #username");
+    username.type_str("e2e-beacon").await.expect("type username");
+    page.find_element("button[type=submit]")
+        .await
+        .expect("submit button")
+        .click()
+        .await
+        .expect("click submit");
+
+    // Poll for the ceremony_error beacon body (the .catch fires it after the reject).
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let body = loop {
+        assert!(
+            Instant::now() < deadline,
+            "no /login/ceremony_error beacon after a failed ceremony — the DM-followup beacon regressed"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let b: String = js(
+            &page,
+            "(() => { const b = (window.__beacons || []).find(x => x.url && x.url.indexOf('/login/ceremony_error') >= 0); return b && b.body ? b.body : ''; })()",
+        )
+        .await;
+        if !b.trim().is_empty() {
+            break b;
+        }
+    };
+    assert!(body.contains("\"action\":\"register\""), "beacon carries the action: {body}");
+    assert!(body.contains("NotAllowedError"), "beacon carries the error name: {body}");
+
+    // The visible error still renders (the beacon is additive, not a replacement).
+    let msg: String = js(&page, "document.getElementById('error_message').textContent").await;
+    assert!(!msg.trim().is_empty(), "the user still sees an error message");
+
+    browser.close().await.ok();
+    handle.await.ok();
+    let _ = std::fs::remove_dir_all(&profile);
+    drop(server);
+}
+
 /// Evaluate a JS expression on the page and return it as a JSON value.
 async fn js<T: serde::de::DeserializeOwned>(page: &Page, expr: &str) -> T {
     page.evaluate(expr)

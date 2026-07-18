@@ -7,8 +7,9 @@ use crate::{
 use anyhow::{anyhow, Context};
 use askama::Template;
 use axum::{
+    body::Bytes,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
     Json, Router,
@@ -31,7 +32,47 @@ pub fn login_router() -> Router<AppState> {
         .route("/finish_authentication", post(finish_authentication))
         .route("/start_register/{:display_name}", get(start_registration))
         .route("/finish_register", post(finish_registration))
+        .route("/ceremony_error", post(ceremony_error))
         .route("/logout", get(logout))
+}
+
+/// A client → server beacon body for a passkey CEREMONY failure (`htmx-webauthn.js`
+/// `beacon_ceremony_error`). All fields default so a partial/garbage beacon can't 400.
+#[derive(Deserialize, Default)]
+struct CeremonyError {
+    #[serde(default)]
+    action: String,
+    #[serde(default)]
+    error_name: String,
+    #[serde(default)]
+    error_message: String,
+}
+
+/// `POST /login/ceremony_error` — the client beacons a passkey ceremony failure
+/// here so a CLIENT-side `navigator.credentials.*` rejection is no longer invisible
+/// (DM follow-up: DM made the server handlers loud, but a ceremony that dies in the
+/// browser left no server trail — only a `console.error` on a phone). We `warn!` it
+/// WITH the request User-Agent so an Android-specific pattern is visible in
+/// `/admin/logs`. Anonymous (a pre-login beacon; allowlisted in the mutation layer),
+/// best-effort: ALWAYS `204`, never errors the client; the body is size-capped +
+/// control-char-stripped so a hostile beacon can't inject into the log.
+async fn ceremony_error(headers: HeaderMap, body: Bytes) -> Response {
+    if let Ok(e) = serde_json::from_slice::<CeremonyError>(&body) {
+        let clean = |s: &str, n: usize| s.chars().filter(|c| !c.is_control()).take(n).collect::<String>();
+        let ua = headers
+            .get(header::USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| clean(s, 200))
+            .unwrap_or_default();
+        warn!(
+            "passkey ceremony failed [{}] name={:?} message={:?} ua={:?}",
+            clean(&e.action, 32),
+            clean(&e.error_name, 80),
+            clean(&e.error_message, 300),
+            ua,
+        );
+    }
+    StatusCode::NO_CONTENT.into_response()
 }
 
 #[derive(Template)]

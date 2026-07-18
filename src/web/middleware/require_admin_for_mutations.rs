@@ -117,18 +117,19 @@ fn allowed_by_role_scope(
 
 /// EXACT `(path, method)` allowlist of the only non-GET endpoints reachable
 /// without admin: the two WebAuthn ceremony POSTs (registration / authentication
-/// *finish*), plus the debug-only `/test/login` seam (`cfg`-gated to match the
-/// route, which is absent from release). The ceremony's GET steps
-/// (`/login`, `/login/get_auth_opts`, `/login/start_register/{name}`,
-/// `/login/logout`) are covered by the GET-public rule, so they need no entry.
-/// CAVEAT: if logout or start_register is ever changed to a POST it MUST be added
-/// here or non-admins can't log in/out.
+/// *finish*), the anonymous ceremony-failure BEACON (`/login/ceremony_error`, a
+/// pre-login client telemetry POST — DM follow-up), plus the debug-only
+/// `/test/login` seam (`cfg`-gated to match the route, which is absent from
+/// release). The ceremony's GET steps (`/login`, `/login/get_auth_opts`,
+/// `/login/start_register/{name}`, `/login/logout`) are covered by the GET-public
+/// rule, so they need no entry. CAVEAT: if logout or start_register is ever changed
+/// to a POST it MUST be added here or non-admins can't log in/out.
 fn is_anonymous_auth_endpoint(method: &Method, path: &str) -> bool {
     if method != Method::POST {
         return false;
     }
     match path {
-        "/login/finish_authentication" | "/login/finish_register" => true,
+        "/login/finish_authentication" | "/login/finish_register" | "/login/ceremony_error" => true,
         #[cfg(debug_assertions)]
         "/test/login" => true,
         _ => false,
@@ -149,6 +150,11 @@ mod tests {
         assert!(is_anonymous_auth_endpoint(
             &Method::POST,
             "/login/finish_register"
+        ));
+        // The anonymous ceremony-failure beacon (DM follow-up).
+        assert!(is_anonymous_auth_endpoint(
+            &Method::POST,
+            "/login/ceremony_error"
         ));
 
         // POST-only: a different verb to the same path is NOT exempt.

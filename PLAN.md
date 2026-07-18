@@ -1,4 +1,4 @@
-<!-- plan-bridge:phase-high-water=DS -->
+<!-- plan-bridge:phase-high-water=DT -->
 # Plan
 
 Completed phases are in `PLAN_ARCHIVE.md` (most recent: Phase 12 — beta deployment on the mini (inverted `main`→beta / `v*`tag→prod flow); Phase 1 — `get_recs_by_name` `type=A` filter fix (ACME renewal hang); Phase 9 — Tailwind cleanup / dropped DaisyUI; Phase 8 — local/e2e test harness; Phase 7 — admin analytics dashboard; Phase 2 — DNS module testability; Phase 5 — dropped the `cookie-rs` fork; Phase 3 — `ifconfig.me` → Cloudflare `cdn-cgi/trace`; Phase 0 — push-to-deploy on the Mac mini; Phase 4 — `tray-wrapper` 0.4.1 bump).
@@ -163,6 +163,16 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] DS.2 - Cover/hero ref-stability LOCK: a test that a cover set from EITHER form (`/media/<ref>` or `/media/file/<url_key>`) stores the `media_id` and re-renders correctly AFTER the item's variants are replaced (the hero `<img>`/srcset byte URLs are recomputed each render, never stale). Confirms covers need no rewrite — pins the doc's claim.
 - [ ] DS.3 - Editor: confirm the drop-upload inserts `![](/media/<ref>)` (it does) + the library copy affordances lead with the ref-embed (`![](/media/<ref>)`), the byte `/media/file/<key>` "Copy link" kept as the explicit-download secondary. No-op if already so; else a small template/JS tweak.
 - [ ] DS.4 - Tests (the save-rewrite: pasted byte URL → ref, unresolvable untouched, both `![]` + `[]` forms; the cover round-trip) + `media-design.md` note flip + CLAUDE.md delta.
+
+## Phase DT - Registration ceremony hardening (DM follow-up: guard + beacon + recover)
+
+*A recurring, INVISIBLE registration failure on Android ("pending registration", no server logs). Two root causes + a recovery gap: (1) `credentials.create` (register) colliding with the ALWAYS-pending autofill conditional `get` (or a double-tap firing two creates) throws "a request is already pending"; (2) a CLIENT-side ceremony failure left NO server trail — DM made the server handlers loud but not the browser ceremony, so the operator was blind. Fix: abort the pending autofill get + guard register re-entry (prevent the collision), beacon every ceremony failure to the server WITH the UA (make it visible), and point a stuck user at a reload (recover — a fresh load clears stuck client state + fetches the patched script).*
+
+- [ ] DT.0 - Phase exit: a register `create` can't collide with a pending autofill `get` or a double-tap; every client-side ceremony failure beacons `/login/ceremony_error` (logged with UA); a stuck user is told to reload; tests green; shipped.
+- [x] DT.1 - Autofill abort + register re-entry guard (`htmx-webauthn.js`): the conditional `get` takes an `AbortController`; register `.abort()`s it BEFORE `credentials.create` (kills the "a request is already pending" collision — the Android theory) + a `registerInFlight` guard (reset in `.finally`) blocks a double-tap firing two creates.
+- [x] DT.2 - Ceremony-error beacon: `beacon_ceremony_error` (`sendBeacon`, keepalive-fetch fallback) → `POST /login/ceremony_error` on register (all) + autofill (genuine-only) failures; a new ANONYMOUS, allowlisted handler `warn!`s it WITH the request UA + a capped/control-char-stripped body (best-effort, always `204`). Added to the mutation-layer anonymous allowlist.
+- [x] DT.3 - Recovery: the register error copy points a stuck user at a page RELOAD (clears stuck client state + fetches the patched script; skipped for `InvalidStateError`, which already routes to "log in"). The stranded-credential login path (DM) already returns a clean `401` "register again" — which now SUCCEEDS with DT.1, so the recovery loop closes.
+- [x] DT.4 - Tests: e2e (`sendBeacon`-override + `create`-reject → the beacon fires with action+name, the error still renders — deterministic desktop Chrome, no emulator); integration (the beacon is anonymous + always `204`, POST-only); unit (allowlist includes it). + CLAUDE.md auth-section delta.
 
 ## Backlog (not yet phased)
 

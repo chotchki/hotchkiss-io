@@ -3,6 +3,15 @@
   const jsonWebAuthnSupport =
     !!globalThis.PublicKeyCredential?.parseCreationOptionsFromJSON;
 
+  // A pending conditional-UI (autofill) `credentials.get` has no natural end — it
+  // waits for the user to pick a field. On some platforms a `credentials.create`
+  // (register) started WHILE that get is pending throws "a request is already
+  // pending" (the likely Android "pending registration" failure). So the autofill
+  // get gets an AbortController we cancel before registering, and register guards
+  // against re-entry (a double-tap firing two overlapping creates).
+  let autofillAbort = null;
+  let registerInFlight = false;
+
   /// Render a user-visible message into the login form's error slot (the
   /// `#error_message` div, present only on /login). Null-guarded so a stray
   /// call on any other page is a silent no-op, never a throw.
@@ -10,6 +19,37 @@
     const slot = document.getElementById("error_message");
     if (slot) {
       slot.textContent = message;
+    }
+  }
+
+  /// Report a ceremony failure to the server so a CLIENT-side passkey failure is
+  /// no longer invisible to the operator (DM follow-up — the register/login
+  /// ceremony runs in the browser, so a `navigator.credentials.*` rejection left
+  /// no server trail; only a `console.error` on a phone). `sendBeacon` survives the
+  /// page navigating away; the server `warn!`s it WITH the request UA so an
+  /// Android-specific pattern is visible. Best-effort — telemetry must never throw.
+  function beacon_ceremony_error(action, err) {
+    try {
+      const body = JSON.stringify({
+        action: action,
+        error_name: err && err.name ? String(err.name).slice(0, 80) : "",
+        error_message: String((err && err.message) || err || "").slice(0, 300),
+      });
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(
+          "/login/ceremony_error",
+          new Blob([body], { type: "application/json" }),
+        );
+      } else {
+        fetch("/login/ceremony_error", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: body,
+          keepalive: true,
+        }).catch(function () {});
+      }
+    } catch {
+      /* never let telemetry throw into the ceremony */
     }
   }
 
@@ -135,9 +175,15 @@
     const server_public_key = PublicKeyCredential.parseRequestOptionsFromJSON(
       auth_opt_json.publicKey,
     );
+    // A cancellable signal so a subsequent register can ABORT this pending
+    // conditional get (else `credentials.create` collides with it — "a request is
+    // already pending"). Aborting resolves as an AbortError, which the autofill
+    // `.catch` treats as a benign dismissal.
+    autofillAbort = new AbortController();
     var new_auth_opts = {
       mediation: auth_opt_json.mediation,
       publicKey: server_public_key,
+      signal: autofillAbort.signal,
     };
 
     const credential = await navigator.credentials.get(new_auth_opts);
@@ -256,14 +302,16 @@
         })
         .catch(function (err) {
           console.error("Autofill login ceremony failed: " + err);
-          // Autofill is passive: a user-dismissal (NotAllowedError) is normal —
-          // stay quiet. Surface only genuine failures (server/network).
+          // Autofill is passive: a user-dismissal (NotAllowedError) OR our own
+          // register-triggered `.abort()` (AbortError) is normal — stay quiet.
+          // Surface + beacon only GENUINE failures (server/network/platform).
           if (
             err &&
             err.name !== "NotAllowedError" &&
             err.name !== "AbortError"
           ) {
             show_error(ceremony_error_message(err, "Login"));
+            beacon_ceremony_error("login-autofill", err);
           }
         });
     },
@@ -294,6 +342,20 @@
         return;
       }
 
+      // One ceremony at a time — a double-tap / double-fire would start a second
+      // `credentials.create` and throw "a request is already pending".
+      if (registerInFlight) {
+        return;
+      }
+      registerInFlight = true;
+
+      // Cancel any pending conditional-UI (autofill) `get` FIRST, so `create`
+      // doesn't collide with it (the likely Android "pending registration" cause).
+      if (autofillAbort) {
+        autofillAbort.abort();
+        autofillAbort = null;
+      }
+
       // Clear any stale message before a fresh attempt.
       show_error("");
 
@@ -310,7 +372,18 @@
         })
         .catch(function (err) {
           console.error("Registration ceremony failed: " + err);
-          show_error(ceremony_error_message(err, "Registration"));
+          // RECOVERY: a stuck/"pending" state clears on a fresh page load (new
+          // client state + the latest script), so point the user at a reload —
+          // except InvalidStateError, which already routes them to "log in".
+          let msg = ceremony_error_message(err, "Registration");
+          if (!err || err.name !== "InvalidStateError") {
+            msg += " If this keeps happening, reload the page and try again.";
+          }
+          show_error(msg);
+          beacon_ceremony_error("register", err);
+        })
+        .finally(function () {
+          registerInFlight = false;
         });
     },
   });
