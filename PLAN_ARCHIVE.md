@@ -1028,3 +1028,23 @@ Design + rationale (the decisions, the honest limits): [docs/greylist-challenge-
 - [x] DV.12 - Child-page drag-reorder (dogfood polish): the child-index widget renders a SortableJS reorder grid for an admin (like the top-level /admin/pages reorder), persisting `page_order` via a new offset-aware `POST /admin/pages/reorder-children` (validates ids are children of the parent; within-page drag writes `start..+N` so pagination stays consistent). The manual complement to DW's filename-order; a non-admin gets a plain list.
 
 
+---
+
+## 2026-07-19
+
+## Phase DW - Bulk manga ingest (271-volume ergonomics)
+
+*DV makes one volume work; DW makes a 271-volume series tractable. TWO front doors (both, per chris): (1) a **filesystem-drop + admin-triggered ingest** — the primary, since 271 × ~100 MB ≈ 27 GB can't sanely go through a browser: drop the `.epub`s onto a mini drive (big media already lives on `/Volumes/MediaStorage4/…`), then ingest server-side; (2) a **browser multi-file drop** for small add-later batches. Each file → commit to the content store (stream — never buffer 271 at once) → mint an Epub item (Family-gated, inheriting the series) → create a volume child page, with the volume number + `page_order` parsed from the filename (`Series v012.epub` → Vol. 12). Flat `<series>/<volume>` — no range grouping (pagination + `?q=` search on the series page handle a big series).*
+
+- [x] DW.0 - Phase exit: a folder of `.epub`s on the mini ingests as a series (volumes ordered from filenames) via an admin trigger; a browser multi-file drop covers small batches; both create Epub items + ordered volume child pages under the series; tests + docs; shipped.
+- [x] DW.1 - Filename → volume parse: a pure `parse_volume(filename) -> Option<(order, title)>` (extract the volume number across real shapes — `v012`, ` 12 `, `Vol.12`, `#12`, `c012`; fallback = lexical/upload order). Unit-tested against real manga filename patterns.
+- [x] DW.2 - Bulk-ingest core (shared by both front doors): given a target series page + a list of (bytes-source, filename), for each → stream-commit to the store, mint the Epub item (Family, inherit the series' `min_role`), create the volume child page (title/order from DW.1, embedding `![](/media/<ref>)`). Skip a volume whose content-hash already exists under the series (idempotent re-run). NEVER hold all 271 in memory.
+- [x] DW.3 - Filesystem front door: an admin action (`POST /admin/library/manga/ingest`) taking a server-side folder path + target series → DW.2 over the folder's `.epub`s. Server-side, no upload; a long op → spawn + report progress (mirror the dead-link scan's spawn+status handle). The path is admin-only + validated against a configured drop dir / the media roots (no traversal).
+- [x] DW.4 - Browser front door: a multi-file drop (`/admin/library/manga` or the media library) → DW.2 over the uploaded files with the `UploadProgress` bar. For SMALL batches; an honest note steers a full-series to the filesystem path (27 GB through a browser is impractical).
+- [x] DW.5 - Series creation: a create-a-series affordance (a series = an authored Family-gated child of `manga`); the ingest can create the series if absent (from the folder / a supplied series name), inheriting `manga`'s gate.
+- [x] DW.6 - Tests: DW.1 parse (unit); DW.2 ingest (tiny `.epub` fixtures → items + ordered volume pages under a series; the dedup skip); the filesystem front door over a temp dir of fixtures; gating inheritance (volumes are Family).
+- [x] DW.7 - Docs: `docs/epub-reader-design.md` bulk-ingest section + CLAUDE.md delta.
+- [x] DW.8 - CBZ kind + reader: MediaKind::Cbz, probe .cbz → comicbook+zip mime, dominant_kind, shared foliate reader embed (data-kind), reader JS types the File so foliate's comic path loads it
+- [x] DW.9 - CBZ cover extraction: first image in the zip → an image variant (zip dep), wired into add_derived_variants
+- [x] DW.10 - Ingest accepts .cbz alongside .epub; cbz fixture + tests (upload cbz → reader shell + cover; ingest)
+
