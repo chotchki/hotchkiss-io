@@ -88,7 +88,12 @@ pub async fn render_children_grid(
         paginate(pool, Some(parent_page_id), query, order, list_base, viewer).await?;
     let mut cards = Vec::with_capacity(items.len());
     for c in items {
-        let cover_url = crate::web::features::media::cover_url_for(pool, c.page_id).await;
+        // Explicit page cover wins; else derive it from the page's first media embed
+        // (DV.11) so a book/volume auto-covers with no manual cover-setting.
+        let cover_url = match crate::web::features::media::cover_url_for(pool, c.page_id).await {
+            Some(url) => Some(url),
+            None => crate::web::features::media::embedded_media_cover(pool, &c.page_markdown).await,
+        };
         cards.push(ChildCard {
             title: c.display_title(),
             url: format!("{child_base}/{}", c.page_name),

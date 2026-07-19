@@ -4212,6 +4212,77 @@ async fn uploaded_epub_renders_the_foliate_reader_embed() {
     assert!(!embed.contains("media-download"), "must NOT be a plain File download link");
 }
 
+/// Phase DV.11: a child-index card whose page has NO explicit cover derives one from
+/// the FIRST `![](/media/<ref>)` embed in the page's content → that media item's image
+/// variant (here the EPUB's extracted OPF cover). So a book/volume auto-covers its card
+/// with zero manual cover-setting.
+#[tokio::test]
+async fn child_card_cover_derives_from_embedded_media() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // An epub upload → an Epub item carrying an extracted OPF cover (image variant).
+    let epub =
+        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/test.epub")).unwrap();
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(epub)
+            .file_name("v1.epub")
+            .mime_str("application/epub+zip")
+            .unwrap(),
+    );
+    let media_ref = admin
+        .post(server.url("/media"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap()["ref"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // A series parent carrying the fence + a volume child that embeds the epub (no
+    // explicit page cover set on the child).
+    admin.post(server.url("/pages")).form(&[("page_title", "Series")]).send().await.unwrap();
+    admin
+        .put(server.url("/pages/series"))
+        .header("HX-Request", "true")
+        .form(&[
+            ("page_category", ""),
+            ("page_markdown", "# Series\n\n```children order=manual\n```\n"),
+            ("page_cover_media_ref", ""),
+            ("page_order", "0"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    admin.post(server.url("/pages/series")).form(&[("page_title", "Volume 1")]).send().await.unwrap();
+    let vol_md = format!("# Volume 1\n\n![](/media/{media_ref})\n");
+    admin
+        .put(server.url("/pages/series/volume-1"))
+        .header("HX-Request", "true")
+        .form(&[
+            ("page_category", ""),
+            ("page_markdown", vol_md.as_str()),
+            ("page_cover_media_ref", ""),
+            ("page_order", "1"),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    // The series listing card carries a derived cover byte URL — not the placeholder.
+    let body = reqwest::get(server.url("/pages/series")).await.unwrap().text().await.unwrap();
+    assert!(
+        body.contains("Volume 1") && body.contains("/media/file/"),
+        "the card cover derives from the embedded media's image variant: {body}"
+    );
+}
+
 /// Phase DV.10: an uploaded EPUB's embedded cover (declared in the OPF) is extracted
 /// at ingest + stored as an image variant, so `cover_url_for` auto-populates the card
 /// + hero — the EPUB analog of the audiobook `attached_pic` poster. The item stays an

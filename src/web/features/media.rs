@@ -873,6 +873,41 @@ pub(crate) async fn cover_hero_for(pool: &sqlx::SqlitePool, page_id: i64) -> Opt
     Some(CoverHero { src, srcset })
 }
 
+/// Card-cover FALLBACK (Phase DV.11): a page's first `![](/media/<ref>)` embed →
+/// that media item's thumbnail (its smallest image variant — the audio poster, the
+/// EPUB OPF cover, or an image itself), via the SAME `media_select` pick
+/// `cover_url_for` uses. So a book / manga-volume page auto-covers its listing card
+/// with NO explicit `page_cover_media_id` set; the explicit page cover still WINS
+/// (this only fills in when it's absent). `None` when the content has no resolvable
+/// media embed carrying an image variant.
+pub(crate) async fn embedded_media_cover(
+    pool: &sqlx::SqlitePool,
+    markdown: &str,
+) -> Option<String> {
+    for url in crate::web::markdown::links::collect_link_urls(markdown).ok()? {
+        // Match a `/media/<ref>` embed — ONE path segment, not `/media/file/<key>`.
+        let Some(rest) = url.strip_prefix("/media/") else {
+            continue;
+        };
+        let refstr = rest.split(['?', '#']).next().unwrap_or("");
+        if refstr.is_empty() || refstr.contains('/') {
+            continue;
+        }
+        let Ok(Some(media)) = MediaDao::find_by_ref(pool, refstr).await else {
+            continue;
+        };
+        let variants = MediaVariantDao::find_by_media_id(pool, media.media_id).await.ok()?;
+        let key = media_select::image_ladder(&variants)
+            .first()
+            .map(|v| v.url_key.clone())
+            .or_else(|| first_image(&variants).map(|v| v.url_key.clone()));
+        if let Some(k) = key {
+            return Some(format!("/media/file/{k}"));
+        }
+    }
+    None
+}
+
 /// The current cover's media REF (token) for a page, for the editor's cover field
 /// pre-fill. `None` when no cover is set.
 pub(crate) async fn cover_ref_for(pool: &sqlx::SqlitePool, page_id: i64) -> Option<String> {
