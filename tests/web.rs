@@ -5752,6 +5752,10 @@ async fn children_fence_aspect_controls_the_card_shape() {
     let sq = admin.get(server.url("/pages/squares")).send().await.unwrap().text().await.unwrap();
     assert!(sq.contains("aspect-square"), "square fence → square card boxes: {sq}");
     assert!(!sq.contains("aspect-[3/4]"), "square fence emits no portrait box");
+    // DZ.6: the widget is `not-prose` — else the Typography plugin styles the card
+    // cover <img> with article margins (whitespace above/below the cover) on the
+    // `/pages/<…>` fence path (the grid renders inside `<div class="prose">`).
+    assert!(sq.contains("not-prose"), "the widget opts out of prose img margins: {sq}");
 
     // Control: no aspect → the 3:4 portrait default.
     admin.post(server.url("/pages")).form(&[("page_title", "Portraits")]).send().await.unwrap();

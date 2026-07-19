@@ -23,6 +23,12 @@
 </a>
 {% endmacro %}
 
+{# `not-prose` (Tailwind Typography escape hatch): on the `/pages/<…>` fence path the
+   filled grid lands inside `<div class="prose">`, which otherwise styles the card
+   COVER `<img>` with article margins (`margin: 2em/1em`) → whitespace above/below every
+   cover. This widget is a UI component, not article prose, so opt the whole thing out.
+   Harmless on the section/library routes (no prose there to negate). #}
+<div class="not-prose">
 {% if is_admin %}
 <form hx-post="{{ form_action }}" class="mb-4 flex flex-row gap-2">
     <input class="border border-navy px-2 grow min-w-0 rounded-sm" name="page_title" type="text"
@@ -49,3 +55,4 @@
 {% endif %}
 
 {% include "partials/listing_pager.html" %}
+</div>
