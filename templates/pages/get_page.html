@@ -202,12 +202,10 @@
   </div>
 </div>
 {% endif %}{% endif %}
-{% if pages_path.len() > 2 %}
-<ul class="flex text-sm text-navy/60 mb-1">
-  {% for path_node in pages_path.iter().skip(1) %}
-  {% if ! loop.last %}
-  <li class="pr-2">{{path_node.display_title()}} &gt;</li>
-  {% endif %}
+{% if ! breadcrumbs.is_empty() %}
+<ul class="flex flex-wrap text-sm text-navy/60 mb-1">
+  {% for crumb in breadcrumbs %}
+  <li class="pr-2"><a href="{{crumb.href}}" class="hover:text-navy hover:underline">{{crumb.title}}</a> &gt;</li>
   {% endfor %}
 </ul>
 {% endif %}

@@ -11,7 +11,18 @@
     {% else %}
     <span></span>
     {% endif %}
-    <span class="text-navy/70 text-sm">Page {{ pagination.current_page }} of {{ pagination.total_pages }}</span>
+    {# Jump-to-page: a native GET form (no JS) — type a number, Enter navigates to
+       base_path?q=…&page=N, exactly the URL the prev/next links carry. The handler
+       clamps out-of-range, so any typed value is safe. Preserves an active search. #}
+    <form method="get" action="{{ pagination.base_path }}" class="inline-flex items-center gap-1 text-navy/70 text-sm">
+        {% if pagination.is_search() %}<input type="hidden" name="q" value="{{ pagination.search }}" />{% endif %}
+        <label>Page
+            <input type="number" name="page" value="{{ pagination.current_page }}"
+                min="1" max="{{ pagination.total_pages }}" inputmode="numeric" aria-label="Go to page number"
+                class="w-14 border border-navy/30 rounded px-2 py-1 text-center bg-white" />
+        </label>
+        of {{ pagination.total_pages }}
+    </form>
     {% if pagination.has_next() %}
     <a href="{{ pagination.next_url() }}" class="px-3 py-2 bg-navy text-div-grey rounded-sm">
         Next {% call icons::arrow_right() %}

@@ -89,7 +89,8 @@ pub async fn show_resume(
         auth_state: session_data.auth_state,
         page_path: format!("resume/{}", child.page_name),
         page: child.clone(),
-        pages_path: vec![child.clone()],
+        // The résumé is a single-level page — no ancestor trail to link.
+        breadcrumbs: Vec::new(),
         children_pages: ContentPageDao::find_by_parent(&state.pool, Some(child.page_id)).await?,
         rendered_markdown: cached_transform(&separate_role_subtitles(&strip_leading_h1(
             &child.page_markdown,

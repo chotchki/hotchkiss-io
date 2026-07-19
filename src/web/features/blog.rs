@@ -171,7 +171,7 @@ pub async fn show_post(
         auth_state: session_data.auth_state,
         page_path: format!("blog/{slug}"),
         page: lp.clone(),
-        pages_path: pages_path.clone(),
+        breadcrumbs: crate::web::features::pages::breadcrumbs_from_path(&pages_path),
         children_pages: ContentPageDao::find_by_parent(&state.pool, Some(lp.page_id)).await?,
         rendered_markdown: cached_transform(&strip_leading_h1(&lp.page_markdown))?,
         edit: edit_q.edit.is_some(),

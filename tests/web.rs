@@ -3850,13 +3850,20 @@ async fn blog_paginates_at_page_size() {
     }
     let p1 = reqwest::get(server.url("/blog")).await.unwrap().text().await.unwrap();
     assert_eq!(p1.matches("/blog/post-").count(), 10, "page 1 shows PAGE_SIZE cards");
-    assert!(p1.contains("Page 1 of 2"), "pager present: {p1}");
+    // The editable jump-to-page form: a number input (current value + max) + "of N".
+    assert!(
+        p1.contains(r#"name="page""#) && p1.contains(r#"value="1""#) && p1.contains("of 2"),
+        "editable pager present on page 1: {p1}"
+    );
     assert!(p1.contains("Next"), "page 1 has a Next link");
     assert!(!p1.contains("Previous"), "page 1 has no Previous link");
 
     let p2 = reqwest::get(server.url("/blog?page=2")).await.unwrap().text().await.unwrap();
     assert_eq!(p2.matches("/blog/post-").count(), 2, "page 2 shows the remainder");
-    assert!(p2.contains("Page 2 of 2"));
+    assert!(
+        p2.contains(r#"value="2""#) && p2.contains("of 2"),
+        "the jump input reflects the current page"
+    );
     assert!(p2.contains("Previous"), "page 2 has a Previous link");
     assert!(!p2.contains("Next"), "page 2 has no Next link");
 }
@@ -3882,7 +3889,7 @@ async fn blog_search_filters_and_composes_with_pagination() {
     }
     let s1 = reqwest::get(server.url("/blog?q=widgetword")).await.unwrap().text().await.unwrap();
     assert!(s1.contains("12 results for"), "filtered count: {s1}");
-    assert!(s1.contains("Page 1 of 2"), "filtered set paginates");
+    assert!(s1.contains(r#"name="page""#) && s1.contains("of 2"), "filtered set paginates: {s1}");
     assert!(
         s1.contains("q=widgetword") && s1.contains("page=2"),
         "next link composes q + page"
@@ -3897,11 +3904,51 @@ async fn projects_listing_uses_the_shared_search_and_pager() {
     }
     let body = reqwest::get(server.url("/projects")).await.unwrap().text().await.unwrap();
     assert!(body.contains("action=\"/projects\""), "shared search box wired on projects: {body}");
-    assert!(body.contains("Page 1 of 2"), "projects paginate via the shared machinery");
+    assert!(
+        body.contains(r#"name="page""#) && body.contains("of 2"),
+        "projects paginate via the shared machinery: {body}"
+    );
     assert_eq!(
         body.matches("/pages/projects/proj-").count(),
         10,
         "page 1 shows PAGE_SIZE projects"
+    );
+}
+
+/// The pager's "Page N of M" is an editable jump-to-page GET form (friendlier than
+/// clicking Next 25× on a 26-page series): a number input bounded to [1, total] that
+/// submits to base_path?page=N. No JS — native form GET. A search stays sticky via a
+/// hidden q. And an out-of-range typed number is clamped by the handler, not a 500.
+#[tokio::test]
+async fn pager_is_an_editable_jump_to_page_form() {
+    let server = spawn_test_server().await.expect("spawn");
+    for i in 0..25 {
+        server
+            .seed_blog_post(&format!("jump-{i:02}"), "shared jumpword body")
+            .await
+            .unwrap();
+    }
+    // 25 posts, PAGE_SIZE 10 → 3 pages. The jump input is bounded to the total.
+    let p1 = reqwest::get(server.url("/blog")).await.unwrap().text().await.unwrap();
+    assert!(p1.contains(r#"<form method="get" action="/blog""#), "the pager is a GET form to base_path: {p1}");
+    assert!(p1.contains(r#"type="number" name="page""#), "with a number page input");
+    assert!(p1.contains(r#"max="3""#), "bounded to the total page count");
+    assert!(p1.contains(r#"value="1""#), "defaulting to the current page");
+
+    // Jumping straight to the last page works (what typing 3 + Enter navigates to).
+    let p3 = reqwest::get(server.url("/blog?page=3")).await.unwrap().text().await.unwrap();
+    assert_eq!(p3.matches("/blog/jump-").count(), 5, "page 3 shows the remainder (25 - 20)");
+    assert!(p3.contains(r#"value="3""#), "the input reflects page 3");
+
+    // An out-of-range jump is clamped to the last page, never a 500.
+    let over = reqwest::get(server.url("/blog?page=999")).await.unwrap();
+    assert_eq!(over.status(), StatusCode::OK, "an over-range page is clamped, not an error");
+
+    // A search keeps its q sticky through the jump form (hidden field).
+    let s = reqwest::get(server.url("/blog?q=jumpword")).await.unwrap().text().await.unwrap();
+    assert!(
+        s.contains(r#"type="hidden" name="q" value="jumpword""#),
+        "the jump form preserves the active search: {s}"
     );
 }
 
@@ -5454,6 +5501,54 @@ async fn series_card_rolls_up_its_first_volume_cover() {
     assert!(
         section.contains(&format!("/media/file/{cover_key}")),
         "the series card rolled up volume 1's cover: {section}"
+    );
+}
+
+/// Breadcrumbs on a deep page are CLICKABLE ancestor links (chris's ask): a manga
+/// volume at `/pages/library/manga/<series>/<volume>` shows `Manga › <Series>` as
+/// links to their cumulative `/pages/…` URLs. The top section (library) is dropped
+/// (the nav carries it) and the leaf (the volume you're on) is not a link.
+#[tokio::test]
+async fn breadcrumbs_are_clickable_ancestor_links() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // Build a 4-deep tree via the manga ingest: library → manga → bread-series → volume-1.
+    let form = reqwest::multipart::Form::new()
+        .text("series", "Bread Series")
+        .part("f1", epub_part(manga_fixture(1), "series-v01.epub"));
+    admin
+        .post(server.url("/admin/media/import/upload"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+
+    let vol = admin
+        .get(server.url("/pages/library/manga/bread-series/volume-1"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    // The two ancestor crumbs are links to their cumulative paths.
+    assert!(
+        vol.contains(r#"<a href="/pages/library/manga""#),
+        "the Manga crumb links to the section: {vol}"
+    );
+    assert!(
+        vol.contains(r#"<a href="/pages/library/manga/bread-series""#),
+        "the series crumb links to the series page"
+    );
+    // The leaf (the volume you're on) is NOT a link anywhere on its own page — the
+    // breadcrumb omits it. (`/pages/library` is deliberately NOT asserted-absent: the
+    // nav's Library tab links it, so its presence isn't a breadcrumb signal.)
+    assert!(
+        !vol.contains(r#"<a href="/pages/library/manga/bread-series/volume-1""#),
+        "the current page is not a self-link in the trail"
     );
 }
 

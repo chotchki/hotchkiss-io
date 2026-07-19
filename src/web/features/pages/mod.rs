@@ -76,6 +76,41 @@ pub struct PostNavCard {
     pub page_creation_date: String,
 }
 
+/// One clickable breadcrumb: an ancestor's title + its `/pages/…` link target.
+pub struct Crumb {
+    pub title: String,
+    pub href: String,
+}
+
+/// Build the clickable ancestor trail from a resolved root→leaf `pages_path`. Each
+/// crumb links to its CUMULATIVE `/pages/<seg>/…` URL (the segments up to and
+/// including that node). Mirrors the trail the template used to render as plain text:
+/// the top-level section (index 0) is dropped — the nav already carries it — and the
+/// leaf (the page you're ON) is omitted. So a `/pages/library/manga/one-piece/vol-1`
+/// view shows `Manga › One Piece`, both links. Fewer than 3 nodes → no trail (empty).
+pub fn breadcrumbs_from_path(pages_path: &[ContentPageDao]) -> Vec<Crumb> {
+    if pages_path.len() < 3 {
+        return Vec::new();
+    }
+    // Ancestors between the top section (exclusive) and the leaf (exclusive).
+    pages_path[1..pages_path.len() - 1]
+        .iter()
+        .enumerate()
+        .map(|(offset, node)| {
+            // `offset` is 0-based within the slice starting at index 1, so the
+            // cumulative segment span is pages_path[0..=offset+1].
+            let segs: Vec<&str> = pages_path[..=offset + 1]
+                .iter()
+                .map(|n| n.page_name.as_str())
+                .collect();
+            Crumb {
+                title: node.display_title(),
+                href: format!("/pages/{}", segs.join("/")),
+            }
+        })
+        .collect()
+}
+
 #[derive(Template)]
 #[template(path = "pages/get_page.html")]
 pub struct GetPageTemplate {
@@ -83,7 +118,10 @@ pub struct GetPageTemplate {
     pub auth_state: AuthenticationState,
     pub page_path: String,
     pub page: ContentPageDao,
-    pub pages_path: Vec<ContentPageDao>,
+    /// Clickable ancestor trail (title + cumulative `/pages/…` href), derived from
+    /// the resolved page path by `breadcrumbs_from_path`. Empty when there's nothing
+    /// to link (a top-level or one-deep page), so the template renders no crumb bar.
+    pub breadcrumbs: Vec<Crumb>,
     pub children_pages: Vec<ContentPageDao>,
     pub rendered_markdown: String,
     /// Admin editor visible? Driven by `?edit` so admin defaults to the clean
@@ -204,7 +242,7 @@ pub async fn get_page_path(
                 auth_state: session_data.auth_state,
                 page_path: page_path.clone(),
                 page: lp.clone(),
-                pages_path: pages_path.clone(),
+                breadcrumbs: breadcrumbs_from_path(&pages_path),
                 children_pages: ContentPageDao::find_by_parent(&state.pool, Some(lp.page_id))
                     .await?,
                 rendered_markdown: rendered,
@@ -369,5 +407,67 @@ async fn create_and_redirect(
         )
             .into_response()),
         Err(PageWriteError::Internal(e)) => Err(e.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::types::chrono::Utc;
+
+    /// A minimal page node — `breadcrumbs_from_path` reads only `page_name` (and
+    /// `display_title()`, which falls back to `page_name` with no title/H1).
+    fn node(name: &str) -> ContentPageDao {
+        ContentPageDao {
+            page_id: 0,
+            parent_page_id: None,
+            page_name: name.to_string(),
+            page_title: None,
+            page_category: None,
+            page_markdown: String::new(),
+            page_cover_attachment_id: None,
+            page_order: 0,
+            page_creation_date: Utc::now(),
+            page_modified_date: Utc::now(),
+            special_page: false,
+            min_role: None,
+        }
+    }
+
+    #[test]
+    fn no_trail_until_you_are_actually_nesting() {
+        // Top-level and one-deep pages (e.g. `/blog/<slug>`) show NO breadcrumb — the
+        // trail only earns its place once a page nests below a section (chris's ask).
+        assert!(breadcrumbs_from_path(&[]).is_empty());
+        assert!(breadcrumbs_from_path(&[node("blog")]).is_empty());
+        assert!(breadcrumbs_from_path(&[node("blog"), node("my-post")]).is_empty());
+    }
+
+    #[test]
+    fn drops_the_top_section_and_the_leaf() {
+        // `/pages/library/manga/one-piece/volume-1` → `Manga › One Piece`, both links
+        // to their cumulative paths; the top (`library`, in the nav) and the leaf
+        // (`volume-1`, the current page) are omitted.
+        let path = [
+            node("library"),
+            node("manga"),
+            node("one-piece"),
+            node("volume-1"),
+        ];
+        let crumbs = breadcrumbs_from_path(&path);
+        assert_eq!(crumbs.len(), 2);
+        assert_eq!(crumbs[0].title, "manga");
+        assert_eq!(crumbs[0].href, "/pages/library/manga");
+        assert_eq!(crumbs[1].title, "one-piece");
+        assert_eq!(crumbs[1].href, "/pages/library/manga/one-piece");
+    }
+
+    #[test]
+    fn three_deep_shows_the_single_parent_crumb() {
+        // The minimal nesting: `/pages/a/b/c` → just `b` (the immediate parent).
+        let crumbs = breadcrumbs_from_path(&[node("a"), node("b"), node("c")]);
+        assert_eq!(crumbs.len(), 1);
+        assert_eq!(crumbs[0].title, "b");
+        assert_eq!(crumbs[0].href, "/pages/a/b");
     }
 }
