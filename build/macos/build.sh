@@ -67,6 +67,16 @@ APP="$TARGET_DIR/$APP_BASENAME"
 
 rustup target add aarch64-apple-darwin
 
+# Full clean before every deploy build (honors CARGO_TARGET_DIR). Two reasons:
+# (1) rust-embed's RELEASE embed is compile-time, and it does NOT detect a NEWLY
+#     ADDED asset file on an incremental build — static_content.rs isn't recompiled,
+#     so the new file 404s in prod (the DV foliate-js vendoring hit exactly this).
+#     A clean guarantees the embed is always the current assets tree.
+# (2) It bounds the persistent per-profile target dir (which otherwise accumulates
+#     incremental artifacts + old dep versions across deploys). The cost is a full
+#     rebuild each deploy (~minutes), accepted for correctness + bounded disk.
+cargo clean
+
 cargo build --locked --target aarch64-apple-darwin --release
 
 rm -rf "$APP"
