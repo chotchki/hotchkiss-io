@@ -4212,6 +4212,60 @@ async fn uploaded_epub_renders_the_foliate_reader_embed() {
     assert!(!embed.contains("media-download"), "must NOT be a plain File download link");
 }
 
+/// Phase DV.10: an uploaded EPUB's embedded cover (declared in the OPF) is extracted
+/// at ingest + stored as an image variant, so `cover_url_for` auto-populates the card
+/// + hero — the EPUB analog of the audiobook `attached_pic` poster. The item stays an
+/// Epub (the cover is its thumbnail, not its type).
+#[tokio::test]
+async fn epub_cover_is_extracted_as_an_image_variant() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+    let epub =
+        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/test.epub")).unwrap();
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(epub)
+            .file_name("vol01.epub")
+            .mime_str("application/epub+zip")
+            .unwrap(),
+    );
+    let media_ref = admin
+        .post(server.url("/media"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap()["ref"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let img_variants: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM media_variant v JOIN media m ON m.media_id = v.media_id \
+         WHERE m.media_ref = ?1 AND v.mime LIKE 'image/%'",
+    )
+    .bind(&media_ref)
+    .fetch_one(&server.pool)
+    .await
+    .unwrap();
+    assert!(img_variants >= 1, "the OPF cover was extracted as an image variant");
+
+    let kind: String = sqlx::query_scalar("SELECT kind FROM media WHERE media_ref = ?1")
+        .bind(&media_ref)
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+    assert_eq!(kind, "epub", "a book grouped with its cover stays an Epub item");
+
+    // And the card cover resolves (cover_url_for picks the extracted image).
+    let card =
+        admin.get(server.url("/admin/media")).send().await.unwrap().text().await.unwrap();
+    assert!(card.contains(&media_ref), "the item shows in the library");
+}
+
 /// Phase DV: the vendored foliate-js EPUB reader engine serves as ES modules — the
 /// entry (`view.js`), the EPUB parser it dynamically imports (`epub.js`), and the
 /// zip loader under the relative `./vendor/` path view.js resolves against.

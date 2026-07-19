@@ -29,6 +29,7 @@ cat > "$src/content.opf" <<'XML'
   </metadata>
   <manifest>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="cover" href="cover.png" media-type="image/png" properties="cover-image"/>
     <item id="p1" href="page1.xhtml" media-type="application/xhtml+xml"/>
     <item id="p2" href="page2.xhtml" media-type="application/xhtml+xml"/>
   </manifest>
@@ -47,6 +48,9 @@ cat > "$src/nav.xhtml" <<'XML'
 </html>
 XML
 
+# A tiny valid PNG cover (2x2) — enough for the DV.10 cover-extraction test.
+printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP8z8Dwn4EIwDiKAgB5ZwQBIsN9UwAAAABJRU5ErkJggg==' | base64 -d > "$src/cover.png"
+
 for n in 1 2; do
   cat > "$src/page$n.xhtml" <<XML
 <?xml version="1.0" encoding="utf-8"?>
@@ -58,5 +62,5 @@ done
 out="$repo/tests/fixtures/test.epub"
 rm -f "$out"
 ( cd "$src" && zip -X0 "$out" mimetype >/dev/null \
-    && zip -Xr9 "$out" META-INF content.opf nav.xhtml page1.xhtml page2.xhtml >/dev/null )
+    && zip -Xr9 "$out" META-INF content.opf nav.xhtml cover.png page1.xhtml page2.xhtml >/dev/null )
 echo "wrote $out"

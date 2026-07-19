@@ -304,6 +304,8 @@ async fn add_derived_variants(
         maybe_add_responsive_variants(state, hmac_key, media_id, primary_sha).await;
     } else if matches!(kind, MediaKind::Video | MediaKind::Audio) {
         maybe_add_poster(state, hmac_key, media_id, primary_sha).await;
+    } else if kind == MediaKind::Epub {
+        maybe_add_epub_cover(state, hmac_key, media_id, primary_sha).await;
     }
 }
 
@@ -731,6 +733,62 @@ async fn maybe_add_poster(state: &AppState, hmac_key: &[u8], media_id: i64, vide
             }
         }
         Err(e) => tracing::warn!("auto-poster generation failed (media {media_id}): {e:?}"),
+    }
+}
+
+/// Extract an EPUB's embedded cover image (declared in the OPF) and add it as an
+/// image variant (Phase DV.10) — the EPUB analog of the audiobook `attached_pic`
+/// poster, so `cover_url_for` / `cover_hero_for` auto-populate the card + hero. The
+/// `epub` crate parses the OPF, so we don't hand-roll the EPUB2 `<meta name="cover">`
+/// vs EPUB3 `properties="cover-image"` variations. Best-effort: a cover-less or
+/// malformed book just logs + degrades to the placeholder, NEVER fails the upload.
+async fn maybe_add_epub_cover(state: &AppState, hmac_key: &[u8], media_id: i64, epub_sha: String) {
+    let store = state.media_store.clone();
+    let result: Result<(String, i64, String, std::path::PathBuf)> = async {
+        let path_store = store.clone();
+        // EpubDoc is blocking file I/O — do the open + cover read off the async runtime.
+        let (bytes, mime) = tokio::task::spawn_blocking(move || -> Result<(Vec<u8>, String)> {
+            let path = path_store
+                .resolve_path(&epub_sha, None)
+                .ok_or_else(|| anyhow!("epub source {epub_sha} not found in any media root"))?;
+            let mut doc = epub::doc::EpubDoc::new(&path).map_err(|e| anyhow!("open epub: {e}"))?;
+            doc.get_cover().ok_or_else(|| anyhow!("no cover in the OPF"))
+        })
+        .await
+        .map_err(|e| anyhow!("epub cover task panicked: {e}"))??;
+        let len = bytes.len() as i64;
+        let store2 = store.clone();
+        let (sha, root) = tokio::task::spawn_blocking(move || store2.store(&bytes))
+            .await
+            .map_err(|e| anyhow!("epub cover store task panicked: {e}"))??;
+        Ok((sha, len, mime, root))
+    }
+    .await;
+
+    match result {
+        Ok((sha, len, mime, root)) => {
+            // The OPF cover SHOULD be an image; guard a weird manifest so we never
+            // store a non-image "cover" that the card render would then choke on.
+            let mime = if mime.starts_with("image/") { mime } else { "image/jpeg".to_string() };
+            if let Err(e) = create_variant(
+                &state.pool,
+                hmac_key,
+                media_id,
+                sha,
+                mime,
+                None,
+                len,
+                Some(root.to_string_lossy().into_owned()),
+                None,
+                None,
+            )
+            .await
+            {
+                tracing::warn!("epub cover variant insert failed (media {media_id}): {e:?}");
+            }
+        }
+        // A cover-less EPUB is normal, not an error — INFO, not WARN.
+        Err(e) => tracing::info!("no epub cover extracted (media {media_id}): {e:?}"),
     }
 }
 
