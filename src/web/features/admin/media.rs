@@ -190,6 +190,10 @@ fn dominant_kind(kinds: &[MediaKind]) -> MediaKind {
         // An audiobook grouped with its cover image is an AUDIO item; the
         // image is its artwork/thumbnail (same rule as model/video vs image).
         MediaKind::Audio
+    } else if kinds.contains(&MediaKind::Epub) {
+        // A book grouped with its extracted cover image (Phase DV.10) is an EPUB
+        // item; the image is its thumbnail — same rule as audio/video vs image.
+        MediaKind::Epub
     } else if kinds.contains(&MediaKind::Image) {
         MediaKind::Image
     } else {

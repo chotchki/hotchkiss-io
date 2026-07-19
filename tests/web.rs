@@ -4176,6 +4176,42 @@ async fn child_index_widget_lists_children() {
     );
 }
 
+/// Phase DV: an uploaded `.epub` becomes a `MediaKind::Epub` item (extension-typed,
+/// no ffprobe; `dominant_kind` keeps a lone epub Epub — the regression that shipped
+/// it as a File download), and its embed is the foliate READER shell carrying the
+/// gated byte URL — NOT a plain download link.
+#[tokio::test]
+async fn uploaded_epub_renders_the_foliate_reader_embed() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    let epub =
+        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/test.epub")).unwrap();
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(epub)
+            .file_name("vol01.epub")
+            .mime_str("application/epub+zip")
+            .unwrap(),
+    );
+    let resp = admin.post(server.url("/media")).multipart(form).send().await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "epub upload (no ffprobe needed)");
+    let media_ref =
+        resp.json::<serde_json::Value>().await.unwrap()["ref"].as_str().unwrap().to_string();
+
+    let embed = reqwest::get(server.url(&format!("/media/embed/{media_ref}")))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(embed.contains("class=\"epub-reader"), "epub renders the reader shell: {embed}");
+    assert!(embed.contains("epub-splash"), "the reader shell carries the boot splash");
+    assert!(embed.contains("/media/file/"), "carries the gated byte URL for the reader to fetch");
+    assert!(!embed.contains("media-download"), "must NOT be a plain File download link");
+}
+
 /// Phase DV: the vendored foliate-js EPUB reader engine serves as ES modules — the
 /// entry (`view.js`), the EPUB parser it dynamically imports (`epub.js`), and the
 /// zip loader under the relative `./vendor/` path view.js resolves against.

@@ -403,6 +403,10 @@ hx-trigger="load" hx-swap="outerHTML">`; `render_embed_html` dispatches by kind:
   DOWNLOAD = largest mesh, `data-format` (stl|3mf) branches the loader. A scad variant
   adds the **"Open in the slicer"** button (§10). Selection is over `ModelFormat::is_mesh`
   variants only (an image variant is thumbnail, never mis-loaded as mesh).
+- **epub** → the in-browser **foliate-js** reader shell (`<foliate-view>` mount + boot splash +
+  no-JS download fallback); `epub-reader.js` fetches the gated `.epub` Blob, RTL-aware page
+  turn, `localStorage` resume. Manga + novels. `.epub` is extension-typed (`dominant_kind`
+  keeps a lone epub `Epub`, NOT File). **Full design: `docs/epub-reader-design.md`** (Phase DV).
 - **file** → a styled `download_button` (glyph + name + size, `download` attr).
 
 **Selector sharing (DP.3 / DR.4):** the embed's Stl arm (`media_select::viewer_mesh` /
@@ -479,6 +483,7 @@ rule:** an author never bakes a `url_key`; every authored reference resolves thr
 | video | HEVC + AV1 `video/mp4` + poster AVIF | `mp4` → largest; poster is `image/avif` |
 | audio | AAC (`audio/mp4`) + cover art AVIF | `m4a`/`aac` → the audio; art is `image/avif` |
 | stl   | scad + low/high mesh (3mf/stl) | `scad` → source, `3mf`/`stl` → largest mesh |
+| epub  | the `.epub` blob (+ extracted cover AVIF, DV.10) | the byte URL feeds the in-browser foliate reader; cover art is `image/avif` |
 | file  | the one file | its own type |
 
 `bytes` is the fidelity key everywhere (decimation/downscale is monotonic).

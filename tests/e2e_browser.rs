@@ -854,6 +854,130 @@ async fn family_library_gate_login_next_and_entry() {
     drop(server);
 }
 
+/// Phase DV: the foliate-js EPUB reader BOOTS in a real browser — the de-risk the
+/// direct tests can't give. Setup over HTTP (upload a real `.epub` as PUBLIC media +
+/// embed it on a public page), then headless Chrome loads the page: the embed
+/// hx-swaps in, `epub-reader.js` fetches the `.epub` Blob, mounts a `<foliate-view>`,
+/// opens the book, and lifts the boot splash. Asserts the view mounts + the splash
+/// lifts (the book opened + first page painted) + no fatal console error. Gating is
+/// proved server-side; this proves the reader RUNS.
+#[tokio::test]
+async fn epub_reader_boots_in_browser() {
+    use chromiumoxide::cdp::browser_protocol::log::{
+        EnableParams as LogEnableParams, EventEntryAdded, LogEntryLevel,
+    };
+    let _e2e = e2e_lock().await;
+    let server: TestServer = spawn_test_server().await.expect("spawn harness");
+
+    // Setup over reqwest: upload the fixture .epub as PUBLIC media + embed it on a
+    // public page (so the browser loads it anonymously — no ceremony needed here).
+    let http = reqwest::Client::builder().cookie_store(true).build().unwrap();
+    http.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+    let epub =
+        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/test.epub")).unwrap();
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(epub)
+            .file_name("test.epub")
+            .mime_str("application/epub+zip")
+            .unwrap(),
+    );
+    let up: serde_json::Value =
+        http.post(server.url("/media")).multipart(form).send().await.unwrap().json().await.unwrap();
+    let media_ref = up["ref"].as_str().expect("media ref").to_string();
+    http.post(server.url("/pages")).form(&[("page_title", "Reader Test")]).send().await.unwrap();
+    let md = format!("# Reader Test\n\n![](/media/{media_ref})\n");
+    http.put(server.url("/pages/reader-test"))
+        .header("HX-Request", "true")
+        .form(&[
+            ("page_category", ""),
+            ("page_markdown", md.as_str()),
+            ("page_cover_media_ref", ""),
+            ("page_order", "0"),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    let (mut browser, handle, profile) = launch().await;
+    let page = browser.new_page("about:blank").await.expect("new page");
+
+    // Capture console errors so a foliate boot failure is visible in CI output.
+    page.execute(LogEnableParams::default()).await.expect("Log.enable");
+    let mut entries = page.event_listener::<EventEntryAdded>().await.expect("log listener");
+    let errors: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = errors.clone();
+    let log_task = tokio::spawn(async move {
+        while let Some(ev) = entries.next().await {
+            if matches!(ev.entry.level, LogEntryLevel::Error) {
+                sink.lock().unwrap().push(ev.entry.text.clone());
+            }
+        }
+    });
+
+    page.goto(server.url("/pages/reader-test")).await.expect("goto reader page");
+
+    // Wait for the reader to mount + the splash to lift (book opened + painted).
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut booted = false;
+    while Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let ok: bool = page
+            .evaluate(
+                "!!document.querySelector('.epub-reader foliate-view') \
+                 && !document.querySelector('.epub-splash')",
+            )
+            .await
+            .ok()
+            .and_then(|r| r.into_value().ok())
+            .unwrap_or(false);
+        if ok {
+            booted = true;
+            break;
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await; // flush late error logs
+
+    let view_present: bool = page
+        .evaluate("!!document.querySelector('.epub-reader foliate-view')")
+        .await
+        .ok()
+        .and_then(|r| r.into_value().ok())
+        .unwrap_or(false);
+    let splash_text: String = page
+        .evaluate("(function(){var s=document.querySelector('.epub-splash');return s?s.textContent:'';})()")
+        .await
+        .ok()
+        .and_then(|r| r.into_value().ok())
+        .unwrap_or_default();
+
+    let errs = errors.lock().unwrap().clone();
+    let fatal: Vec<&String> = errs
+        .iter()
+        .filter(|e| {
+            let t = e.to_lowercase();
+            t.contains("epub-reader:") || t.contains("uncaught") || t.contains("is not a function")
+        })
+        .collect();
+
+    browser.close().await.ok();
+    handle.await.ok();
+    log_task.abort();
+    let _ = std::fs::remove_dir_all(&profile);
+
+    assert!(view_present, "the <foliate-view> reader element mounted");
+    assert!(
+        fatal.is_empty(),
+        "fatal console errors during foliate boot: {fatal:?}"
+    );
+    assert!(
+        booted,
+        "the reader never booted (splash never lifted); splash still reads {splash_text:?}, errors: {errs:?}"
+    );
+    drop(server);
+}
+
 // ── Editor boot e2e (fab-gui migration, CW.9) ────────────────────────────────
 /// Loads `/3d/editor` in real headless Chrome and asserts the fab-gui WASM app
 /// BOOTS end-to-end — coverage the direct-fetch integration tests (three_d.rs)
