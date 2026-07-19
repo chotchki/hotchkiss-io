@@ -18,6 +18,27 @@ function addImage() {
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: called from template inline handlers
+function addChildIndex() {
+  const el = document.getElementById("page_markdown");
+  const [start, end] = [el.selectionStart, el.selectionEnd];
+  // A ```children fence — the child-index widget lists this page's child pages
+  // as a card grid (order=manual for volumes/curated; change to newest for a feed).
+  el.setRangeText("\n```children order=manual\n```\n", start, end, "end");
+  el.focus();
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from template inline handlers
+function addDiagram() {
+  const el = document.getElementById("page_markdown");
+  const [start, end] = [el.selectionStart, el.selectionEnd];
+  // A ```d2 fence — compiled to an inline SVG diagram at render (a starter graph).
+  el.setRangeText("\n```d2\na -> b -> c\n```\n", start, end, "end");
+  el.focus();
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from template inline handlers
 function addAttachment(event) {
   event.preventDefault();
   const el = document.getElementById("page_markdown");
