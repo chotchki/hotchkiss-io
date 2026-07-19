@@ -45,6 +45,8 @@ pub fn parse_order(meta: Option<&str>) -> &'static str {
 }
 
 struct ChildCard {
+    /// The child page's id — the drag-reorder hidden input (DV.12).
+    page_id: i64,
     title: String,
     /// `{base_path}/{child slug}` — the child page's URL.
     url: String,
@@ -61,13 +63,17 @@ struct ChildCard {
 struct ChildIndexTemplate {
     cards: Vec<ChildCard>,
     pagination: Pagination,
-    /// Show the "+ new child" authoring form.
+    /// Show the "+ new child" authoring form + the drag-reorder handles (DV.12).
     is_admin: bool,
     /// The content-tree path children live under — the "+ new child" form `hx-post`s
     /// here to create a child. Distinct from the pager base (`pagination.base_path`):
     /// on a content page they're the same (`/pages/<path>`), but the library section
     /// route lists at `/library/<section>` while children live at `/pages/library/<section>`.
     form_action: String,
+    /// The parent page id + the page-order offset for the drag-reorder POST (DV.12):
+    /// within-page drag writes `reorder_start..+N`, so pagination stays consistent.
+    parent_id: i64,
+    reorder_start: i64,
 }
 
 /// Render the paginated children grid for `parent` as an HTML fragment — the ONE
@@ -95,6 +101,7 @@ pub async fn render_children_grid(
             None => crate::web::features::media::embedded_media_cover(pool, &c.page_markdown).await,
         };
         cards.push(ChildCard {
+            page_id: c.page_id,
             title: c.display_title(),
             url: format!("{child_base}/{}", c.page_name),
             cover_url,
@@ -103,11 +110,14 @@ pub async fn render_children_grid(
             visibility: c.visibility_label(),
         });
     }
+    let reorder_start = (pagination.current_page - 1) * crate::web::features::listing::PAGE_SIZE;
     Ok(ChildIndexTemplate {
         cards,
         pagination,
         is_admin: viewer == Role::Admin,
         form_action: child_base.to_string(),
+        parent_id: parent_page_id,
+        reorder_start,
     }
     .render()?)
 }

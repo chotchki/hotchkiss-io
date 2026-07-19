@@ -1,8 +1,25 @@
 {# The child-index widget fragment (Phase DV) — rendered standalone by
-   `child_index::fill` and string-replaced into a content page's HTML where a
-   ` ```children ` fence sat. Lists the page's children as cards + the shared
-   search/pager. `is_admin` shows an inline "+ new child" form. Reused by manga
-   series pages AND the audiobooks section (the unified listing/selection). #}
+   `child_index::fill` / `render_children_grid` and placed where a ` ```children `
+   fence sat (or by the library section route). Lists the page's children as cards
+   + the shared search/pager. For an admin: a "+ new child" form AND drag-to-reorder
+   (DV.12) that persists `page_order` via /admin/pages/reorder-children. #}
+
+{% macro card_body(c) %}
+<a href="{{ c.url }}" class="block hover:opacity-90">
+    {% if let Some(cover) = c.cover_url %}
+    <div class="aspect-[3/4] bg-navy"><img src="{{ cover }}" alt="" class="w-full h-full object-cover" loading="lazy" /></div>
+    {% else %}
+    <div class="aspect-[3/4] bg-navy flex items-center justify-center"><span class="text-4xl">📖</span></div>
+    {% endif %}
+    <div class="p-2">
+        {% if c.scheduled %}<span class="inline-block mb-1 px-2 py-0.5 rounded text-xs font-semibold bg-yellow text-navy uppercase tracking-wide">Scheduled</span>{% endif %}
+        {% if let Some(v) = c.visibility %}<span class="inline-block mb-1 px-2 py-0.5 rounded text-xs font-semibold bg-navy text-yellow uppercase tracking-wide">{{ v }}</span>{% endif %}
+        <span class="block text-sm font-display text-navy break-words">{{ c.title }}</span>
+        {% if !c.excerpt.is_empty() %}<p class="mt-1 text-xs text-navy/70 line-clamp-2">{{ c.excerpt }}</p>{% endif %}
+    </div>
+</a>
+{% endmacro %}
+
 {% if is_admin %}
 <form hx-post="{{ form_action }}" class="mb-4 flex flex-row gap-2">
     <input class="border border-navy px-2 grow min-w-0 rounded-sm" name="page_title" type="text"
@@ -15,23 +32,26 @@
 
 {% if cards.is_empty() %}
 <p class="text-navy/70 italic my-4">{% if pagination.is_search() %}Nothing matches your search.{% else %}Nothing here yet.{% endif %}</p>
+{% else if is_admin %}
+{# Drag-to-reorder (DV.12): the whole grid is a SortableJS form; on drop it posts
+   the children's ids (in the new visual order) + the parent + the page offset. Only
+   meaningful with the manual order — a newest-order listing ignores page_order. #}
+<form class="sortable grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 my-4"
+    hx-post="/admin/pages/reorder-children" hx-trigger="end" hx-swap="none">
+    <input type="hidden" name="parent_id" value="{{ parent_id }}" />
+    <input type="hidden" name="start" value="{{ reorder_start }}" />
+    {% for c in cards %}
+    <div class="border-2 border-navy rounded-md overflow-hidden bg-body-grey cursor-move">
+        <input type="hidden" name="page_id" value="{{ c.page_id }}" />
+        {% call card_body(c) %}
+    </div>
+    {% endfor %}
+</form>
 {% else %}
 <ul class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 list-none p-0 my-4">
     {% for c in cards %}
     <li class="border-2 border-navy rounded-md overflow-hidden bg-body-grey">
-        <a href="{{ c.url }}" class="block hover:opacity-90">
-            {% if let Some(cover) = c.cover_url %}
-            <div class="aspect-[3/4] bg-navy"><img src="{{ cover }}" alt="" class="w-full h-full object-cover" loading="lazy" /></div>
-            {% else %}
-            <div class="aspect-[3/4] bg-navy flex items-center justify-center"><span class="text-4xl">📖</span></div>
-            {% endif %}
-            <div class="p-2">
-                {% if c.scheduled %}<span class="inline-block mb-1 px-2 py-0.5 rounded text-xs font-semibold bg-yellow text-navy uppercase tracking-wide">Scheduled</span>{% endif %}
-                {% if let Some(v) = c.visibility %}<span class="inline-block mb-1 px-2 py-0.5 rounded text-xs font-semibold bg-navy text-yellow uppercase tracking-wide">{{ v }}</span>{% endif %}
-                <span class="block text-sm font-display text-navy break-words">{{ c.title }}</span>
-                {% if !c.excerpt.is_empty() %}<p class="mt-1 text-xs text-navy/70 line-clamp-2">{{ c.excerpt }}</p>{% endif %}
-            </div>
-        </a>
+        {% call card_body(c) %}
     </li>
     {% endfor %}
 </ul>

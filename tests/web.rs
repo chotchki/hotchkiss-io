@@ -4212,6 +4212,96 @@ async fn uploaded_epub_renders_the_foliate_reader_embed() {
     assert!(!embed.contains("media-download"), "must NOT be a plain File download link");
 }
 
+/// Phase DV.12: the child-index widget renders a SortableJS reorder form for an admin,
+/// and the reorder endpoint persists `page_order` (offset-aware for pagination). A
+/// non-admin gets a plain, non-draggable list.
+#[tokio::test]
+async fn child_index_drag_reorder_persists_page_order() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // A parent carrying the manual-order fence + three children.
+    admin.post(server.url("/pages")).form(&[("page_title", "Shelf")]).send().await.unwrap();
+    admin
+        .put(server.url("/pages/shelf"))
+        .header("HX-Request", "true")
+        .form(&[
+            ("page_category", ""),
+            ("page_markdown", "# Shelf\n\n```children order=manual\n```\n"),
+            ("page_cover_media_ref", ""),
+            ("page_order", "0"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    for t in ["Alpha", "Bravo", "Charlie"] {
+        admin.post(server.url("/pages/shelf")).form(&[("page_title", t)]).send().await.unwrap();
+    }
+    let parent_id: i64 =
+        sqlx::query_scalar("SELECT page_id FROM content_pages WHERE page_name = 'shelf'")
+            .fetch_one(&server.pool)
+            .await
+            .unwrap();
+    let id = |name: &str| {
+        let pool = server.pool.clone();
+        let name = name.to_string();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT page_id FROM content_pages WHERE page_name = ?1")
+                .bind(name)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    let (a, b, c) = (id("alpha").await, id("bravo").await, id("charlie").await);
+
+    // Admin view: the sortable reorder form is present (draggable), targeting the
+    // children endpoint with the parent id.
+    let page = admin.get(server.url("/pages/shelf")).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("class=\"sortable"), "admin gets the draggable grid");
+    assert!(page.contains("/admin/pages/reorder-children"), "posts to the children reorder");
+    assert!(page.contains(&format!("name=\"parent_id\" value=\"{parent_id}\"")), "carries the parent id");
+
+    // Reorder to Charlie, Alpha, Bravo (repeated page_id keys → a Vec).
+    let form: Vec<(&str, String)> = vec![
+        ("parent_id", parent_id.to_string()),
+        ("start", "0".to_string()),
+        ("page_id", c.to_string()),
+        ("page_id", a.to_string()),
+        ("page_id", b.to_string()),
+    ];
+    let resp = admin.post(server.url("/admin/pages/reorder-children")).form(&form).send().await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let order = |page_id: i64| {
+        let pool = server.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT page_order FROM content_pages WHERE page_id = ?1")
+                .bind(page_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(order(c).await, 0, "Charlie moved first");
+    assert_eq!(order(a).await, 1);
+    assert_eq!(order(b).await, 2);
+
+    // Anti-tamper: an id that isn't a child of the parent is rejected.
+    let bad: Vec<(&str, String)> = vec![
+        ("parent_id", parent_id.to_string()),
+        ("page_id", parent_id.to_string()), // the parent itself isn't its own child
+    ];
+    let resp = admin.post(server.url("/admin/pages/reorder-children")).form(&bad).send().await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "a non-child id is rejected");
+
+    // A non-admin gets a plain list, no sortable form.
+    let anon = reqwest::get(server.url("/pages/shelf")).await.unwrap().text().await.unwrap();
+    assert!(!anon.contains("class=\"sortable"), "non-admin gets no drag handles");
+    assert!(anon.contains("Alpha"), "but still sees the listing");
+}
+
 /// Phase DV.11: a child-index card whose page has NO explicit cover derives one from
 /// the FIRST `![](/media/<ref>)` embed in the page's content → that media item's image
 /// variant (here the EPUB's extracted OPF cover). So a book/volume auto-covers its card

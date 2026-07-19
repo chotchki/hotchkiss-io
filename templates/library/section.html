@@ -3,7 +3,13 @@
 
 {% block title %}{{ title }}{% endblock %}
 
-{% block head %}{% endblock %}
+{% block head %}
+{% if is_admin %}
+{# Drag-to-reorder for the section's child-index widget (DV.12) — admin only. #}
+<script src="/vendor/sortable/sortable-1.15.6.min.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<script defer src="/scripts/htmx-sortable.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+{% endif %}
+{% endblock %}
 
 {% block content %}
 <div class="max-w-5xl mx-auto">

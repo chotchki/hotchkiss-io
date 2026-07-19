@@ -30,6 +30,12 @@
 <script src="/scripts/upload-progress.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 <script src="/scripts/editor-support.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 {% endif %}
+{% if auth_state.is_admin() %}
+{# Drag-to-reorder for a child-index widget (DV.12) — admin only; the widget shows
+   in the reader view too, so this isn't gated on ?edit. #}
+<script src="/vendor/sortable/sortable-1.15.6.min.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<script defer src="/scripts/htmx-sortable.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+{% endif %}
 {% endblock %}
 
 {% block content %}

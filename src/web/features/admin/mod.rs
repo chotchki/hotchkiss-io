@@ -29,6 +29,9 @@ pub fn admin_router() -> Router<AppState> {
         )
         .route("/pages", get(pages::show_admin_pages))
         .route("/pages/reorder", post(pages::reorder_pages))
+        // Child-index widget drag-reorder (DV.12) — a fixed two-segment path, so it
+        // never collides with `/pages/{page_id}/...`.
+        .route("/pages/reorder-children", post(pages::reorder_children))
         // Toggle a page's landing "Featured" pin (13.8). Two path segments, so it
         // never collides with the static `/pages/reorder`.
         .route("/pages/{page_id}/feature", post(pages::toggle_feature))

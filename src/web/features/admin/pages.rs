@@ -83,6 +83,45 @@ pub async fn reorder_pages(
     Ok(StatusCode::OK.into_response())
 }
 
+/// The child-index widget's drag-to-reorder (Phase DV.12): the child ids in their
+/// new visual order, plus the parent they belong to and the page-order `start`
+/// offset (the widget is paginated, so within-page drag writes `start..start+N`,
+/// leaving other pages' order untouched).
+#[derive(Deserialize)]
+pub struct ReorderChildrenForm {
+    pub parent_id: i64,
+    #[serde(default)]
+    pub start: i64,
+    #[serde(default)]
+    pub page_id: Vec<i64>,
+}
+
+/// Persist a new order for a page's CHILDREN (the ` ```children ` widget). Like
+/// `reorder_pages` but scoped to one parent + offset-aware for pagination. Admin-
+/// gated (the /admin layer). Every submitted id MUST be a child of `parent_id` — a
+/// crafted POST can't renumber an unrelated list (rolls back before commit).
+pub async fn reorder_children(
+    State(state): State<AppState>,
+    Form(form): Form<ReorderChildrenForm>,
+) -> Result<Response, AppError> {
+    let mut tx = state.pool.begin().await?;
+    let children: HashSet<i64> = ContentPageDao::find_by_parent(&mut *tx, Some(form.parent_id))
+        .await?
+        .into_iter()
+        .map(|p| p.page_id)
+        .collect();
+
+    for (index, page_id) in form.page_id.iter().enumerate() {
+        if !children.contains(page_id) {
+            return Ok((StatusCode::BAD_REQUEST, "not a child of that page").into_response());
+        }
+        ContentPageDao::set_order(&mut *tx, *page_id, form.start + index as i64).await?;
+    }
+    tx.commit().await?;
+
+    Ok(StatusCode::OK.into_response())
+}
+
 /// Toggle a page's landing "Featured" pin (Phase 13.8): flip the reserved
 /// `featured` tag in its `page_category`. Read-modify-write against the CURRENT DB
 /// value (not a form field), so it composes with a page's other category tags and
