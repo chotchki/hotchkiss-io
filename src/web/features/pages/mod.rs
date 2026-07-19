@@ -1,6 +1,6 @@
 use crate::web::util::deserialize::empty_string_as_none;
 use crate::{
-    db::dao::content_pages::ContentPageDao,
+    db::dao::{content_pages::ContentPageDao, roles::Role},
     web::{
         app_error::AppError, app_state::AppState, authentication_state::AuthenticationState,
         html_template::HtmlTemplate,
@@ -67,13 +67,57 @@ pub async fn redirect_to_first_page(State(state): State<AppState>) -> Result<Res
     }
 }
 
-/// Compact card for the next/previous nav at the bottom of a blog post. Lives
-/// on GetPageTemplate as Options that ONLY `show_post` (blog) fills — `/pages`
-/// leaves them None, so the nav is blog-only by construction.
+/// Compact card for the previous/next adjacent-page nav at the bottom of a reader
+/// view. Filled by `show_post` (blog, date-ordered siblings) AND `get_page_path`
+/// (nested `/pages` content, page_order-ordered siblings — manga volumes, book
+/// chapters; Phase DY). A `None` side omits that card (the ends of the run).
 pub struct PostNavCard {
-    pub page_name: String,
+    /// Full URL to the adjacent page: `/blog/<slug>` for blog, `/pages/<path>` for
+    /// a nested page.
+    pub href: String,
     pub title: String,
-    pub page_creation_date: String,
+    /// The line under the title — the post date for blog, `None` for a nested volume
+    /// (whose title already reads "Volume N").
+    pub subtitle: Option<String>,
+}
+
+/// Prev/next sibling nav for a NESTED `/pages` page (Phase DY): its siblings in
+/// `page_order` (the volume/chapter reading order), viewer-gated, with this page
+/// located among them. Previous = the lower-ordered neighbor, Next = the higher.
+/// Each card's href is the sibling's FULL path (the current path with its last
+/// segment swapped). A lone child (no visible siblings) → `(None, None)`, so the nav
+/// renders nothing. `page_names` is the resolved URL path (leaf included).
+async fn sibling_nav(
+    pool: &sqlx::SqlitePool,
+    page: &ContentPageDao,
+    page_names: &[&str],
+    viewer: Role,
+) -> Result<(Option<PostNavCard>, Option<PostNavCard>), AppError> {
+    // A TOP-LEVEL page (one segment) isn't a sequence — `find_by_parent(None)` would
+    // pull the unrelated top-level/special pages (blog, projects, login…) as
+    // "siblings". Only genuinely nested pages (a section child, a volume) get the nav.
+    if page_names.len() < 2 {
+        return Ok((None, None));
+    }
+    let mut siblings = ContentPageDao::find_by_parent(pool, page.parent_page_id).await?;
+    siblings.retain(|p| p.is_visible_to(viewer));
+    let parent_segs = &page_names[..page_names.len().saturating_sub(1)];
+    let card = |p: &ContentPageDao| {
+        let mut segs: Vec<&str> = parent_segs.to_vec();
+        segs.push(p.page_name.as_str());
+        PostNavCard {
+            href: format!("/pages/{}", segs.join("/")),
+            title: p.display_title(),
+            subtitle: None,
+        }
+    };
+    Ok(match siblings.iter().position(|p| p.page_id == page.page_id) {
+        Some(i) => (
+            i.checked_sub(1).and_then(|j| siblings.get(j)).map(card),
+            siblings.get(i + 1).map(card),
+        ),
+        None => (None, None),
+    })
 }
 
 /// One clickable breadcrumb: an ancestor's title + its `/pages/…` link target.
@@ -237,6 +281,10 @@ pub async fn get_page_path(
             )
             .await?;
 
+            // Prev/next sibling nav (Phase DY) — jump between volumes/chapters in
+            // page_order; a lone child renders nothing.
+            let (prev_post, next_post) = sibling_nav(&state.pool, lp, &page_names, viewer).await?;
+
             let gpt = GetPageTemplate {
                 top_bar: TopBar::create(&state.pool, page_names.first().unwrap(), viewer).await?,
                 auth_state: session_data.auth_state,
@@ -247,8 +295,8 @@ pub async fn get_page_path(
                     .await?,
                 rendered_markdown: rendered,
                 edit: edit_q.edit.is_some(),
-                prev_post: None,
-                next_post: None,
+                prev_post,
+                next_post,
                 pdf_url: None,
                 cover_media_ref: crate::web::features::media::cover_ref_for(
                     &state.pool,

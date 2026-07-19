@@ -236,22 +236,26 @@
   {{rendered_markdown|safe}}
 </div>
 {% if !edit && (prev_post.is_some() || next_post.is_some()) %}
-<nav aria-label="Post navigation" class="mt-10 pt-6 border-t border-navy/20 grid grid-cols-1 sm:grid-cols-2 gap-4">
+<nav aria-label="Page navigation" class="mt-10 pt-6 border-t border-navy/20 grid grid-cols-1 sm:grid-cols-2 gap-4">
   {% if let Some(prev) = prev_post %}
-  <a href="/blog/{{prev.page_name}}" class="block border-2 border-navy rounded-md bg-body-grey p-4 hover:opacity-90">
+  <a href="{{prev.href}}" class="block border-2 border-navy rounded-md bg-body-grey p-4 hover:opacity-90">
     <p class="text-xs uppercase tracking-wide text-navy/60">{% call icons::arrow_left() %} Previous</p>
-    <p class="text-sm text-navy/70 mt-1">{{prev.page_creation_date}}</p>
+    {% if let Some(sub) = prev.subtitle %}<p class="text-sm text-navy/70 mt-1">{{sub}}</p>{% endif %}
     <p class="font-display text-navy underline">{{prev.title}}</p>
   </a>
   {% else %}
   <div class="hidden sm:block"></div>
   {% endif %}
   {% if let Some(next) = next_post %}
-  <a href="/blog/{{next.page_name}}" class="block border-2 border-navy rounded-md bg-body-grey p-4 hover:opacity-90 text-right">
+  <a href="{{next.href}}" class="block border-2 border-navy rounded-md bg-body-grey p-4 hover:opacity-90 text-right">
     <p class="text-xs uppercase tracking-wide text-navy/60">Next {% call icons::arrow_right() %}</p>
-    <p class="text-sm text-navy/70 mt-1">{{next.page_creation_date}}</p>
+    {% if let Some(sub) = next.subtitle %}<p class="text-sm text-navy/70 mt-1">{{sub}}</p>{% endif %}
     <p class="font-display text-navy underline">{{next.title}}</p>
   </a>
+  {# Cross-page audio autoplay hook (Phase DY): on a NESTED page (no post date),
+     audio-player.js navigates here when the current volume's audio ends. Blog
+     posts (dated) are excluded — a finished audio post shouldn't jump to a newer post. #}
+  {% if posted_date.is_none() %}<div id="autoplay-next" data-href="{{next.href}}" hidden></div>{% endif %}
   {% endif %}
 </nav>
 {% endif %}

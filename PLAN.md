@@ -3,6 +3,16 @@
 
 Completed phases are in `PLAN_ARCHIVE.md` (most recent: Phase 12 — beta deployment on the mini (inverted `main`→beta / `v*`tag→prod flow); Phase 1 — `get_recs_by_name` `type=A` filter fix (ACME renewal hang); Phase 9 — Tailwind cleanup / dropped DaisyUI; Phase 8 — local/e2e test harness; Phase 7 — admin analytics dashboard; Phase 2 — DNS module testability; Phase 5 — dropped the `cookie-rs` fork; Phase 3 — `ifconfig.me` → Cloudflare `cdn-cgi/trace`; Phase 0 — push-to-deploy on the Mac mini; Phase 4 — `tray-wrapper` 0.4.1 bump).
 
+## Phase DY - Nested-item nav + cross-page audio autoplay
+
+DV/DW nested each volume onto its own page (one embed each), which dormant-ed the same-page DG audio auto-advance (it chains multiple embeds in ONE page's DOM). Restore continuity WITHOUT going back to a multi-embed page: prev/next sibling buttons on every nested content page + FOREGROUND cross-page autoplay. chris chose foreground-nav over a series listen-all page (AskUserQuestion) — accepting that locked-screen cross-volume advance is lost to the iOS no-gesture-after-navigation rule; the same-page multi-embed autoplay still works wherever a page DOES carry several embeds.
+
+- [ ] DY.0 - Phase exit: a nested volume page shows prev/next sibling buttons (page_order = volume order); finishing a volume's audio with the screen ON navigates to the next sibling + auto-plays (best-effort — one tap if the browser blocks a gesture-less play); tests + docs + shipped.
+- [x] DY.1 - Server: sibling nav in `get_page_path` (nested `/pages` content) — siblings via `find_by_parent` (page_order order), viewer-gated, prev = lower / next = higher neighbor, each carrying the FULL `/pages/<parent>/<sibling>` href. Generalize `PostNavCard` to `{href, title, subtitle: Option<String>}` so blog (date subtitle) + nested (no subtitle) share it; the ends omit a side.
+- [x] DY.2 - Template: render prev/next buttons for nested pages (reuse the blog nav block, now href-based). When a next sibling exists, emit an autoplay hook (`#autoplay-next[data-href]`) the audio script reads.
+- [x] DY.3 - Client: foreground cross-page autoplay in `audio-player.js` — on `ended` with NO same-page neighbor, if the hook is present, navigate to the next page with `?play=1`; the destination auto-plays its (first) audio embed on load (best-effort; a browser block → cued at position, one tap). Locked-screen cross-page = documented no-op.
+- [x] DY.4 - Tests + docs: prev/next nav over a nested tree (order, ends, viewer-gating, href shape); the autoplay hook renders only with a next sibling; `?play=1` triggers a play attempt once (not re-fired on manual nav). CLAUDE.md + design-doc delta.
+
 ## Phase 6 - DNS follow-ups (parked)
 
 Two items deferred out of Phase 2 — neither urgent, both real.

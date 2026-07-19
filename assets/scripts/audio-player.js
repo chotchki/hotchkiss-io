@@ -15,6 +15,12 @@
  *     nexttrack/prevtrack skip between volumes from the lock screen, and
  *     starting one player pauses the others. A single-embed page is a
  *     playlist of one — none of this fires.
+ *   - cross-page auto-advance (Phase DY): DV/DW nested each volume onto its OWN
+ *     page (one embed), so the same-page chain above has no next — when the audio
+ *     ends with the page VISIBLE, navigate to the next sibling (server-rendered
+ *     #autoplay-next[data-href]) with ?play=1 and the destination auto-plays.
+ *     Foreground-only: a hidden/locked page can't navigate + start gesture-less
+ *     audio on iOS (accepted — the listener taps Next on return).
  *   - LOCKED-screen advance (DG.1 plan B, phone-proven necessary): iOS mutes
  *     a backgrounded element that never had a user gesture — `next.play()`
  *     advanced SILENTLY until unlock. So when `ended` fires with the page
@@ -57,6 +63,42 @@
     );
     const i = all.indexOf(audio);
     return i < 0 ? null : all[i + delta] || null;
+  }
+
+  // Cross-page auto-advance (Phase DY): with DV/DW the volumes are one-per-page, so a
+  // volume page carries a SINGLE embed — the same-page chain (neighborAudio) has no
+  // next. When the audio ends with the page VISIBLE, navigate to the next sibling
+  // (the server renders #autoplay-next[data-href] when one exists) carrying ?play=1 so
+  // the destination starts playing. Foreground-only BY DESIGN: a hidden/locked page
+  // can't navigate + start gesture-less audio on iOS (the accepted limitation — the
+  // listener taps Next on return). Best-effort: a browser autoplay block on arrival
+  // leaves the next volume cued at its position (one tap).
+  function crossPageAdvance() {
+    const hook = document.getElementById("autoplay-next");
+    const href = hook && hook.dataset.href;
+    if (!href) return;
+    location.href = href + (href.indexOf("?") >= 0 ? "&" : "?") + "play=1";
+  }
+
+  // Consume a ?play=1 left by a cross-page advance: play the first embed, then strip
+  // the flag (so a manual refresh doesn't re-autoplay). No audio yet (embed still
+  // settling via HTMX) → leave the flag and retry on the next settle. The play rides
+  // the element's own resume/rate hooks; a browser block just leaves it cued.
+  function maybeAutoplayFromNav() {
+    const params = new URLSearchParams(location.search);
+    if (params.get("play") !== "1") return;
+    const first = document.querySelector(".audio-embed audio[data-ref]");
+    if (!first) return;
+    params.delete("play");
+    const qs = params.toString();
+    history.replaceState(
+      null,
+      "",
+      location.pathname + (qs ? "?" + qs : "") + location.hash,
+    );
+    first.play().catch(() => {
+      /* gesture-less play blocked — cued at position, one tap resumes */
+    });
   }
 
   function button(label, title, onClick) {
@@ -194,7 +236,12 @@
     audio.addEventListener("ended", () => {
       const base = adopted ? adopted.el : audio;
       const next = neighborAudio(base, 1);
-      if (!next) return;
+      if (!next) {
+        // No same-page neighbor (the one-per-page volume case) — cross-page advance
+        // when visible (Phase DY). Hidden/locked can't autoplay across a nav on iOS.
+        if (!document.hidden) crossPageAdvance();
+        return;
+      }
       if (document.hidden) {
         adoptTrack(next);
       } else {
@@ -424,11 +471,17 @@
       .forEach((a) => enhance(a));
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", scan);
-  } else {
+  // Enhance present embeds, then consume any cross-page ?play=1 (Phase DY) once the
+  // audio has settled in.
+  function onSettle() {
     scan();
+    maybeAutoplayFromNav();
   }
-  // Embeds arrive via HTMX swaps — enhance them as they settle.
-  document.addEventListener("htmx:afterSettle", scan);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", onSettle);
+  } else {
+    onSettle();
+  }
+  // Embeds arrive via HTMX swaps — enhance + autoplay-check as they settle.
+  document.addEventListener("htmx:afterSettle", onSettle);
 })();

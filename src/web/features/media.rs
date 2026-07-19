@@ -914,25 +914,44 @@ pub(crate) async fn embedded_media_cover(
     None
 }
 
-/// How many children a roll-up scans before giving up. A series's first volume sorts
-/// first by page_order and carries the cover, so the first hit almost always wins on
-/// row one; the cap just bounds a pathological all-coverless container to a handful of
-/// lookups, never its full child list (a series can run to hundreds of volumes).
+/// How many children a roll-up scans PER LEVEL before giving up. A series's first
+/// volume sorts first by page_order and carries the cover, so the first hit almost
+/// always wins on row one; the cap just bounds a pathological all-coverless container
+/// to a handful of lookups, never its full child list (a series can run to hundreds).
 const ROLLUP_SCAN: i64 = 24;
 
-/// Card-cover ROLL-UP (DW.12): a CONTAINER page (a manga series, a library section)
-/// carries only a ` ```children ` fence — no `page_cover_media_id`, no `/media/<ref>`
-/// embed — so its own two-step cover derivation comes up empty and the card renders
-/// blank. Borrow the cover of its first cover-bearing CHILD (page_order ASCENDING, so
-/// a series rolls up to VOLUME 1), reusing the SAME explicit-then-embed chain one level
-/// down. Deliberately a SINGLE level (a series → its volume): enough for the library
-/// tree, and it can't recurse away on a deep/cyclic tree. Scans past a rare coverless
-/// leading child up to `ROLLUP_SCAN`. `None` when no scanned child resolves a cover.
+/// How many LEVELS the roll-up descends (DW.13). `series → season → episode` needs the
+/// SERIES card to reach 2 levels down for the first episode's cover (a `season` page is
+/// itself just a ` ```children ` fence); 3 gives headroom for one more grouping layer
+/// without letting a pathological all-coverless subtree fan out unboundedly.
+const ROLLUP_MAX_DEPTH: u8 = 3;
+
+/// Card-cover ROLL-UP (DW.12, deepened DW.13): a CONTAINER page (a manga series, a
+/// season, a library section) carries only a ` ```children ` fence — no
+/// `page_cover_media_id`, no `/media/<ref>` embed — so its own two-step cover
+/// derivation comes up empty and the card renders blank. Borrow the cover of its first
+/// cover-bearing DESCENDANT (page_order ASCENDING at each level, so a series rolls up
+/// to season 1 → episode 1), reusing the SAME explicit-then-embed chain. Descends up to
+/// `ROLLUP_MAX_DEPTH` levels and scans `ROLLUP_SCAN` children per level — the depth-first
+/// first-child path returns on the first real cover, so a healthy tree costs a handful
+/// of lookups; the caps bound a fully-coverless subtree. `None` when nothing resolves.
 pub(crate) async fn child_rollup_cover(
     pool: &sqlx::SqlitePool,
     parent_page_id: i64,
     viewer: Role,
 ) -> Option<String> {
+    rollup_cover(pool, parent_page_id, viewer, ROLLUP_MAX_DEPTH).await
+}
+
+async fn rollup_cover(
+    pool: &sqlx::SqlitePool,
+    parent_page_id: i64,
+    viewer: Role,
+    depth: u8,
+) -> Option<String> {
+    if depth == 0 {
+        return None;
+    }
     let children = crate::db::dao::content_pages::ContentPageDao::find_children_ordered_paged(
         pool,
         Some(parent_page_id),
@@ -948,6 +967,14 @@ pub(crate) async fn child_rollup_cover(
             return Some(url);
         }
         if let Some(url) = embedded_media_cover(pool, &child.page_markdown).await {
+            return Some(url);
+        }
+        // The child is itself a container (a SEASON under a series) with only a
+        // ` ```children ` fence — descend one more level for its first descendant's
+        // cover. Box::pin breaks the infinitely-sized async-recursion future.
+        if let Some(url) =
+            Box::pin(rollup_cover(pool, child.page_id, viewer, depth - 1)).await
+        {
             return Some(url);
         }
     }

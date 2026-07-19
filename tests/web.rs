@@ -5552,6 +5552,166 @@ async fn breadcrumbs_are_clickable_ancestor_links() {
     );
 }
 
+/// Phase DY: a nested volume page shows prev/next sibling buttons in page_order (the
+/// volume reading order), each linking the sibling's FULL /pages path, with a side
+/// omitted at the ends. The middle volume also emits the cross-page autoplay hook
+/// (#autoplay-next → the next volume) that audio-player.js reads on `ended`.
+#[tokio::test]
+async fn nested_volume_shows_prev_next_and_autoplay_hook() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // library → manga → nav-series → volume-1..3 (drop out of order to prove ordering).
+    let form = reqwest::multipart::Form::new()
+        .text("series", "Nav Series")
+        .part("f3", epub_part(manga_fixture(3), "series-v03.epub"))
+        .part("f1", epub_part(manga_fixture(1), "series-v01.epub"))
+        .part("f2", epub_part(manga_fixture(2), "series-v02.epub"));
+    admin
+        .post(server.url("/admin/media/import/upload"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+
+    let get = |slug: &str| {
+        let admin = admin.clone();
+        let url = server.url(&format!("/pages/library/manga/nav-series/{slug}"));
+        async move { admin.get(url).send().await.unwrap().text().await.unwrap() }
+    };
+
+    // Middle volume: BOTH sides, full-path hrefs, + the autoplay hook → the next volume.
+    let v2 = get("volume-2").await;
+    assert!(v2.contains("Previous"), "middle has Previous: {v2}");
+    assert!(v2.contains("Next"), "middle has Next");
+    assert!(
+        v2.contains(r#"href="/pages/library/manga/nav-series/volume-1""#),
+        "Previous links volume-1 by full path"
+    );
+    assert!(
+        v2.contains(r#"href="/pages/library/manga/nav-series/volume-3""#),
+        "Next links volume-3 by full path"
+    );
+    assert!(
+        v2.contains(r#"id="autoplay-next" data-href="/pages/library/manga/nav-series/volume-3""#),
+        "the autoplay hook points at the next volume: {v2}"
+    );
+
+    // First volume: Next only (→ v2), no Previous.
+    let v1 = get("volume-1").await;
+    assert!(!v1.contains("Previous"), "first volume has no Previous: {v1}");
+    assert!(v1.contains(r#"href="/pages/library/manga/nav-series/volume-2""#), "Next → v2");
+
+    // Last volume: Previous only (→ v2), no Next, and NO autoplay hook (nothing after).
+    let v3 = get("volume-3").await;
+    assert!(!v3.contains("Next"), "last volume has no Next: {v3}");
+    assert!(v3.contains(r#"href="/pages/library/manga/nav-series/volume-2""#), "Previous → v2");
+    assert!(!v3.contains("autoplay-next"), "no autoplay hook on the last volume");
+}
+
+/// Phase DW.13: the cover roll-up descends MORE than one level, so a `series → season
+/// → episode` tree covers the SERIES card from the first episode two levels down (the
+/// season page is itself just a ` ```children ` fence). The single-level DW.12 roll-up
+/// left the series card blank once a season layer was inserted.
+#[tokio::test]
+async fn series_card_rolls_up_a_cover_two_levels_deep() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // A cover-bearing media item (a CBZ auto-extracts a first-page cover).
+    let cbz = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/manga/comic-v01.cbz"
+    ))
+    .unwrap();
+    let up = admin
+        .post(server.url("/media"))
+        .multipart(reqwest::multipart::Form::new().part(
+            "file",
+            reqwest::multipart::Part::bytes(cbz)
+                .file_name("ep.cbz")
+                .mime_str("application/vnd.comicbook+zip")
+                .unwrap(),
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(up.status(), StatusCode::CREATED);
+    let media_ref: String = sqlx::query_scalar("SELECT media_ref FROM media WHERE kind = 'cbz'")
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+    let cover_key: String = sqlx::query_scalar(
+        "SELECT mv.url_key FROM media_variant mv JOIN media m ON mv.media_id = m.media_id WHERE m.kind = 'cbz' AND mv.mime LIKE 'image/%' LIMIT 1",
+    )
+    .fetch_one(&server.pool)
+    .await
+    .unwrap();
+
+    let fence = "```children order=manual\n```\n".to_string();
+    let put = |path: &str, md: String| {
+        let admin = admin.clone();
+        let url = server.url(&format!("/pages/{path}"));
+        async move {
+            admin
+                .put(url)
+                .header("HX-Request", "true")
+                .form(&[
+                    ("page_category", ""),
+                    ("page_markdown", md.as_str()),
+                    ("page_cover_media_ref", ""),
+                    ("page_order", "0"),
+                ])
+                .send()
+                .await
+                .unwrap();
+        }
+    };
+    let create = |parent: &str, title: &str| {
+        let admin = admin.clone();
+        let url = if parent.is_empty() {
+            server.url("/pages")
+        } else {
+            server.url(&format!("/pages/{parent}"))
+        };
+        let title = title.to_string();
+        async move {
+            admin.post(url).form(&[("page_title", title.as_str())]).send().await.unwrap();
+        }
+    };
+
+    // Section (fence) → Show (fence) → Season (fence) → Episode (the media embed).
+    create("", "Section").await;
+    put("section", fence.clone()).await;
+    create("section", "Show").await;
+    put("section/show", fence.clone()).await;
+    create("section/show", "Season").await;
+    put("section/show/season", fence.clone()).await;
+    create("section/show/season", "Episode").await;
+    put("section/show/season/episode", format!("![](/media/{media_ref})")).await;
+
+    // The Section grid renders the Show card. Show has only a fence (no cover/embed of
+    // its own), so its card rolls up TWO levels — Show → Season → Episode — to the cover.
+    let section = admin
+        .get(server.url("/pages/section"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        section.contains("/pages/section/show"),
+        "the section lists the show card: {section}"
+    );
+    assert!(
+        section.contains(&format!("/media/file/{cover_key}")),
+        "the show card rolled up the two-level-deep episode cover: {section}"
+    );
+}
+
 /// Phase DW.11: an EPUB with NO cover declared in the OPF (the Jujutsu Kaisen shape)
 /// still gets a cover — the extractor falls back to the first image resource (page 1).
 #[tokio::test]

@@ -189,8 +189,8 @@ pub async fn show_post(
 /// Map a post row to the compact card the next/previous nav renders.
 fn nav_card(p: &ContentPageDao) -> PostNavCard {
     PostNavCard {
-        page_name: p.page_name.clone(),
+        href: format!("/blog/{}", p.page_name),
         title: p.display_title(),
-        page_creation_date: p.page_creation_date.format("%B %-d, %Y").to_string(),
+        subtitle: Some(p.page_creation_date.format("%B %-d, %Y").to_string()),
     }
 }
