@@ -33,25 +33,13 @@
 
 {% include "partials/listing_search.html" %}
 
+{# The card grid is READ-ONLY (DZ.5) — a reader/preview view, never a reorder surface.
+   Reordering children is a dedicated drag+position LIST in the editor (get_page.html),
+   the /admin/pages pattern, so the Preview stays a faithful read-only render. #}
 {% if cards.is_empty() %}
 <p class="text-navy/70 italic my-4">{% if pagination.is_search() %}Nothing matches your search.{% else %}Nothing here yet.{% endif %}</p>
-{% else if is_admin %}
-{# Drag-to-reorder (DV.12): the whole grid is a SortableJS form; on drop it posts
-   the children's ids (in the new visual order) + the parent + the page offset. Only
-   meaningful with the manual order — a newest-order listing ignores page_order. #}
-<form class="sortable grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 my-4"
-    hx-post="/admin/pages/reorder-children" hx-trigger="end" hx-swap="none">
-    <input type="hidden" name="parent_id" value="{{ parent_id }}" />
-    <input type="hidden" name="start" value="{{ reorder_start }}" />
-    {% for c in cards %}
-    <div class="border-2 border-navy rounded-md overflow-hidden bg-body-grey cursor-move">
-        <input type="hidden" name="page_id" value="{{ c.page_id }}" />
-        {% call card_body(c, is_square) %}
-    </div>
-    {% endfor %}
-</form>
 {% else %}
-<ul class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 list-none p-0 my-4">
+<ul class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 list-none p-0 my-4 items-start">
     {% for c in cards %}
     <li class="border-2 border-navy rounded-md overflow-hidden bg-body-grey">
         {% call card_body(c, is_square) %}

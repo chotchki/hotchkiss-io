@@ -4259,9 +4259,9 @@ async fn uploaded_epub_renders_the_foliate_reader_embed() {
     assert!(!embed.contains("media-download"), "must NOT be a plain File download link");
 }
 
-/// Phase DV.12: the child-index widget renders a SortableJS reorder form for an admin,
-/// and the reorder endpoint persists `page_order` (offset-aware for pagination). A
-/// non-admin gets a plain, non-draggable list.
+/// Phase DV.12 + DZ.5: the reorder UI is the drag+position LIST in the EDITOR (`?edit`)
+/// — the /admin/pages pattern — NOT the read-only card widget. The endpoint persists
+/// `page_order`. The card grid (reader + preview) is read-only for everyone.
 #[tokio::test]
 async fn child_index_drag_reorder_persists_page_order() {
     let server = spawn_test_server().await.expect("spawn");
@@ -4303,12 +4303,16 @@ async fn child_index_drag_reorder_persists_page_order() {
     };
     let (a, b, c) = (id("alpha").await, id("bravo").await, id("charlie").await);
 
-    // Admin view: the sortable reorder form is present (draggable), targeting the
-    // children endpoint with the parent id.
-    let page = admin.get(server.url("/pages/shelf")).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("class=\"sortable"), "admin gets the draggable grid");
-    assert!(page.contains("/admin/pages/reorder-children"), "posts to the children reorder");
-    assert!(page.contains(&format!("name=\"parent_id\" value=\"{parent_id}\"")), "carries the parent id");
+    // The EDITOR (?edit) carries the drag+position reorder list, targeting the children
+    // endpoint with the parent id + a numeric position input per row (the long-list
+    // mechanism). The READ-ONLY card widget (non-edit admin) has NO sortable.
+    let editor = admin.get(server.url("/pages/shelf?edit=1")).send().await.unwrap().text().await.unwrap();
+    assert!(editor.contains("class=\"sortable"), "the editor list is draggable");
+    assert!(editor.contains("/admin/pages/reorder-children"), "posts to the children reorder");
+    assert!(editor.contains(&format!("name=\"parent_id\" value=\"{parent_id}\"")), "carries the parent id");
+    assert!(editor.contains("data-reorder-position"), "each row has a numeric position input");
+    let reader = admin.get(server.url("/pages/shelf")).send().await.unwrap().text().await.unwrap();
+    assert!(!reader.contains("class=\"sortable"), "the card widget is read-only (no reorder)");
 
     // Reorder to Charlie, Alpha, Bravo (repeated page_id keys → a Vec).
     let form: Vec<(&str, String)> = vec![
