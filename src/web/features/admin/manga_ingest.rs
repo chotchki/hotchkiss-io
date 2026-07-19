@@ -527,6 +527,35 @@ pub async fn show_ingest_console(
     render_console(&state, &session_data, None, None).await
 }
 
+/// Backfill covers for already-imported books that lack one (DW.11): `POST
+/// /admin/media/import/backfill-covers`. For a batch imported before the EPUB
+/// first-image fallback existed (the Jujutsu Kaisen import — no OPF cover). Opening
+/// hundreds of books takes a while, so it SPAWNS + returns; the cards fill in as
+/// covers extract, logged to `/admin/logs`.
+pub async fn backfill_covers(
+    State(state): State<AppState>,
+    session_data: SessionData,
+) -> Result<Response, AppError> {
+    let st = state.clone();
+    tokio::spawn(async move {
+        match crate::web::features::admin::media::backfill_book_covers(&st).await {
+            Ok(0) => tracing::info!("cover backfill: no coverless books to process"),
+            Ok(n) => tracing::info!("cover backfill: processed {n} coverless book(s)"),
+            Err(e) => tracing::error!("cover backfill failed: {e:#}"),
+        }
+    });
+    render_console(
+        &state,
+        &session_data,
+        Some(
+            "Backfilling covers for books that don't have one yet — watch /admin/logs; the cards fill in as they process."
+                .into(),
+        ),
+        None,
+    )
+    .await
+}
+
 /// Filesystem front door (DW.3): `POST /admin/media/import/filesystem` — a server-side
 /// folder path + series name. Validates the folder, resolves/creates the series, then
 /// SPAWNS the long ingest (staging can copy tens of GB) and returns immediately; the

@@ -315,6 +315,47 @@ async fn add_derived_variants(
     }
 }
 
+/// Backfill cover variants for Epub/Cbz media that lack one (DW.11) — e.g. manga
+/// chapters whose EPUB declares NO OPF cover, imported before the first-image
+/// fallback existed. Idempotent: only touches books with NO image variant, and each
+/// extraction is best-effort (a truly imageless book just stays coverless). Returns
+/// the number of coverless books it attempted. Detached + fire-and-forget by the
+/// admin trigger, so it never blocks a request.
+pub(crate) async fn backfill_book_covers(state: &AppState) -> Result<usize> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT m.media_id AS "media_id!", m.kind AS "kind!",
+               (SELECT v.sha256 FROM media_variant v
+                 WHERE v.media_id = m.media_id AND v.mime NOT LIKE 'image/%'
+                 LIMIT 1) AS "book_sha?"
+        FROM media m
+        WHERE m.kind IN ('epub', 'cbz')
+          AND NOT EXISTS (
+              SELECT 1 FROM media_variant vi
+               WHERE vi.media_id = m.media_id AND vi.mime LIKE 'image/%')
+        "#
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    let hmac_key = CryptoKey::get_or_create(&state.pool, MEDIA_HMAC_KEY_ID)
+        .await?
+        .key_value;
+    let mut attempted = 0usize;
+    for r in rows {
+        let (Some(book_sha), Ok(kind)) = (r.book_sha, MediaKind::parse(&r.kind)) else {
+            continue;
+        };
+        // Re-runs the kind's cover extraction (EPUB OPF/first-image or CBZ first-image)
+        // + inserts the variant; safe because we filtered to no-image-variant items.
+        add_derived_variants(state, &hmac_key, r.media_id, kind, book_sha).await;
+        attempted += 1;
+    }
+    Ok(attempted)
+}
+
 /// Ingest a multipart into a NEW item + its variants — the shared core behind
 /// `create_media` (`POST /media`; DR retired the old admin `upload_media`). Streams + probes,
 /// mints the opaque UUIDv7 ref, derives kind/dims from the dominant file, inserts
@@ -798,12 +839,37 @@ async fn maybe_add_poster(state: &AppState, hmac_key: &[u8], media_id: i64, vide
     }
 }
 
-/// Extract an EPUB's embedded cover image (declared in the OPF) and add it as an
-/// image variant (Phase DV.10) — the EPUB analog of the audiobook `attached_pic`
-/// poster, so `cover_url_for` / `cover_hero_for` auto-populate the card + hero. The
-/// `epub` crate parses the OPF, so we don't hand-roll the EPUB2 `<meta name="cover">`
-/// vs EPUB3 `properties="cover-image"` variations. Best-effort: a cover-less or
-/// malformed book just logs + degrades to the placeholder, NEVER fails the upload.
+/// Read an EPUB's cover bytes + mime: the OPF-declared cover if present, else
+/// (DW.11 fallback) the FIRST image resource by sorted path. Manga chapters routinely
+/// declare NO cover in the OPF (the Jujutsu Kaisen import surfaced this) but their
+/// pages are zero-padded (`img/01.jpg…`), so the first sorted image IS page 1 / the
+/// cover — the same first-image rule CBZ uses. Pure sync (called under spawn_blocking).
+fn epub_cover_bytes(path: &std::path::Path) -> Result<(Vec<u8>, String)> {
+    let mut doc = epub::doc::EpubDoc::new(path).map_err(|e| anyhow!("open epub: {e}"))?;
+    if let Some(cover) = doc.get_cover() {
+        return Ok(cover);
+    }
+    // No OPF cover → first image resource by sorted path.
+    let mut images: Vec<(String, String)> = doc
+        .resources
+        .iter()
+        .filter(|(_, item)| item.mime.starts_with("image/"))
+        .map(|(id, item)| (item.path.to_string_lossy().into_owned(), id.clone()))
+        .collect();
+    images.sort();
+    let (_, id) = images
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("no OPF cover and no image resources in the epub"))?;
+    doc.get_resource(&id)
+        .ok_or_else(|| anyhow!("first image resource unreadable"))
+}
+
+/// Extract an EPUB's cover image and add it as an image variant (Phase DV.10; DW.11
+/// first-image fallback) — the EPUB analog of the audiobook `attached_pic` poster, so
+/// `cover_url_for` / `cover_hero_for` auto-populate the card + hero. Best-effort: a
+/// truly imageless / malformed book just logs + degrades to the placeholder, NEVER
+/// fails the upload.
 async fn maybe_add_epub_cover(state: &AppState, hmac_key: &[u8], media_id: i64, epub_sha: String) {
     let store = state.media_store.clone();
     let result: Result<(String, i64, String, std::path::PathBuf)> = async {
@@ -813,8 +879,7 @@ async fn maybe_add_epub_cover(state: &AppState, hmac_key: &[u8], media_id: i64, 
             let path = path_store
                 .resolve_path(&epub_sha, None)
                 .ok_or_else(|| anyhow!("epub source {epub_sha} not found in any media root"))?;
-            let mut doc = epub::doc::EpubDoc::new(&path).map_err(|e| anyhow!("open epub: {e}"))?;
-            doc.get_cover().ok_or_else(|| anyhow!("no cover in the OPF"))
+            epub_cover_bytes(&path)
         })
         .await
         .map_err(|e| anyhow!("epub cover task panicked: {e}"))??;

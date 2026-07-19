@@ -20,6 +20,16 @@
     <div class="mb-6 border border-navy/40 bg-yellow/40 text-navy rounded px-3 py-2 text-sm">{{ flash }}</div>
     {% endif %}
 
+    {# Backfill covers for books imported before the EPUB first-image fallback (DW.11)
+       — a manga chapter with no OPF cover now takes its first page as the cover. #}
+    <form method="post" action="/admin/media/import/backfill-covers" class="mb-6">
+        <button type="submit"
+            class="text-sm text-navy border border-navy/40 rounded px-3 py-1 hover:bg-navy hover:text-div-grey uppercase font-display">Backfill
+            missing covers</button>
+        <span class="text-xs text-navy/60 ml-2">Give a cover to any already-imported book that doesn't have
+            one (uses the first page).</span>
+    </form>
+
     {% if let Some(r) = report %}
     <div class="mb-6">
         <div class="text-sm text-navy/70 mb-2 flex flex-row flex-wrap gap-3">

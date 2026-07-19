@@ -47,6 +47,11 @@ pub fn admin_router() -> Router<AppState> {
         .route("/media/import", get(manga_ingest::show_ingest_console))
         .route("/media/import/filesystem", post(manga_ingest::ingest_filesystem))
         .route("/media/import/upload", post(manga_ingest::ingest_upload))
+        // Backfill covers for books imported before the EPUB first-image fallback (DW.11).
+        .route(
+            "/media/import/backfill-covers",
+            post(manga_ingest::backfill_covers),
+        )
         // Media library PAGE (Phase BZ) — the HTML admin UI. All MUTATIONS moved to
         // the canonical `/media` REST surface (Phase DR): the library JS drives
         // `POST /media`, `POST /media/<ref>/variants`, `PUT`/`DELETE /media/<ref>`,

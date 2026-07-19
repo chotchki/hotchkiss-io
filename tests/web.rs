@@ -5398,3 +5398,138 @@ async fn manga_cbz_upload_renders_the_comic_reader_with_a_cover() {
     assert!(embed.contains("data-kind=\"cbz\""), "flagged as a comic so foliate picks the comic path");
     assert!(!embed.contains("media-download"), "not a plain File download");
 }
+
+/// Phase DW.11: an EPUB with NO cover declared in the OPF (the Jujutsu Kaisen shape)
+/// still gets a cover — the extractor falls back to the first image resource (page 1).
+#[tokio::test]
+async fn epub_without_opf_cover_falls_back_to_the_first_page() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    let epub = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/manga/no-cover-v01.epub"
+    ))
+    .unwrap();
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(epub)
+            .file_name("Chapter 1.epub")
+            .mime_str("application/epub+zip")
+            .unwrap(),
+    );
+    let resp = admin.post(server.url("/media")).multipart(form).send().await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
+    // Despite the OPF declaring no cover, an image variant (the first page) was added.
+    let cover_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM media_variant mv JOIN media m ON mv.media_id = m.media_id WHERE m.kind = 'epub' AND mv.mime LIKE 'image/%'",
+    )
+    .fetch_one(&server.pool)
+    .await
+    .unwrap();
+    assert_eq!(cover_count, 1, "the first-page fallback produced a cover variant");
+}
+
+/// Phase DW.11: the cover backfill gives a cover to a book that was ingested without
+/// one (an image variant removed to simulate the pre-fallback import).
+#[tokio::test]
+async fn cover_backfill_covers_a_coverless_book() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    let epub = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/manga/no-cover-v01.epub"
+    ))
+    .unwrap();
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(epub)
+            .file_name("Chapter 1.epub")
+            .mime_str("application/epub+zip")
+            .unwrap(),
+    );
+    admin.post(server.url("/media")).multipart(form).send().await.unwrap();
+
+    // Simulate a pre-fallback import: strip the cover variant so the book is coverless.
+    sqlx::query("DELETE FROM media_variant WHERE mime LIKE 'image/%'")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+    let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM media_variant WHERE mime LIKE 'image/%'")
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+    assert_eq!(before, 0, "book is coverless");
+
+    // Trigger the backfill (spawned); poll for the cover to reappear.
+    let resp = admin
+        .post(server.url("/admin/media/import/backfill-covers"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let mut covered = false;
+    for _ in 0..40 {
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM media_variant WHERE mime LIKE 'image/%'")
+            .fetch_one(&server.pool)
+            .await
+            .unwrap();
+        if n >= 1 {
+            covered = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    assert!(covered, "the backfill re-extracted the cover");
+}
+
+/// Phase DW.11: a listing search skips the markdown body ONLY for an all-hex query —
+/// so an `![](/media/<ref>)` embed's UUID hex can't pollute a numeric search (the
+/// "80 → 35 results" bug) — while a PROSE body word still matches (body search kept).
+#[tokio::test]
+async fn listing_search_skips_body_only_for_hex_queries() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // A blog post whose BODY has a prose word ("zebra") AND a hex token ("deadbeef",
+    // standing in for a media-ref UUID), but whose title/slug carry neither.
+    admin.post(server.url("/pages")).form(&[("page_title", "Alpha")]).send().await.unwrap();
+    admin
+        .put(server.url("/pages/alpha"))
+        .header("HX-Request", "true")
+        .form(&[
+            ("page_category", ""),
+            ("page_markdown", "# Alpha\n\nprose zebra and a hex token deadbeef here"),
+            ("page_cover_media_ref", ""),
+            ("page_order", "0"),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    // Move it under /blog so the listing search applies (children of the blog special page).
+    let blog_id: i64 = sqlx::query_scalar("SELECT page_id FROM content_pages WHERE page_name = 'blog'")
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE content_pages SET parent_page_id = ?1 WHERE page_name = 'alpha'")
+        .bind(blog_id)
+        .execute(&server.pool)
+        .await
+        .unwrap();
+
+    // A prose body word still matches (body search preserved).
+    let prose = reqwest::get(server.url("/blog?q=zebra")).await.unwrap().text().await.unwrap();
+    assert!(prose.contains("/blog/alpha"), "a prose body word still matches (body search kept)");
+    // An all-hex body token does NOT match (the pollution fix) — it's not in title/slug.
+    let hex = reqwest::get(server.url("/blog?q=deadbeef")).await.unwrap().text().await.unwrap();
+    assert!(!hex.contains("/blog/alpha"), "an all-hex query skips the body (no ref-UUID pollution)");
+    // The title still matches regardless.
+    let title = reqwest::get(server.url("/blog?q=Alpha")).await.unwrap().text().await.unwrap();
+    assert!(title.contains("/blog/alpha"), "the title still matches");
+}

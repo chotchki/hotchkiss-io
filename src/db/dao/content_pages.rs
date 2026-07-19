@@ -376,6 +376,10 @@ impl ContentPageDao {
     ) -> Result<i64> {
         let viewer_is_admin = viewer == Role::Admin;
         let viewer_rank = viewer.rank() as i64;
+        // Search the body (markdown) ONLY when the query carries a non-hex char — an
+        // all-hex query ("80"/"cafe") would match the UUID in an `![](/media/<ref>)`
+        // embed, not real content (DW.11). A prose query keeps body search.
+        let search_body = search.chars().any(|c| !c.is_ascii_hexdigit());
         let row = query!(
             r#"
                 select count(*) as "count!: i64"
@@ -383,7 +387,11 @@ impl ContentPageDao {
                 where parent_page_id IS ?1
                   and (?2 = ''
                        or page_title    like '%' || ?2 || '%'
-                       or page_markdown like '%' || ?2 || '%'
+                       -- Body search, gated by ?5 (skipped for an all-hex query): an
+                       -- `![](/media/<ref>)` embed bakes a UUID hex into the body, so
+                       -- "80"/"cafe" would match ref hex not content (DW.11). Prose
+                       -- keeps body search; FTS5 is the deferred upgrade.
+                       or (?5 and page_markdown like '%' || ?2 || '%')
                        or page_name     like '%' || ?2 || '%')
                   and (?3
                        or special_page = 1
@@ -396,7 +404,8 @@ impl ContentPageDao {
             parent_page_id,
             search,
             viewer_is_admin,
-            viewer_rank
+            viewer_rank,
+            search_body
         )
         .fetch_one(executor)
         .await?;
@@ -418,6 +427,9 @@ impl ContentPageDao {
     ) -> Result<Vec<ContentPageDao>> {
         let viewer_is_admin = viewer == Role::Admin;
         let viewer_rank = viewer.rank() as i64;
+        // Body search only for a non-hex query — see `count_children` (DW.11); the
+        // predicate MUST match the count's or the pager desyncs.
+        let search_body = search.chars().any(|c| !c.is_ascii_hexdigit());
         let content_pages: Vec<ContentPageDao> = query_as!(
             ContentPageDao,
             r#"
@@ -438,7 +450,10 @@ impl ContentPageDao {
                 where parent_page_id IS ?1
                   and (?2 = ''
                        or page_title    like '%' || ?2 || '%'
-                       or page_markdown like '%' || ?2 || '%'
+                       -- Body search, gated by ?7 (skipped for an all-hex query) — an
+                       -- embed UUID hex would otherwise pollute a numeric query (DW.11).
+                       -- Must match count_children's predicate or the pager desyncs.
+                       or (?7 and page_markdown like '%' || ?2 || '%')
                        or page_name     like '%' || ?2 || '%')
                   and (?5
                        or special_page = 1
@@ -455,7 +470,8 @@ impl ContentPageDao {
             limit,
             offset,
             viewer_is_admin,
-            viewer_rank
+            viewer_rank,
+            search_body
         )
         .fetch_all(executor)
         .await?;
@@ -476,6 +492,9 @@ impl ContentPageDao {
     ) -> Result<Vec<ContentPageDao>> {
         let viewer_is_admin = viewer == Role::Admin;
         let viewer_rank = viewer.rank() as i64;
+        // Body search only for a non-hex query — see `count_children` (DW.11); the
+        // predicate MUST match the count's or the pager desyncs.
+        let search_body = search.chars().any(|c| !c.is_ascii_hexdigit());
         let content_pages: Vec<ContentPageDao> = query_as!(
             ContentPageDao,
             r#"
@@ -496,7 +515,10 @@ impl ContentPageDao {
                 where parent_page_id IS ?1
                   and (?2 = ''
                        or page_title    like '%' || ?2 || '%'
-                       or page_markdown like '%' || ?2 || '%'
+                       -- Body search, gated by ?7 (skipped for an all-hex query) — an
+                       -- embed UUID hex would otherwise pollute a numeric query (DW.11).
+                       -- Must match count_children's predicate or the pager desyncs.
+                       or (?7 and page_markdown like '%' || ?2 || '%')
                        or page_name     like '%' || ?2 || '%')
                   and (?5
                        or special_page = 1
@@ -513,7 +535,8 @@ impl ContentPageDao {
             limit,
             offset,
             viewer_is_admin,
-            viewer_rank
+            viewer_rank,
+            search_body
         )
         .fetch_all(executor)
         .await?;
