@@ -194,6 +194,10 @@ fn dominant_kind(kinds: &[MediaKind]) -> MediaKind {
         // A book grouped with its extracted cover image (Phase DV.10) is an EPUB
         // item; the image is its thumbnail — same rule as audio/video vs image.
         MediaKind::Epub
+    } else if kinds.contains(&MediaKind::Cbz) {
+        // A comic grouped with its extracted cover image (Phase DW.8) is a CBZ item;
+        // the image is its thumbnail — same rule as EPUB/audio/video vs image.
+        MediaKind::Cbz
     } else if kinds.contains(&MediaKind::Image) {
         MediaKind::Image
     } else {
@@ -306,6 +310,8 @@ async fn add_derived_variants(
         maybe_add_poster(state, hmac_key, media_id, primary_sha).await;
     } else if kind == MediaKind::Epub {
         maybe_add_epub_cover(state, hmac_key, media_id, primary_sha).await;
+    } else if kind == MediaKind::Cbz {
+        maybe_add_cbz_cover(state, hmac_key, media_id, primary_sha).await;
     }
 }
 
@@ -845,6 +851,102 @@ async fn maybe_add_epub_cover(state: &AppState, hmac_key: &[u8], media_id: i64, 
         }
         // A cover-less EPUB is normal, not an error — INFO, not WARN.
         Err(e) => tracing::info!("no epub cover extracted (media {media_id}): {e:?}"),
+    }
+}
+
+/// Extract a CBZ's cover — the FIRST image in the zip, by sorted entry name (comic
+/// pages are zero-padded `001.jpg…`, so the first sorted image IS the cover / page 1)
+/// — and add it as an image variant (Phase DW.9), the CBZ analog of the EPUB OPF
+/// cover. Best-effort: a malformed / imageless zip just logs + degrades to the
+/// placeholder, NEVER fails the upload.
+async fn maybe_add_cbz_cover(state: &AppState, hmac_key: &[u8], media_id: i64, cbz_sha: String) {
+    let store = state.media_store.clone();
+    let result: Result<(String, i64, String, std::path::PathBuf)> = async {
+        let path_store = store.clone();
+        let (bytes, mime) = tokio::task::spawn_blocking(move || -> Result<(Vec<u8>, String)> {
+            let path = path_store
+                .resolve_path(&cbz_sha, None)
+                .ok_or_else(|| anyhow!("cbz source {cbz_sha} not found in any media root"))?;
+            cbz_cover_bytes(&path)
+        })
+        .await
+        .map_err(|e| anyhow!("cbz cover task panicked: {e}"))??;
+        let len = bytes.len() as i64;
+        let store2 = store.clone();
+        let (sha, root) = tokio::task::spawn_blocking(move || store2.store(&bytes))
+            .await
+            .map_err(|e| anyhow!("cbz cover store task panicked: {e}"))??;
+        Ok((sha, len, mime, root))
+    }
+    .await;
+
+    match result {
+        Ok((sha, len, mime, root)) => {
+            if let Err(e) = create_variant(
+                &state.pool,
+                hmac_key,
+                media_id,
+                sha,
+                mime,
+                None,
+                len,
+                Some(root.to_string_lossy().into_owned()),
+                None,
+                None,
+            )
+            .await
+            {
+                tracing::warn!("cbz cover variant insert failed (media {media_id}): {e:?}");
+            }
+        }
+        // An imageless / malformed CBZ is degrade-not-fail — INFO, not WARN.
+        Err(e) => tracing::info!("no cbz cover extracted (media {media_id}): {e:?}"),
+    }
+}
+
+/// Open a CBZ (a plain zip of page images) and return the FIRST image entry's bytes +
+/// mime, sorted by entry name. Pure sync (called under `spawn_blocking`).
+fn cbz_cover_bytes(path: &std::path::Path) -> Result<(Vec<u8>, String)> {
+    use std::io::Read;
+    let file = std::fs::File::open(path)?;
+    let mut zip = zip::ZipArchive::new(file)?;
+    // Collect the image entry names (skips `ComicInfo.xml`, dirs, thumbs), sort, take
+    // the first — the zero-padded page order makes that the cover.
+    let mut names: Vec<String> = (0..zip.len())
+        .filter_map(|i| {
+            let entry = zip.by_index(i).ok()?;
+            if entry.is_dir() {
+                return None;
+            }
+            let name = entry.name().to_string();
+            image_mime_from_name(&name).map(|_| name)
+        })
+        .collect();
+    names.sort();
+    let first = names.first().ok_or_else(|| anyhow!("no image entries in the cbz"))?;
+    let mime = image_mime_from_name(first).unwrap_or("image/jpeg").to_string();
+    let mut entry = zip.by_name(first)?;
+    let mut bytes = Vec::new();
+    entry.read_to_end(&mut bytes)?;
+    Ok((bytes, mime))
+}
+
+/// The image mime for a filename by extension, or `None` if it's not a page image
+/// (so a `ComicInfo.xml` / `.nfo` / directory entry is skipped when picking the cover).
+fn image_mime_from_name(name: &str) -> Option<&'static str> {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        Some("image/jpeg")
+    } else if lower.ends_with(".png") {
+        Some("image/png")
+    } else if lower.ends_with(".webp") {
+        Some("image/webp")
+    } else if lower.ends_with(".gif") {
+        Some("image/gif")
+    } else if lower.ends_with(".avif") {
+        Some("image/avif")
+    } else {
+        None
     }
 }
 

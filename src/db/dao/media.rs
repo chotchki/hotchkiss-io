@@ -15,6 +15,10 @@ pub enum MediaKind {
     /// An EPUB (manga / novel) rendered in-browser by foliate-js (Phase DV). Stored
     /// as a plain blob (`application/epub+zip`); the embed mounts the reader.
     Epub,
+    /// A CBZ (comic-book zip — a zip of page images) rendered by the SAME foliate-js
+    /// reader (Phase DW.8), which auto-detects it from the `application/vnd.comicbook+zip`
+    /// mime. Most manga come as CBZ, not EPUB. Cover = the first image in the zip.
+    Cbz,
     File,
 }
 
@@ -26,6 +30,7 @@ impl MediaKind {
             MediaKind::Stl => "stl",
             MediaKind::Audio => "audio",
             MediaKind::Epub => "epub",
+            MediaKind::Cbz => "cbz",
             MediaKind::File => "file",
         }
     }
@@ -37,6 +42,7 @@ impl MediaKind {
             "stl" => Ok(MediaKind::Stl),
             "audio" => Ok(MediaKind::Audio),
             "epub" => Ok(MediaKind::Epub),
+            "cbz" => Ok(MediaKind::Cbz),
             "file" => Ok(MediaKind::File),
             other => Err(anyhow!("unknown media kind {other:?}")),
         }

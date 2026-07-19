@@ -124,6 +124,21 @@ pub fn probe(path: &Path, original_name: &str) -> Result<Probed> {
             chapters: None,
         });
     }
+    // `.cbz` (comic-book zip — a zip of page images) is read by the SAME foliate reader
+    // (Phase DW.8), which dispatches on the `application/vnd.comicbook+zip` mime. Typed
+    // by extension like `.epub` (ffprobe can't read the zip). The cover is the first
+    // image in the zip (extracted in `add_derived_variants`).
+    if lower.ends_with(".cbz") {
+        return Ok(Probed {
+            kind: MediaKind::Cbz,
+            mime: "application/vnd.comicbook+zip".to_string(),
+            codecs: None,
+            width: None,
+            height: None,
+            duration_ms: None,
+            chapters: None,
+        });
+    }
     let bin = FFPROBE_BIN
         .as_deref()
         .ok_or_else(|| anyhow!("ffprobe not found — `brew install ffmpeg` (looked at $FFPROBE_BIN, /opt/homebrew/bin, /usr/local/bin, PATH)"))?;

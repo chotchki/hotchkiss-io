@@ -674,22 +674,28 @@ Your browser can't play this audio.</audio></span>",
                 media_ref = attr_escape(&media.media_ref),
             )
         }
-        MediaKind::Epub => {
-            // The foliate-js reader shell (Phase DV): `epub-reader.js` fetches the
-            // gated `.epub` (the byte URL carries the min_role gate), mounts a
-            // `<foliate-view>` here, restores the saved location, and lifts the
-            // splash. No-JS → a plain download link. Block `<span>` wrapper because a
-            // bare `![]()` sits inside a `<p>` (a block `<div>` there is invalid HTML).
+        MediaKind::Epub | MediaKind::Cbz => {
+            // The foliate-js reader shell (Phase DV; CBZ added DW.8): `epub-reader.js`
+            // fetches the gated book blob (the byte URL carries the min_role gate),
+            // wraps it in a correctly-TYPED `File` (per `data-kind`, so foliate's
+            // makeBook picks the EPUB vs comic-book path), mounts a `<foliate-view>`,
+            // restores the saved location, and lifts the splash. No-JS → a plain
+            // download link. Block `<span>` wrapper because a bare `![]()` sits inside
+            // a `<p>` (a block `<div>` there is invalid HTML).
             let Some(v) = variants.first() else {
-                return error_span("epub has no content");
+                return error_span("book has no content");
             };
             let src = format!("/media/file/{}", v.url_key);
+            let (kind_slug, dl_label) = match kind {
+                MediaKind::Cbz => ("cbz", "Download CBZ"),
+                _ => ("epub", "Download EPUB"),
+            };
             format!(
                 "<span class=\"epub-embed block my-4 w-full\">\
 <div class=\"epub-reader relative w-full h-[80vh] min-h-96 rounded-lg border border-navy/20 bg-white overflow-hidden\" \
-data-ref=\"{r}\" data-src=\"{src}\" data-title=\"{alt}\">\
+data-ref=\"{r}\" data-src=\"{src}\" data-title=\"{alt}\" data-kind=\"{kind_slug}\">\
 <div class=\"epub-splash absolute inset-0 z-10 flex items-center justify-center bg-white text-navy/70 font-display uppercase text-sm\">Loading book…</div>\
-<noscript><a href=\"{src}\" download class=\"absolute inset-0 flex items-center justify-center text-navy underline\">Download EPUB</a></noscript>\
+<noscript><a href=\"{src}\" download class=\"absolute inset-0 flex items-center justify-center text-navy underline\">{dl_label}</a></noscript>\
 </div></span>",
                 r = attr_escape(&media.media_ref),
             )

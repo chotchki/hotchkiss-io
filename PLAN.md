@@ -109,6 +109,9 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [x] DW.5 - Series creation: a create-a-series affordance (a series = an authored Family-gated child of `manga`); the ingest can create the series if absent (from the folder / a supplied series name), inheriting `manga`'s gate.
 - [x] DW.6 - Tests: DW.1 parse (unit); DW.2 ingest (tiny `.epub` fixtures → items + ordered volume pages under a series; the dedup skip); the filesystem front door over a temp dir of fixtures; gating inheritance (volumes are Family).
 - [x] DW.7 - Docs: `docs/epub-reader-design.md` bulk-ingest section + CLAUDE.md delta.
+- [x] DW.8 - CBZ kind + reader: MediaKind::Cbz, probe .cbz → comicbook+zip mime, dominant_kind, shared foliate reader embed (data-kind), reader JS types the File so foliate's comic path loads it
+- [x] DW.9 - CBZ cover extraction: first image in the zip → an image variant (zip dep), wired into add_derived_variants
+- [x] DW.10 - Ingest accepts .cbz alongside .epub; cbz fixture + tests (upload cbz → reader shell + cover; ingest)
 
 ## Backlog (not yet phased)
 

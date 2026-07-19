@@ -1,9 +1,10 @@
-//! Bulk manga (EPUB) ingest (Phase DW) — the 271-volume ergonomics.
+//! Bulk manga ingest (Phase DW) — the 271-volume ergonomics.
 //!
-//! A folder of `.epub`s on the mini, or a browser multi-file drop, becomes an
-//! ordered stack of volume pages under a series (`/library/manga/<series>`). Each
-//! file → one content-addressed Epub media item + one volume child page embedding
-//! `![](/media/<ref>)`, ordered by the number parsed from its filename (DW.1).
+//! A folder of `.epub`/`.cbz` files on the mini, or a browser multi-file drop, becomes
+//! an ordered stack of volume pages under a series (`/library/manga/<series>`). Each
+//! file → one content-addressed Epub/Cbz media item + one volume child page embedding
+//! `![](/media/<ref>)`, ordered by the number parsed from its filename (DW.1). Both
+//! formats are read by the same foliate reader (DW.8); most manga are CBZ, novels EPUB.
 //!
 //! The two front doors (filesystem DW.3, browser DW.4) only differ in how they get
 //! the bytes onto disk; both funnel into the ONE ingest core (DW.2) that streams to
@@ -130,14 +131,17 @@ fn extract_number(stem: &str) -> Option<(i64, VolumeLabel)> {
     marked.or_else(|| bare.map(|n| (n, VolumeLabel::Volume)))
 }
 
-/// Drop a trailing `.epub` (case-insensitive) for the title stem; leave any other
-/// name untouched (a bulk drop is `.epub`s, but this keeps the fn total).
-fn strip_epub_ext(filename: &str) -> &str {
-    if filename.len() >= 5 && filename[filename.len() - 5..].eq_ignore_ascii_case(".epub") {
-        &filename[..filename.len() - 5]
-    } else {
-        filename
+/// Drop a trailing `.epub`/`.cbz` (case-insensitive) for the title stem; leave any
+/// other name untouched (keeps the fn total).
+fn strip_book_ext(filename: &str) -> &str {
+    for ext in [".epub", ".cbz"] {
+        if filename.len() >= ext.len()
+            && filename[filename.len() - ext.len()..].eq_ignore_ascii_case(ext)
+        {
+            return &filename[..filename.len() - ext.len()];
+        }
     }
+    filename
 }
 
 /// Parse a volume number + display title from a manga `.epub` filename (DW.1).
@@ -147,7 +151,7 @@ fn strip_epub_ext(filename: &str) -> &str {
 /// year and the after-marker number winning over a later bare one. No number found →
 /// `number: None` (the caller orders by position) and the cleaned stem as the title.
 pub fn parse_volume(filename: &str) -> ParsedVolume {
-    let stem = strip_epub_ext(filename).trim();
+    let stem = strip_book_ext(filename).trim();
     match extract_number(stem) {
         Some((n, label)) => ParsedVolume {
             number: Some(n),
@@ -548,12 +552,12 @@ pub async fn ingest_filesystem(
             return render_console(&state, &session_data, Some(format!("Folder rejected: {e}")), None).await;
         }
     };
-    let epubs = list_epubs(&folder).await?;
-    if epubs.is_empty() {
-        let msg = format!("No .epub files found in {}.", folder.display());
+    let books = list_books(&folder).await?;
+    if books.is_empty() {
+        let msg = format!("No .epub or .cbz files found in {}.", folder.display());
         return render_console(&state, &session_data, Some(msg), None).await;
     }
-    let count = epubs.len();
+    let count = books.len();
     let (series, series_path) = match resolve_or_create_series(&state, &series_name).await {
         Ok(s) => s,
         Err(e) => {
@@ -574,7 +578,7 @@ pub async fn ingest_filesystem(
             folder.display()
         );
         let path_refs: Vec<&str> = series_path.iter().map(String::as_str).collect();
-        let report = ingest_folder(&st, &series, &path_refs, epubs).await;
+        let report = ingest_folder(&st, &series, &path_refs, books).await;
         tracing::info!(
             "manga ingest into `{series_name_log}` done: {} created, {} skipped, {} failed",
             report.created(),
@@ -617,8 +621,8 @@ pub async fn ingest_upload(
             }
             continue;
         };
-        if !fname.to_ascii_lowercase().ends_with(".epub") {
-            // Drain the non-.epub part so the multipart stream stays aligned.
+        if !is_book_filename(&fname) {
+            // Drain the non-book part so the multipart stream stays aligned.
             while field.chunk().await.map_err(|e| anyhow!("draining upload: {e}"))?.is_some() {}
             continue;
         }
@@ -642,7 +646,7 @@ pub async fn ingest_upload(
         return render_console(&state, &session_data, Some("A series name is required.".into()), None).await;
     }
     if staged.is_empty() {
-        return render_console(&state, &session_data, Some("No .epub files in the upload.".into()), None).await;
+        return render_console(&state, &session_data, Some("No .epub or .cbz files in the upload.".into()), None).await;
     }
     let (series, series_path) = resolve_or_create_series(&state, &series_name).await?;
     let path_refs: Vec<&str> = series_path.iter().map(String::as_str).collect();
@@ -655,8 +659,8 @@ pub async fn ingest_upload(
     render_console(&state, &session_data, Some(flash), Some(view)).await
 }
 
-/// Stage every `.epub` in `folder` into ordered volume pages under `series`,
-/// STREAMING each file to the store then ingesting it immediately (so pages appear
+/// Stage every book file (`.epub`/`.cbz`) in `folder` into ordered volume pages under
+/// `series`, STREAMING each file to the store then ingesting it immediately (so pages appear
 /// incrementally + one 27 GB series never sits in memory). Sorted by path so the
 /// position fallback (an un-numbered file) is deterministic.
 async fn ingest_folder(
@@ -714,9 +718,16 @@ async fn stage_file(store: &MediaStore, path: &Path) -> Result<(String, i64, Str
     Ok((sha, len as i64, root.to_string_lossy().into_owned()))
 }
 
-/// List the `.epub` files directly in `folder` (non-recursive). Used by the
-/// filesystem front door; a subfolder-per-series layout is the operator's to flatten.
-async fn list_epubs(folder: &Path) -> Result<Vec<PathBuf>> {
+/// A supported book file — `.epub` or `.cbz` (both read by the same foliate reader;
+/// most manga are CBZ, novels EPUB). The one place the accepted extensions live.
+fn is_book_filename(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".epub") || lower.ends_with(".cbz")
+}
+
+/// List the book files (`.epub`/`.cbz`) directly in `folder` (non-recursive). Used by
+/// the filesystem front door; a subfolder-per-series layout is the operator's to flatten.
+async fn list_books(folder: &Path) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
     let mut rd = tokio::fs::read_dir(folder)
         .await
@@ -724,9 +735,9 @@ async fn list_epubs(folder: &Path) -> Result<Vec<PathBuf>> {
     while let Some(entry) = rd.next_entry().await? {
         let path = entry.path();
         if path
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| e.eq_ignore_ascii_case("epub"))
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(is_book_filename)
         {
             out.push(path);
         }
@@ -817,5 +828,8 @@ mod tests {
         assert_eq!(parse("Series v3.EPUB"), (Some(3), "Volume 3".into()));
         // No extension still parses (a browser drop could hand a bare name).
         assert_eq!(parse("Series v7"), (Some(7), "Volume 7".into()));
+        // CBZ is stripped the same as EPUB.
+        assert_eq!(parse("Series v9.cbz"), (Some(9), "Volume 9".into()));
+        assert_eq!(parse("One-Shot.cbz"), (None, "One-Shot".into()));
     }
 }

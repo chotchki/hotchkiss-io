@@ -2555,6 +2555,7 @@ dependencies = [
  "uuid",
  "webauthn-rs",
  "x509-parser",
+ "zip",
 ]
 
 [[package]]

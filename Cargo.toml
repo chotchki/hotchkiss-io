@@ -143,6 +143,11 @@ local-ip-address = "0.6"
 rmcp = { version = "2.2", features = ["server", "macros", "transport-streamable-http-server"] }
 schemars = "1"
 epub = "2.1.5"
+# CBZ (comic-book zip) cover extraction (Phase DW.9): open the zip + pull the first
+# image as the cover. Version matches the one `epub` already pulls in transitively,
+# so no duplicate. foliate-js reads the CBZ itself client-side; this is server-side
+# cover-only.
+zip = { version = "3", default-features = false, features = ["deflate"] }
 
 #Need to find the homedir
 [target."cfg(target_os = \"macos\")".dependencies]

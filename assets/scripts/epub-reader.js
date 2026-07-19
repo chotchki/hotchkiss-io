@@ -31,6 +31,9 @@
     el.dataset.mounted = "1";
     const src = el.dataset.src;
     const ref = el.dataset.ref;
+    // "epub" (default) or "cbz" — picks the File name + type so foliate's makeBook
+    // dispatches to the EPUB vs comic-book reader (Phase DW.8).
+    const kind = el.dataset.kind === "cbz" ? "cbz" : "epub";
     const splash = el.querySelector(".epub-splash");
     const fail = (msg) => {
       if (splash) {
@@ -48,9 +51,12 @@
       const resp = await fetch(src, { credentials: "same-origin" });
       if (!resp.ok) throw new Error("fetch " + src + " -> " + resp.status);
       const blob = await resp.blob();
-      const file = new File([blob], "book.epub", {
-        type: "application/epub+zip",
-      });
+      const fileName = kind === "cbz" ? "book.cbz" : "book.epub";
+      const fileType =
+        kind === "cbz"
+          ? "application/vnd.comicbook+zip"
+          : "application/epub+zip";
+      const file = new File([blob], fileName, { type: fileType });
 
       // Dynamic-import foliate's view module — it registers <foliate-view> and
       // (via top-level await) its zip loader. Relative imports resolve under

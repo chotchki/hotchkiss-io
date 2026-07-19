@@ -8,11 +8,12 @@
         <a class="text-sm text-navy underline hover:text-navy/70" href="/library/manga">Manga library →</a>
     </div>
     <p class="text-sm text-navy/70 mb-6">
-        Turn a folder of <code>.epub</code>s into an ordered stack of volume pages under a series.
-        Each file becomes one book page (its cover is pulled from the EPUB automatically); the volume
-        number is read from the filename (<code>v012</code>, <code>Vol 12</code>, <code>c001</code>,
-        <code>#12</code>). The series is created if it doesn't exist yet, gated <strong>Family</strong>
-        like the rest of the library. Re-running is safe — a volume already ingested is skipped.
+        Turn a folder of <code>.epub</code> or <code>.cbz</code> files into an ordered stack of volume
+        pages under a series. Each file becomes one book page (its cover is pulled from the book
+        automatically); the volume number is read from the filename (<code>v012</code>, <code>Vol 12</code>,
+        <code>c001</code>, <code>#12</code>). The series is created if it doesn't exist yet, gated
+        <strong>Family</strong> like the rest of the library. Re-running is safe — a volume already
+        ingested is skipped.
     </p>
 
     {% if let Some(flash) = flash %}
@@ -37,8 +38,9 @@
     <section class="mb-8 border border-navy/20 rounded p-4">
         <h2 class="font-display text-navy mb-1">From a folder on the server</h2>
         <p class="text-sm text-navy/70 mb-3">
-            The whole-series path. Point it at a folder of <code>.epub</code>s already on the machine;
-            nothing is uploaded. A large series takes minutes — it runs in the background, so watch
+            The whole-series path. Point it at a folder of <code>.epub</code>/<code>.cbz</code> files
+            already on the machine; nothing is uploaded. A large series takes minutes — it runs in the
+            background, so watch
             <a class="underline" href="/admin/logs">/admin/logs</a> and the series page will fill in.
         </p>
         <form method="post" action="/admin/library/manga/ingest" class="flex flex-col gap-3">
@@ -71,8 +73,8 @@
                 <input class="mt-1 w-full border border-navy px-2 py-1 rounded-sm" name="series" type="text"
                     placeholder="One Piece" required />
             </label>
-            <label class="text-sm text-navy">EPUB files
-                <input class="mt-1 w-full text-sm" name="files" type="file" accept=".epub" multiple required />
+            <label class="text-sm text-navy">EPUB / CBZ files
+                <input class="mt-1 w-full text-sm" name="files" type="file" accept=".epub,.cbz" multiple required />
             </label>
             <div>
                 <button type="submit"

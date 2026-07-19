@@ -5205,7 +5205,10 @@ async fn manga_bulk_upload_creates_ordered_family_gated_volumes() {
         .text()
         .await
         .unwrap();
-    assert!(vol.contains("epub-reader"), "the volume page renders the reader");
+    assert!(
+        vol.contains("hx-get=\"/media/embed/"),
+        "the volume page embeds its book (the reader loads via the embed route)"
+    );
     let anon = reqwest::get(server.url("/pages/library/manga/one-piece/volume-1")).await.unwrap();
     assert_eq!(anon.status(), StatusCode::NOT_FOUND, "a gated volume is 404 to anon");
 
@@ -5321,4 +5324,70 @@ async fn manga_filesystem_ingest_over_a_temp_dir() {
     assert_eq!(names, vec!["volume-1", "volume-2", "volume-3"]);
     assert!(rows.iter().all(|(_, _, mr)| mr.as_deref() == Some("Family")), "volumes inherit Family");
     drop(dir);
+}
+
+/// Phase DW.8/DW.9/DW.10: a CBZ (comic zip) ingests as a Cbz item read by the SAME
+/// foliate reader — the embed carries `data-kind="cbz"` so foliate's makeBook takes
+/// the comic-book path — with its cover extracted from the first image in the zip.
+#[tokio::test]
+async fn manga_cbz_upload_renders_the_comic_reader_with_a_cover() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    let cbz = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/manga/comic-v01.cbz"
+    ))
+    .unwrap();
+    let form = reqwest::multipart::Form::new().text("series", "Comic Series").part(
+        "f",
+        reqwest::multipart::Part::bytes(cbz)
+            .file_name("series-v01.cbz")
+            .mime_str("application/vnd.comicbook+zip")
+            .unwrap(),
+    );
+    let resp = admin
+        .post(server.url("/admin/library/manga/upload"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(
+        resp.text().await.unwrap().contains("1</strong> created"),
+        "the cbz ingest creates the volume"
+    );
+
+    // The item is typed Cbz (not File) with an extracted image cover variant.
+    let kind: String = sqlx::query_scalar("SELECT kind FROM media LIMIT 1")
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+    assert_eq!(kind, "cbz", "the item is typed Cbz, not a plain File download");
+    let cover_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM media_variant mv JOIN media m ON mv.media_id = m.media_id WHERE m.kind = 'cbz' AND mv.mime LIKE 'image/%'",
+    )
+    .fetch_one(&server.pool)
+    .await
+    .unwrap();
+    assert!(cover_count >= 1, "the CBZ cover (first zip image) is stored as an image variant");
+
+    // The embed (rendered by render_embed_html) is the shared reader shell, flagged as
+    // a comic so foliate's makeBook takes the comic-book path.
+    let media_ref: String = sqlx::query_scalar("SELECT media_ref FROM media WHERE kind = 'cbz'")
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+    let embed = admin
+        .get(server.url(&format!("/media/embed/{media_ref}")))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(embed.contains("class=\"epub-reader"), "renders the shared foliate reader shell");
+    assert!(embed.contains("data-kind=\"cbz\""), "flagged as a comic so foliate picks the comic path");
+    assert!(!embed.contains("media-download"), "not a plain File download");
 }
