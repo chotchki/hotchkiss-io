@@ -1,29 +1,7 @@
-<!-- plan-bridge:phase-high-water=DW -->
+<!-- plan-bridge:phase-high-water=DZ -->
 # Plan
 
 Completed phases are in `PLAN_ARCHIVE.md` (most recent: Phase 12 — beta deployment on the mini (inverted `main`→beta / `v*`tag→prod flow); Phase 1 — `get_recs_by_name` `type=A` filter fix (ACME renewal hang); Phase 9 — Tailwind cleanup / dropped DaisyUI; Phase 8 — local/e2e test harness; Phase 7 — admin analytics dashboard; Phase 2 — DNS module testability; Phase 5 — dropped the `cookie-rs` fork; Phase 3 — `ifconfig.me` → Cloudflare `cdn-cgi/trace`; Phase 0 — push-to-deploy on the Mac mini; Phase 4 — `tray-wrapper` 0.4.1 bump).
-
-## Phase DY - Nested-item nav + cross-page audio autoplay
-
-DV/DW nested each volume onto its own page (one embed each), which dormant-ed the same-page DG audio auto-advance (it chains multiple embeds in ONE page's DOM). Restore continuity WITHOUT going back to a multi-embed page: prev/next sibling buttons on every nested content page + FOREGROUND cross-page autoplay. chris chose foreground-nav over a series listen-all page (AskUserQuestion) — accepting that locked-screen cross-volume advance is lost to the iOS no-gesture-after-navigation rule; the same-page multi-embed autoplay still works wherever a page DOES carry several embeds.
-
-- [ ] DY.0 - Phase exit: a nested volume page shows prev/next sibling buttons (page_order = volume order); finishing a volume's audio with the screen ON navigates to the next sibling + auto-plays (best-effort — one tap if the browser blocks a gesture-less play); tests + docs + shipped.
-- [x] DY.1 - Server: sibling nav in `get_page_path` (nested `/pages` content) — siblings via `find_by_parent` (page_order order), viewer-gated, prev = lower / next = higher neighbor, each carrying the FULL `/pages/<parent>/<sibling>` href. Generalize `PostNavCard` to `{href, title, subtitle: Option<String>}` so blog (date subtitle) + nested (no subtitle) share it; the ends omit a side.
-- [x] DY.2 - Template: render prev/next buttons for nested pages (reuse the blog nav block, now href-based). When a next sibling exists, emit an autoplay hook (`#autoplay-next[data-href]`) the audio script reads.
-- [x] DY.3 - Client: foreground cross-page autoplay in `audio-player.js` — on `ended` with NO same-page neighbor, if the hook is present, navigate to the next page with `?play=1`; the destination auto-plays its (first) audio embed on load (best-effort; a browser block → cued at position, one tap). Locked-screen cross-page = documented no-op.
-- [x] DY.4 - Tests + docs: prev/next nav over a nested tree (order, ends, viewer-gating, href shape); the autoplay hook renders only with a next sibling; `?play=1` triggers a play attempt once (not re-fired on manual nav). CLAUDE.md + design-doc delta.
-
-## Phase DZ - Card aspect ratio + widget-everywhere
-
-The child-index card cover is a fixed 3:4 (portrait) — right for book/manga covers, WRONG for audiobooks, whose square m4b art gets cropped top-and-bottom by `object-cover` in a 0.75 box. Add a per-section `aspect=` fence param and unify the section code route + the `/library` index onto the SAME widget so the whole Library honors it (chris confirmed the covers are genuinely square, and that the top-level sections should use the widget too).
-
-- [ ] DZ.0 - Phase exit: an audiobooks section renders square cover cards (no crop), manga stays 3:4, both `/library/<section>` and `/pages/library/<section>` agree, the `/library` index renders section cards via the widget; tests + docs + shipped.
-- [x] DZ.1 - `aspect=square|portrait` fence param: `parse_aspect` (default portrait), folded into `child_index::sentinel` (so it's part of the content-hash cache key), threaded `fill` → `render_children_grid` → `ChildIndexTemplate` → the card template picks `aspect-square` vs `aspect-[3/4]`. Default portrait = zero regression for existing manga/book sections.
-- [x] DZ.2 - Section code route honors the fence: `show_library_section` parses the section page's markdown fence for order + aspect (instead of hardcoding `ListOrder::Newest`), so `/library/<section>` matches `/pages/library/<section>` byte-for-byte.
-- [x] DZ.3 - `/library` index uses the widget: `show_library_index` renders its section children via `render_children_grid` (rolled-up cover cards) instead of the bespoke `SectionDoor` text tiles. Top-level aspect a code default (portrait); chris authors the per-section fences.
-- [x] DZ.4 - Tests (aspect round-trips the sentinel + renders the class; the section route honors the fence; the library index renders cards) + CLAUDE.md + design-doc delta.
-- [x] DZ.6 - Cover whitespace ROOT CAUSE (a headless-screenshot + CDP box-model probe found it): the card grid renders inside `<div class="prose">` on the `/pages/<…>` fence path, so Tailwind Typography styled the cover `<img>` with article margins (`margin: 2em/1em`) → the whitespace above/below every cover (NOT grid-stretch; `items-start` from DZ.5 was a red herring for this). Fix: wrap the child-index widget in `not-prose` (it's a UI component, not article prose; harmless on the section/library routes with no prose). Regression: `children_fence_aspect_controls_the_card_shape` asserts `not-prose`.
-- [x] DZ.5 - Beta-review fixes: (a) card whitespace — `items-start` on the grids so a card doesn't stretch to the tallest sibling in its row; (b) the card widget is READ-ONLY (drag-reorder removed) — reordering is now a drag+position LIST in the EDITOR (`?edit`, the `/admin/pages` grip pattern), so the Preview is a faithful read-only render; (c) LONG lists — a per-row numeric POSITION input (type a number → the row jumps + the reorder POSTs) beside grip-drag, so a 271-volume series is reorderable without dragging across hundreds of rows; (d) `htmx-sortable.js` gains grip-handle detection (so the number input stays editable) + renumber-after-reorder. Test updated to `?edit` reorder list + read-only widget. (Also: fab-gui pin 0.18.0 → 0.19.0.)
 
 ## Phase 6 - DNS follow-ups (parked)
 
