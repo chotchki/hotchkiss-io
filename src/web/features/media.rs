@@ -914,6 +914,46 @@ pub(crate) async fn embedded_media_cover(
     None
 }
 
+/// How many children a roll-up scans before giving up. A series's first volume sorts
+/// first by page_order and carries the cover, so the first hit almost always wins on
+/// row one; the cap just bounds a pathological all-coverless container to a handful of
+/// lookups, never its full child list (a series can run to hundreds of volumes).
+const ROLLUP_SCAN: i64 = 24;
+
+/// Card-cover ROLL-UP (DW.12): a CONTAINER page (a manga series, a library section)
+/// carries only a ` ```children ` fence — no `page_cover_media_id`, no `/media/<ref>`
+/// embed — so its own two-step cover derivation comes up empty and the card renders
+/// blank. Borrow the cover of its first cover-bearing CHILD (page_order ASCENDING, so
+/// a series rolls up to VOLUME 1), reusing the SAME explicit-then-embed chain one level
+/// down. Deliberately a SINGLE level (a series → its volume): enough for the library
+/// tree, and it can't recurse away on a deep/cyclic tree. Scans past a rare coverless
+/// leading child up to `ROLLUP_SCAN`. `None` when no scanned child resolves a cover.
+pub(crate) async fn child_rollup_cover(
+    pool: &sqlx::SqlitePool,
+    parent_page_id: i64,
+    viewer: Role,
+) -> Option<String> {
+    let children = crate::db::dao::content_pages::ContentPageDao::find_children_ordered_paged(
+        pool,
+        Some(parent_page_id),
+        "",
+        ROLLUP_SCAN,
+        0,
+        viewer,
+    )
+    .await
+    .ok()?;
+    for child in children {
+        if let Some(url) = cover_url_for(pool, child.page_id).await {
+            return Some(url);
+        }
+        if let Some(url) = embedded_media_cover(pool, &child.page_markdown).await {
+            return Some(url);
+        }
+    }
+    None
+}
+
 /// The current cover's media REF (token) for a page, for the editor's cover field
 /// pre-fill. `None` when no cover is set.
 pub(crate) async fn cover_ref_for(pool: &sqlx::SqlitePool, page_id: i64) -> Option<String> {

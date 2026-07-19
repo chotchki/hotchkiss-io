@@ -5399,6 +5399,64 @@ async fn manga_cbz_upload_renders_the_comic_reader_with_a_cover() {
     assert!(!embed.contains("media-download"), "not a plain File download");
 }
 
+/// Phase DW.12: a SERIES card (only a ` ```children ` fence — no cover, no embed of its
+/// own) rolls up its first volume's cover, so the `/library/manga` tile isn't blank
+/// after a volume-only import. The card's `<img>` cover comes one level down.
+#[tokio::test]
+async fn series_card_rolls_up_its_first_volume_cover() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // A CBZ carries a guaranteed first-image cover variant — ingest it as volume 1.
+    let cbz = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/manga/comic-v01.cbz"
+    ))
+    .unwrap();
+    let form = reqwest::multipart::Form::new().text("series", "Rollup Series").part(
+        "f",
+        reqwest::multipart::Part::bytes(cbz)
+            .file_name("series-v01.cbz")
+            .mime_str("application/vnd.comicbook+zip")
+            .unwrap(),
+    );
+    let resp = admin
+        .post(server.url("/admin/media/import/upload"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // The volume's cover url_key — the exact image the series card should borrow.
+    let cover_key: String = sqlx::query_scalar(
+        "SELECT mv.url_key FROM media_variant mv JOIN media m ON mv.media_id = m.media_id WHERE m.kind = 'cbz' AND mv.mime LIKE 'image/%' LIMIT 1",
+    )
+    .fetch_one(&server.pool)
+    .await
+    .unwrap();
+
+    // The manga SECTION lists SERIES cards. The series page has no cover/embed of its
+    // own — the tile's `<img>` proves the roll-up borrowed volume 1's cover.
+    let section = admin
+        .get(server.url("/library/manga"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        section.contains("/pages/library/manga/rollup-series"),
+        "the section lists the series card"
+    );
+    assert!(
+        section.contains(&format!("/media/file/{cover_key}")),
+        "the series card rolled up volume 1's cover: {section}"
+    );
+}
+
 /// Phase DW.11: an EPUB with NO cover declared in the OPF (the Jujutsu Kaisen shape)
 /// still gets a cover — the extractor falls back to the first image resource (page 1).
 #[tokio::test]

@@ -95,10 +95,19 @@ pub async fn render_children_grid(
     let mut cards = Vec::with_capacity(items.len());
     for c in items {
         // Explicit page cover wins; else derive it from the page's first media embed
-        // (DV.11) so a book/volume auto-covers with no manual cover-setting.
+        // (DV.11) so a book/volume auto-covers with no manual cover-setting; else, for a
+        // CONTAINER card (a manga series — only a ` ```children ` fence, no embed), roll
+        // up to its first volume's cover (DW.12) so the series tile isn't blank.
         let cover_url = match crate::web::features::media::cover_url_for(pool, c.page_id).await {
             Some(url) => Some(url),
-            None => crate::web::features::media::embedded_media_cover(pool, &c.page_markdown).await,
+            None => match crate::web::features::media::embedded_media_cover(pool, &c.page_markdown)
+                .await
+            {
+                Some(url) => Some(url),
+                None => {
+                    crate::web::features::media::child_rollup_cover(pool, c.page_id, viewer).await
+                }
+            },
         };
         cards.push(ChildCard {
             page_id: c.page_id,
