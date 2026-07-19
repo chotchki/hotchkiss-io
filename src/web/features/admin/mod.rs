@@ -11,6 +11,7 @@ pub mod api_keys;
 pub mod dead_links;
 pub mod greylist;
 pub mod logs;
+pub mod manga_ingest;
 pub mod media;
 pub mod pages;
 pub mod users;
@@ -39,6 +40,11 @@ pub fn admin_router() -> Router<AppState> {
         // draft (Phase CU) — same two-path-segment shape as /feature.
         .route("/pages/{page_id}/publish", post(pages::publish_now))
         .route("/pages/{page_id}/unpublish", post(pages::unpublish))
+        // Bulk manga (EPUB) ingest (Phase DW): the console + the two front doors —
+        // `/ingest` (server folder, spawned) + `/upload` (browser drop, synchronous).
+        .route("/library/manga", get(manga_ingest::show_ingest_console))
+        .route("/library/manga/ingest", post(manga_ingest::ingest_filesystem))
+        .route("/library/manga/upload", post(manga_ingest::ingest_upload))
         // Media library PAGE (Phase BZ) — the HTML admin UI. All MUTATIONS moved to
         // the canonical `/media` REST surface (Phase DR): the library JS drives
         // `POST /media`, `POST /media/<ref>/variants`, `PUT`/`DELETE /media/<ref>`,

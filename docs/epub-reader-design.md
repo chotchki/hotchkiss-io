@@ -1,4 +1,4 @@
-# EPUB reader + manga library (Phases DV–DW)
+# EPUB reader + manga library (Phases DV–DW) [SHIPPED]
 
 The next Library media type after audiobooks: **EPUB** — manga and reflowable novels — read in-browser, gated to Family, shelved as series → volume pages. DV builds the reader + a single volume end to end; DW builds the bulk path that makes a 271-volume series tractable.
 
@@ -59,9 +59,17 @@ An empty/childless page renders an empty state, never a 500. This keeps `transfo
 
 Per-device `localStorage`, keyed `epub-loc:<ref>`, storing foliate's location (a CFI), applied when the reader is ready — the **same shape as `audio-player.js`'s `audio-pos:<ref>`**. Server-side cross-device sync is deferred exactly like the audiobook version (its Phase DF): localStorage is the honest v1, and a book resumes where you left it on the same device.
 
-## Bulk ingest (→ Phase DW)
+## Bulk ingest (Phase DW) [SHIPPED]
 
-DV makes ONE volume work with manual authoring. A real series is 271 volumes at ~100 MB each ≈ 27 GB — which can't go through a browser upload. DW builds a shared stream-commit ingest core behind two front doors: (1) **filesystem-drop + admin trigger** (the primary — drop the `.epub`s on a mini drive, ingest server-side, no HTTP upload), and (2) a **browser multi-file drop** for small add-later batches. Volume number + `page_order` are parsed from the filename (`Series v012.epub` → Vol. 12); a content-hash already present under the series is skipped (idempotent re-run). Details in DW.
+DV makes ONE volume work with manual authoring. A real series is 271 volumes at ~100 MB each ≈ 27 GB — which can't go through a browser upload. DW is `web/features/admin/manga_ingest.rs`: a shared stream-commit core behind two front doors, both funneling into ONE `ingest_volumes` so the item/page policy can't drift.
+
+**Filename parse (DW.1, `parse_volume`).** Pure fn → `ParsedVolume { number, title }`. A token walk classifies a leading letter-run as a `v`/`vol`/`volume` (→ "Volume N") or `c`/`ch`/`chapter` (→ "Chapter N") marker — chris's Jujutsu Kaisen reads "Chapter 1", One Piece "Volume 12", so the LABEL is preserved, not flattened. A marker beats a stray number (a year): `Series 2020 v12` → 12, `Vol 12 (2020)` → 12. No marker + a bare trailing number → Volume N; no number at all → `None` (the caller orders by sorted position) + the cleaned stem as title. Unit-tested against the real shapes.
+
+**The tree, auto-bootstrapped (DW.5, `resolve_or_create_series`).** `library → manga → <series> → <volume>`. The ingest find-or-creates the `manga` section (a child of `library`) and the `<series>` (a child of `manga`) if absent — each via `PageWrite::create_page`, so each **inherits its parent's gate** (`library` seeds `Family` → everything below is Family for free) and gets stamped with a ` ```children ` fence so a direct visit lists its children. The very first drop self-bootstraps the whole section; zero manual setup.
+
+**The core (DW.2, `ingest_volumes` → `ingest_one`).** Per staged `.epub`: (1) **content-hash dedup** — skip if a child of the series already embeds a media item with this exact sha (idempotent re-run, `series_has_volume_with_sha`, sha-indexed so the child scan stays tiny); (2) reserve the volume page via `create_page` (inherits the series gate) — a **slug collision is a soft skip** (a same-numbered but DIFFERENT file, `SkippedExisting`), never a hard error; (3) ingest the EPUB media item through the shared `admin::media::ingest_stored_file` (probe → variant → OPF-cover extraction, `dominant_kind` → Epub); (4) fill the page with `![](/media/<ref>)` + `page_order` = the parsed number. A media-ingest failure **rolls back the empty page** so a corrupt file leaves no orphan. Best-effort per file — one bad EPUB is a `Failed` report entry, never an aborted batch. **Never all-in-memory:** each file streams to the content store (`StagedBlob`, O(chunk)); the filesystem path stages + ingests one file at a time, so pages appear incrementally and a 27 GB series never sits in RAM.
+
+**Two front doors + the console (DW.3/DW.4, `GET /admin/library/manga`).** (1) **Filesystem** (`POST …/manga/ingest`, series + a server-side folder path) — the 271-volume path, no upload; the folder is CANONICALIZED (resolves `..`/symlinks) + `is_dir`-checked, then the ingest is **spawned** (detached like the coordinator backfills — a bad pass can't take the app down) and logs its tally to `/admin/logs`, so the log tail + the series page filling in ARE the progress view. (2) **Browser** (`POST …/manga/upload`, multipart) — SYNCHRONOUS for SMALL batches (`.epub` parts only, non-epub drained), returning the per-file report inline; an honest note steers a full series to the filesystem path.
 
 ## Honest limits + deferred
 
@@ -71,3 +79,6 @@ DV makes ONE volume work with manual authoring. A real series is 271 volumes at 
 - **Server resume sync** — deferred (shared with the audiobook DF item).
 - **CBZ is nearly free** — foliate reads comic-book zips too; a `.cbz` → `Epub` (or a `Comic`) kind is a small add once the EPUB path works. Not in DV.
 - **Reflowable-novel UX** (font size, themes, TOC) — foliate provides the hooks; DV wires the manga-first controls (page-turn, spread, RTL), and novel-specific polish is a later refinement.
+- **Bulk-ingest folder validation is coarse (DW.3)** — canonicalize + `is_dir`, and it's admin-only (the `/admin` gate). Restricting the source to a configured drop-dir / the media roots is a deferred tightening; the operator is trusted here.
+- **No live ingest progress bar (DW.3)** — the spawned filesystem ingest logs its per-file failures + final tally to `/admin/logs`, and the series page fills in as it goes. A shared status handle (a "running… / last run" badge like the dead-link scan's `DeadLinkScanState`) is the deferred nicety.
+- **Range-grouping dropped (DW).** An earlier plan grouped a huge series into `<lo>-<hi>` range parent pages every N volumes. Cut — the flat `series → volume` tree + the drag-reorder + `?q=` search + the pager handle 271 volumes fine, and the depth-agnostic serving means it's a pure re-parent if it's ever wanted.

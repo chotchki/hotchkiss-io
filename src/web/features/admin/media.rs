@@ -386,6 +386,62 @@ async fn ingest_new_item(
     Ok(Some((media, variants)))
 }
 
+/// Ingest an ALREADY-STAGED file (its bytes committed to the content store) into a
+/// NEW media item + its variant + kind-derived variants — the single-file analog of
+/// [`ingest_new_item`]. Shared with the bulk manga ingest (DW.2), which stages each
+/// `.epub` ITSELF (streaming from disk / the upload, so a volume is never held whole
+/// in memory) then hands the committed facts here. The kind is PROBED, never trusted
+/// from the extension; for an EPUB the derived pass extracts the OPF cover. Returns
+/// the created item (its `media_ref` is the embed target).
+pub(crate) async fn ingest_stored_file(
+    state: &AppState,
+    sha: String,
+    len: i64,
+    root: String,
+    filename: &str,
+    title: Option<String>,
+    min_role: Option<String>,
+) -> Result<MediaDao> {
+    let probed = probe_stored(
+        state.media_store.clone(),
+        sha.clone(),
+        filename.to_string(),
+        Some(root.clone()),
+    )
+    .await?;
+    let media_ref = uuid::Uuid::now_v7().simple().to_string();
+    let hmac_key = CryptoKey::get_or_create(&state.pool, MEDIA_HMAC_KEY_ID)
+        .await?
+        .key_value;
+    let media = MediaDao::create(
+        &state.pool,
+        media_ref,
+        probed.kind,
+        title,
+        probed.width,
+        probed.height,
+        probed.duration_ms,
+        min_role,
+        probed.chapters.clone(),
+    )
+    .await?;
+    create_variant(
+        &state.pool,
+        &hmac_key,
+        media.media_id,
+        sha.clone(),
+        probed.mime.clone(),
+        probed.codecs.clone(),
+        len,
+        Some(root),
+        probed.width,
+        probed.height,
+    )
+    .await?;
+    add_derived_variants(state, &hmac_key, media.media_id, probed.kind, sha).await;
+    Ok(media)
+}
+
 /// `POST /media` — the canonical REST create (DQ.2). Ingests a new item (server
 /// mints the UUIDv7 ref) → `201 Created` + `Location: /media/<ref>` + the manifest.
 /// Admin-gated FOR FREE by `require_admin_for_mutations` (a POST → the admin

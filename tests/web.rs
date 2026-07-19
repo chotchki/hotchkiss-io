@@ -5111,3 +5111,214 @@ async fn scad_upload_serves_openscad_with_corp_and_slicer_embed() {
         "CORP lets the isolated editor fetch it"
     );
 }
+
+// ───────────────────────── Phase DW: bulk manga ingest ─────────────────────────
+
+/// An `.epub` multipart file part (typed so the probe reads it as Epub).
+fn epub_part(bytes: Vec<u8>, name: &str) -> reqwest::multipart::Part {
+    reqwest::multipart::Part::bytes(bytes)
+        .file_name(name.to_string())
+        .mime_str("application/epub+zip")
+        .unwrap()
+}
+
+fn manga_fixture(n: u8) -> Vec<u8> {
+    std::fs::read(format!(
+        "{}/tests/fixtures/manga/series-v0{n}.epub",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap()
+}
+
+/// Phase DW.2/DW.4/DW.5: the browser bulk-upload front door. A multi-file drop + a
+/// series name creates the `library → manga → series` chain (Family-gated, inherited
+/// from the seeded `library` row) and one ordered volume page per `.epub`, each
+/// embedding its reader. Volumes order by the number PARSED from the filename, not by
+/// upload order — so an out-of-order drop still reads 1..N.
+#[tokio::test]
+async fn manga_bulk_upload_creates_ordered_family_gated_volumes() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // Drop OUT of order (3, 1, 2) to prove the parse drives ordering, not arrival.
+    let form = reqwest::multipart::Form::new()
+        .text("series", "One Piece")
+        .part("f3", epub_part(manga_fixture(3), "series-v03.epub"))
+        .part("f1", epub_part(manga_fixture(1), "series-v01.epub"))
+        .part("f2", epub_part(manga_fixture(2), "series-v02.epub"));
+    let resp = admin
+        .post(server.url("/admin/library/manga/upload"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("3</strong> created"), "report shows 3 created: {body}");
+
+    // The whole chain inherits Family (library seeds it; each level inherits).
+    let gate = |name: &str| {
+        let pool = server.pool.clone();
+        let name = name.to_string();
+        async move {
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT min_role FROM content_pages WHERE page_name = ?1",
+            )
+            .bind(name)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(gate("manga").await.as_deref(), Some("Family"), "manga section inherits Family");
+    assert_eq!(gate("one-piece").await.as_deref(), Some("Family"), "series inherits Family");
+
+    // The series' children are ordered volume-1..3 by the parsed number + Family-gated.
+    let series_id: i64 =
+        sqlx::query_scalar("SELECT page_id FROM content_pages WHERE page_name = 'one-piece'")
+            .fetch_one(&server.pool)
+            .await
+            .unwrap();
+    let rows: Vec<(String, i64, Option<String>)> = sqlx::query_as(
+        "SELECT page_name, page_order, min_role FROM content_pages WHERE parent_page_id = ?1 ORDER BY page_order",
+    )
+    .bind(series_id)
+    .fetch_all(&server.pool)
+    .await
+    .unwrap();
+    let names: Vec<&str> = rows.iter().map(|(n, _, _)| n.as_str()).collect();
+    assert_eq!(names, vec!["volume-1", "volume-2", "volume-3"], "ordered by parsed volume number");
+    assert_eq!(rows[0].1, 1, "volume-1 order = parsed 1");
+    assert_eq!(rows[2].1, 3, "volume-3 order = parsed 3");
+    assert!(
+        rows.iter().all(|(_, _, mr)| mr.as_deref() == Some("Family")),
+        "every volume inherits the Family gate"
+    );
+
+    // The volume page serves the reader to an admin; an anon is 404'd (gated ancestor).
+    let vol = admin
+        .get(server.url("/pages/library/manga/one-piece/volume-1"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(vol.contains("epub-reader"), "the volume page renders the reader");
+    let anon = reqwest::get(server.url("/pages/library/manga/one-piece/volume-1")).await.unwrap();
+    assert_eq!(anon.status(), StatusCode::NOT_FOUND, "a gated volume is 404 to anon");
+
+    // The series page lists its volumes (the stamped children fence is filled).
+    let series_page = admin
+        .get(server.url("/pages/library/manga/one-piece"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        series_page.contains("/pages/library/manga/one-piece/volume-1"),
+        "the series page lists its volume cards"
+    );
+}
+
+/// Phase DW.2: content-hash dedup makes a re-run idempotent — the same bytes under the
+/// same series are skipped, not duplicated.
+#[tokio::test]
+async fn manga_bulk_upload_dedups_on_rerun() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    let upload = |bytes: Vec<u8>| {
+        let admin = admin.clone();
+        let url = server.url("/admin/library/manga/upload");
+        async move {
+            let form = reqwest::multipart::Form::new()
+                .text("series", "Berserk")
+                .part("f", epub_part(bytes, "series-v01.epub"));
+            admin.post(url).multipart(form).send().await.unwrap().text().await.unwrap()
+        }
+    };
+
+    let first = upload(manga_fixture(1)).await;
+    assert!(first.contains("1</strong> created"), "first ingest creates the volume: {first}");
+    let second = upload(manga_fixture(1)).await;
+    assert!(second.contains("0</strong> created"), "re-run creates nothing");
+    assert!(second.contains("1</strong> skipped"), "re-run skips the duplicate: {second}");
+
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM content_pages cp JOIN content_pages s ON cp.parent_page_id = s.page_id WHERE s.page_name = 'berserk'",
+    )
+    .fetch_one(&server.pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 1, "exactly one volume page — no duplicate");
+}
+
+/// Phase DW.3: the filesystem front door ingests a server-side folder of `.epub`s. It
+/// SPAWNS (a real series copies tens of GB), so the POST returns "started" and the
+/// volumes appear asynchronously — poll for them.
+#[tokio::test]
+async fn manga_filesystem_ingest_over_a_temp_dir() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    for n in 1..=3 {
+        std::fs::write(dir.path().join(format!("series-v0{n}.epub")), manga_fixture(n)).unwrap();
+    }
+    let folder = dir.path().to_string_lossy().to_string();
+
+    let resp = admin
+        .post(server.url("/admin/library/manga/ingest"))
+        .form(&[("series", "Naruto"), ("folder", folder.as_str())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(resp.text().await.unwrap().contains("started"), "the spawned ingest reports started");
+
+    // The spawn processes off-request — poll for all three volumes.
+    let child_count = || {
+        let pool = server.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM content_pages cp JOIN content_pages s ON cp.parent_page_id = s.page_id WHERE s.page_name = 'naruto'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let mut done = false;
+    for _ in 0..80 {
+        if child_count().await >= 3 {
+            done = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    assert!(done, "the filesystem ingest created 3 volumes under the series");
+
+    // Ordered + Family-gated, same as the browser path.
+    let series_id: i64 =
+        sqlx::query_scalar("SELECT page_id FROM content_pages WHERE page_name = 'naruto'")
+            .fetch_one(&server.pool)
+            .await
+            .unwrap();
+    let rows: Vec<(String, i64, Option<String>)> = sqlx::query_as(
+        "SELECT page_name, page_order, min_role FROM content_pages WHERE parent_page_id = ?1 ORDER BY page_order",
+    )
+    .bind(series_id)
+    .fetch_all(&server.pool)
+    .await
+    .unwrap();
+    let names: Vec<&str> = rows.iter().map(|(n, _, _)| n.as_str()).collect();
+    assert_eq!(names, vec!["volume-1", "volume-2", "volume-3"]);
+    assert!(rows.iter().all(|(_, _, mr)| mr.as_deref() == Some("Family")), "volumes inherit Family");
+    drop(dir);
+}

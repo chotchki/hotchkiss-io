@@ -7,3 +7,8 @@ templates/partials/icons.html
 .claude/plan-bridge-state.json
 .claude/plan-bridge-state.json.lock
 node_modules/
+
+# EPUB fixture generator scratch (build/epub-fixture/*.sh working dirs)
+/build/epub-fixture/src/
+/build/epub-fixture/vol*/
+/build/epub-fixture/*.epub
