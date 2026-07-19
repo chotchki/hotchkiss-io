@@ -99,5 +99,3 @@ codesign --force --sign - "$APP/Contents/MacOS/$EXE"
 ABSOLUTE_APP="$(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
 echo "BUILT_APP=$ABSOLUTE_APP"
 echo "PROFILE=$PROFILE"
-
-# (redeploy marker)
