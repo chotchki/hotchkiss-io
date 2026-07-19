@@ -9,9 +9,15 @@
 
 {% block content %}
 <div class="max-w-5xl mx-auto">
-    <h2 class="font-display text-lg text-navy uppercase mb-1">Media Library</h2>
+    <div class="flex flex-row items-baseline justify-between mb-1">
+        <h2 class="font-display text-lg text-navy uppercase">Media Library</h2>
+        <a href="/admin/media/import"
+            class="text-sm text-navy underline hover:text-navy/70 whitespace-nowrap">Bulk import books →</a>
+    </div>
     <p class="text-sm text-navy/70 mb-4">Upload images, video (drop the AV1 + HEVC encodes
-        together), or STL. Copy a reference and paste <code>![](/media/&lt;ref&gt;)</code> into any page.</p>
+        together), or STL. Copy a reference and paste <code>![](/media/&lt;ref&gt;)</code> into any page.
+        To bulk-load a manga/novel series (a folder of EPUB/CBZ → ordered volume pages), use
+        <a class="underline" href="/admin/media/import">import</a>.</p>
 
     <!-- Storage roots + free space (Phase CJ) — so multi-drive placement isn't silent. -->
     <section class="mb-6 rounded-lg border border-navy/20 bg-white/60 p-3">

@@ -43,7 +43,7 @@
             background, so watch
             <a class="underline" href="/admin/logs">/admin/logs</a> and the series page will fill in.
         </p>
-        <form method="post" action="/admin/library/manga/ingest" class="flex flex-col gap-3">
+        <form method="post" action="/admin/media/import/filesystem" class="flex flex-col gap-3">
             <label class="text-sm text-navy">Series name
                 <input class="mt-1 w-full border border-navy px-2 py-1 rounded-sm" name="series" type="text"
                     placeholder="One Piece" required />
@@ -67,7 +67,7 @@
             For a handful of volumes. Uploads over the browser, so a full multi-GB series is impractical
             here — use the folder path above for those.
         </p>
-        <form method="post" action="/admin/library/manga/upload" enctype="multipart/form-data"
+        <form method="post" action="/admin/media/import/upload" enctype="multipart/form-data"
             class="flex flex-col gap-3">
             <label class="text-sm text-navy">Series name
                 <input class="mt-1 w-full border border-navy px-2 py-1 rounded-sm" name="series" type="text"

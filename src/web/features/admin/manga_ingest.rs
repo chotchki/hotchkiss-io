@@ -459,7 +459,7 @@ async fn ensure_child(
 
 // ─────────────────────────── front doors (DW.3 / DW.4) ───────────────────────────
 
-/// The bulk-ingest console (`GET /admin/library/manga`) — a filesystem-folder form
+/// The bulk-ingest console (`GET /admin/media/import`) — a filesystem-folder form
 /// (the 271-volume path) + a browser multi-file drop (small batches) + guidance. The
 /// POST handlers re-render it with a `flash` banner (and, for the synchronous browser
 /// path, the per-file `report`).
@@ -527,7 +527,7 @@ pub async fn show_ingest_console(
     render_console(&state, &session_data, None, None).await
 }
 
-/// Filesystem front door (DW.3): `POST /admin/library/manga/ingest` — a server-side
+/// Filesystem front door (DW.3): `POST /admin/media/import/filesystem` — a server-side
 /// folder path + series name. Validates the folder, resolves/creates the series, then
 /// SPAWNS the long ingest (staging can copy tens of GB) and returns immediately; the
 /// report goes to `/admin/logs` and volumes appear on the series page as they process.
@@ -598,7 +598,7 @@ pub async fn ingest_filesystem(
     render_console(&state, &session_data, Some(flash), None).await
 }
 
-/// Browser front door (DW.4): `POST /admin/library/manga/upload` — a multi-file drop
+/// Browser front door (DW.4): `POST /admin/media/import/upload` — a multi-file drop
 /// with a series name, streamed to the store. SYNCHRONOUS (for SMALL batches — a full
 /// 27 GB series must go through the filesystem path), returning the per-file report.
 pub async fn ingest_upload(

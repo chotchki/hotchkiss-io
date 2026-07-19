@@ -5141,6 +5141,13 @@ async fn manga_bulk_upload_creates_ordered_family_gated_volumes() {
     let admin = client();
     admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
 
+    // The media library links to the import console (the discoverable entry point).
+    let lib = admin.get(server.url("/admin/media")).send().await.unwrap().text().await.unwrap();
+    assert!(
+        lib.contains("/admin/media/import"),
+        "the media library links to the bulk-import console"
+    );
+
     // Drop OUT of order (3, 1, 2) to prove the parse drives ordering, not arrival.
     let form = reqwest::multipart::Form::new()
         .text("series", "One Piece")
@@ -5148,7 +5155,7 @@ async fn manga_bulk_upload_creates_ordered_family_gated_volumes() {
         .part("f1", epub_part(manga_fixture(1), "series-v01.epub"))
         .part("f2", epub_part(manga_fixture(2), "series-v02.epub"));
     let resp = admin
-        .post(server.url("/admin/library/manga/upload"))
+        .post(server.url("/admin/media/import/upload"))
         .multipart(form)
         .send()
         .await
@@ -5237,7 +5244,7 @@ async fn manga_bulk_upload_dedups_on_rerun() {
 
     let upload = |bytes: Vec<u8>| {
         let admin = admin.clone();
-        let url = server.url("/admin/library/manga/upload");
+        let url = server.url("/admin/media/import/upload");
         async move {
             let form = reqwest::multipart::Form::new()
                 .text("series", "Berserk")
@@ -5277,7 +5284,7 @@ async fn manga_filesystem_ingest_over_a_temp_dir() {
     let folder = dir.path().to_string_lossy().to_string();
 
     let resp = admin
-        .post(server.url("/admin/library/manga/ingest"))
+        .post(server.url("/admin/media/import/filesystem"))
         .form(&[("series", "Naruto"), ("folder", folder.as_str())])
         .send()
         .await
@@ -5348,7 +5355,7 @@ async fn manga_cbz_upload_renders_the_comic_reader_with_a_cover() {
             .unwrap(),
     );
     let resp = admin
-        .post(server.url("/admin/library/manga/upload"))
+        .post(server.url("/admin/media/import/upload"))
         .multipart(form)
         .send()
         .await
