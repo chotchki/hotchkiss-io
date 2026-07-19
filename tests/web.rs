@@ -5712,6 +5712,107 @@ async fn series_card_rolls_up_a_cover_two_levels_deep() {
     );
 }
 
+/// Phase DZ.1: a ` ```children aspect=square ` fence renders the card cover boxes as
+/// 1:1 tiles (square audiobook art fits with no crop); the default (no `aspect=`) stays
+/// the 3:4 book portrait. The aspect rides the sentinel, so it survives the cache.
+#[tokio::test]
+async fn children_fence_aspect_controls_the_card_shape() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    let put = |path: &str, md: &str| {
+        let admin = admin.clone();
+        let url = server.url(&format!("/pages/{path}"));
+        let md = md.to_string();
+        async move {
+            admin
+                .put(url)
+                .header("HX-Request", "true")
+                .form(&[
+                    ("page_category", ""),
+                    ("page_markdown", md.as_str()),
+                    ("page_cover_media_ref", ""),
+                    ("page_order", "0"),
+                ])
+                .send()
+                .await
+                .unwrap();
+        }
+    };
+
+    // A square-aspect fence + one child (a coverless card still renders the aspect box).
+    admin.post(server.url("/pages")).form(&[("page_title", "Squares")]).send().await.unwrap();
+    put("squares", "```children order=newest aspect=square\n```\n").await;
+    admin.post(server.url("/pages/squares")).form(&[("page_title", "Child A")]).send().await.unwrap();
+    let sq = admin.get(server.url("/pages/squares")).send().await.unwrap().text().await.unwrap();
+    assert!(sq.contains("aspect-square"), "square fence → square card boxes: {sq}");
+    assert!(!sq.contains("aspect-[3/4]"), "square fence emits no portrait box");
+
+    // Control: no aspect → the 3:4 portrait default.
+    admin.post(server.url("/pages")).form(&[("page_title", "Portraits")]).send().await.unwrap();
+    put("portraits", "```children order=newest\n```\n").await;
+    admin.post(server.url("/pages/portraits")).form(&[("page_title", "Child B")]).send().await.unwrap();
+    let pt = admin.get(server.url("/pages/portraits")).send().await.unwrap().text().await.unwrap();
+    assert!(pt.contains("aspect-[3/4]"), "no aspect → portrait default: {pt}");
+    assert!(!pt.contains("aspect-square"), "portrait emits no square box");
+}
+
+/// Phase DZ.2/DZ.3: the `/library/<section>` CODE route honors the section page's own
+/// ` ```children ` fence aspect (instead of hardcoding), and the `/library` index
+/// renders its sections through the SAME widget (cards linking into the content tree +
+/// the admin "+ new section" form), not the old bespoke text doors.
+#[tokio::test]
+async fn library_uses_the_widget_and_honors_the_section_fence() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    let put = |path: &str, md: &str| {
+        let admin = admin.clone();
+        let url = server.url(&format!("/pages/{path}"));
+        let md = md.to_string();
+        async move {
+            admin
+                .put(url)
+                .header("HX-Request", "true")
+                .form(&[
+                    ("page_category", ""),
+                    ("page_markdown", md.as_str()),
+                    ("page_cover_media_ref", ""),
+                    ("page_order", "0"),
+                ])
+                .send()
+                .await
+                .unwrap();
+        }
+    };
+
+    // An audiobooks section under library with a SQUARE fence + a book child.
+    admin.post(server.url("/pages/library")).form(&[("page_title", "AudioBooks")]).send().await.unwrap();
+    put("library/audiobooks", "```children order=newest aspect=square\n```\n").await;
+    admin.post(server.url("/pages/library/audiobooks")).form(&[("page_title", "Book One")]).send().await.unwrap();
+
+    // The /library/<section> code route reads the section's fence → square cards.
+    let section = admin.get(server.url("/library/audiobooks")).send().await.unwrap().text().await.unwrap();
+    assert!(
+        section.contains("aspect-square"),
+        "the code route honors the section fence aspect: {section}"
+    );
+
+    // The /library index renders the section via the widget: a card into the content
+    // tree + the admin "+ new section" form (both from render_children_grid).
+    let index = admin.get(server.url("/library")).send().await.unwrap().text().await.unwrap();
+    assert!(
+        index.contains("/pages/library/audiobooks"),
+        "the section is a widget card linking into the content tree: {index}"
+    );
+    assert!(
+        index.contains(r#"hx-post="/pages/library""#),
+        "the widget's new-section form is present"
+    );
+}
+
 /// Phase DW.11: an EPUB with NO cover declared in the OPF (the Jujutsu Kaisen shape)
 /// still gets a cover — the extractor falls back to the first image resource (page 1).
 #[tokio::test]

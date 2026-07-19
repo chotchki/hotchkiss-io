@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% import "partials/icons.html" as icons %}
 
 {% block title %}Library{% endblock %}
 
@@ -9,38 +8,10 @@
 <div class="max-w-5xl mx-auto">
 <h1 class="text-2xl font-display text-navy mb-4">Library</h1>
 
-{% if auth_state.is_admin() %}
-{# Sections are AUTHORED children of the library row (audiobooks first) —
-   the blog/projects index-form pattern, since /pages/library redirects here
-   and never shows the editor's child form. Inherit-on-create stamps the
+{# Section cards via the shared child-index widget (DZ.3) — rolled-up covers + the
+   admin "+ new section" form + drag-reorder, the same renderer every section uses.
+   Sections are AUTHORED children of the library row; inherit-on-create stamps the
    parent's Family gate. #}
-<form hx-post="/pages/library" class="mb-4 flex flex-row gap-2">
-    <input class="border border-navy px-2 grow min-w-0 rounded-sm" name="page_title" type="text"
-        placeholder="Section name (e.g. AudioBooks)" required />
-    <button class="px-3 py-2 bg-navy border-navy rounded-sm text-div-grey" type="submit">{% call icons::plus() %} New section</button>
-</form>
-{% endif %}
-
-{% if doors.is_empty() %}
-<p class="text-navy italic">Nothing on the shelves yet.</p>
-{% else %}
-{# Section doors — the home-pillar shape, one per child page. #}
-<nav aria-label="Library sections">
-    <ul class="grid grid-cols-1 sm:grid-cols-3 gap-4 list-none p-0">
-        {% for door in doors %}
-        <li>
-            <a href="{{ door.href }}"
-                class="flex flex-col items-center text-center gap-2 h-full px-4 py-6 bg-navy rounded-lg border-b-4 border-yellow hover:bg-navy/90">
-                <span class="text-5xl text-yellow">{% call icons::book_open() %}</span>
-                <span class="font-display text-div-grey uppercase text-lg">{{ door.title }}</span>
-                {% if !door.excerpt.is_empty() %}
-                <span class="text-div-grey/80 text-sm">{{ door.excerpt }}</span>
-                {% endif %}
-            </a>
-        </li>
-        {% endfor %}
-    </ul>
-</nav>
-{% endif %}
+{{ grid|safe }}
 </div>
 {% endblock %}

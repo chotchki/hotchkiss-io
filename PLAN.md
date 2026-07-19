@@ -13,6 +13,16 @@ DV/DW nested each volume onto its own page (one embed each), which dormant-ed th
 - [x] DY.3 - Client: foreground cross-page autoplay in `audio-player.js` — on `ended` with NO same-page neighbor, if the hook is present, navigate to the next page with `?play=1`; the destination auto-plays its (first) audio embed on load (best-effort; a browser block → cued at position, one tap). Locked-screen cross-page = documented no-op.
 - [x] DY.4 - Tests + docs: prev/next nav over a nested tree (order, ends, viewer-gating, href shape); the autoplay hook renders only with a next sibling; `?play=1` triggers a play attempt once (not re-fired on manual nav). CLAUDE.md + design-doc delta.
 
+## Phase DZ - Card aspect ratio + widget-everywhere
+
+The child-index card cover is a fixed 3:4 (portrait) — right for book/manga covers, WRONG for audiobooks, whose square m4b art gets cropped top-and-bottom by `object-cover` in a 0.75 box. Add a per-section `aspect=` fence param and unify the section code route + the `/library` index onto the SAME widget so the whole Library honors it (chris confirmed the covers are genuinely square, and that the top-level sections should use the widget too).
+
+- [ ] DZ.0 - Phase exit: an audiobooks section renders square cover cards (no crop), manga stays 3:4, both `/library/<section>` and `/pages/library/<section>` agree, the `/library` index renders section cards via the widget; tests + docs + shipped.
+- [x] DZ.1 - `aspect=square|portrait` fence param: `parse_aspect` (default portrait), folded into `child_index::sentinel` (so it's part of the content-hash cache key), threaded `fill` → `render_children_grid` → `ChildIndexTemplate` → the card template picks `aspect-square` vs `aspect-[3/4]`. Default portrait = zero regression for existing manga/book sections.
+- [x] DZ.2 - Section code route honors the fence: `show_library_section` parses the section page's markdown fence for order + aspect (instead of hardcoding `ListOrder::Newest`), so `/library/<section>` matches `/pages/library/<section>` byte-for-byte.
+- [x] DZ.3 - `/library` index uses the widget: `show_library_index` renders its section children via `render_children_grid` (rolled-up cover cards) instead of the bespoke `SectionDoor` text tiles. Top-level aspect a code default (portrait); chris authors the per-section fences.
+- [x] DZ.4 - Tests (aspect round-trips the sentinel + renders the class; the section route honors the fence; the library index renders cards) + CLAUDE.md + design-doc delta.
+
 ## Phase 6 - DNS follow-ups (parked)
 
 Two items deferred out of Phase 2 — neither urgent, both real.

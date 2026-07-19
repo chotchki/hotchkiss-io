@@ -28,7 +28,6 @@ use crate::{
             top_bar::TopBar,
         },
         html_template::HtmlTemplate,
-        markdown::render_cache::cached_excerpt,
         session::SessionData,
     },
 };
@@ -64,22 +63,15 @@ pub struct LibraryGateTemplate {
     pub login_href: String,
 }
 
-/// A section door on the `/library` index — one per child page (audiobooks
-/// now; a future manga/video section is just a new child page).
-pub struct SectionDoor {
-    /// Door target: `/library/<page_name>` (the audiobooks child resolves to
-    /// the code route; future sections get routes when they're built).
-    pub href: String,
-    pub title: String,
-    pub excerpt: String,
-}
-
 #[derive(Template)]
 #[template(path = "library/index.html")]
 pub struct LibraryIndexTemplate {
     pub top_bar: TopBar,
     pub auth_state: AuthenticationState,
-    pub doors: Vec<SectionDoor>,
+    /// The section cards rendered by the SAME child-index widget as every section
+    /// (DZ.3) — rolled-up cover cards + the admin "+ new section" form + drag-reorder,
+    /// instead of the old bespoke text doors.
+    pub grid: String,
 }
 
 /// A library SECTION index (audiobooks, manga, …) — the section title + its
@@ -132,6 +124,7 @@ async fn gate(
 pub async fn show_library_index(
     State(state): State<AppState>,
     session_data: SessionData,
+    Query(query): Query<ListingQuery>,
 ) -> Result<Response, AppError> {
     let library = match gate(&state, &session_data, "/library").await? {
         Ok(row) => row,
@@ -139,23 +132,29 @@ pub async fn show_library_index(
     };
     let viewer = session_data.auth_state.role();
 
-    let mut children =
-        ContentPageDao::find_by_parent(&state.pool, Some(library.page_id)).await?;
-    children.retain(|p| p.is_visible_to(viewer));
-
-    let doors = children
-        .iter()
-        .map(|p| SectionDoor {
-            href: format!("/library/{}", p.page_name),
-            title: p.display_title(),
-            excerpt: cached_excerpt(&p.page_markdown),
-        })
-        .collect();
+    // The section cards via the SAME widget as every section (DZ.3). The pager stays on
+    // `/library`; cards + the "+ new section" form target the content tree
+    // (`/pages/library`), so a card links to `/pages/library/<section>` (get_page_path
+    // renders it with its own fence) and "+ new" POSTs `/pages/library`. Manual order
+    // (page_order) so an admin can drag-reorder the sections; portrait aspect at the top
+    // level (a section card's rolled-up cover is mixed — the per-section aspect fence
+    // governs INSIDE each section).
+    let grid = child_index::render_children_grid(
+        &state.pool,
+        library.page_id,
+        &query,
+        ListOrder::Ordered,
+        "/library",
+        "/pages/library",
+        viewer,
+        "portrait",
+    )
+    .await?;
 
     let template = LibraryIndexTemplate {
         top_bar: TopBar::create(&state.pool, "library", viewer).await?,
         auth_state: session_data.auth_state,
-        doors,
+        grid,
     };
     Ok(HtmlTemplate(template).into_response())
 }
@@ -193,15 +192,22 @@ pub async fn show_library_section(
     // new-child form target the content tree where child pages live (`child_base`),
     // so a card links to `/pages/library/<section>/<slug>` (served by get_page_path)
     // and "+ new child" POSTs `/pages/library/<section>` (the child-create path).
+    // Order + card aspect come from the section page's OWN ` ```children ` fence
+    // (DZ.2), so this code route renders IDENTICALLY to `/pages/library/<section>`
+    // (the fence path) — no hardcoded ordering that could drift from the author's.
+    let meta = child_index::children_fence_meta(&section_page.page_markdown);
+    let order = child_index::list_order(child_index::parse_order(meta.as_deref()));
+    let aspect = child_index::parse_aspect(meta.as_deref());
     let child_base = format!("/pages/library/{section}");
     let grid = child_index::render_children_grid(
         &state.pool,
         section_page.page_id,
         &query,
-        ListOrder::Newest,
+        order,
         &route,
         &child_base,
         viewer,
+        aspect,
     )
     .await?;
 

@@ -4,12 +4,15 @@
    + the shared search/pager. For an admin: a "+ new child" form AND drag-to-reorder
    (DV.12) that persists `page_order` via /admin/pages/reorder-children. #}
 
-{% macro card_body(c) %}
+{# `square` picks the cover-box aspect. The class names are LITERAL in both branches
+   (not interpolated) so Tailwind's scanner actually generates them — an arbitrary-value
+   class like `aspect-[3/4]` is NOT extracted from a dynamic `{{ }}` or a Rust string. #}
+{% macro card_body(c, square) %}
 <a href="{{ c.url }}" class="block hover:opacity-90">
     {% if let Some(cover) = c.cover_url %}
-    <div class="aspect-[3/4] bg-navy"><img src="{{ cover }}" alt="" class="w-full h-full object-cover" loading="lazy" /></div>
+    <div class="{% if square %}aspect-square{% else %}aspect-[3/4]{% endif %} bg-navy"><img src="{{ cover }}" alt="" class="w-full h-full object-cover" loading="lazy" /></div>
     {% else %}
-    <div class="aspect-[3/4] bg-navy flex items-center justify-center"><span class="text-4xl">📖</span></div>
+    <div class="{% if square %}aspect-square{% else %}aspect-[3/4]{% endif %} bg-navy flex items-center justify-center"><span class="text-4xl">📖</span></div>
     {% endif %}
     <div class="p-2">
         {% if c.scheduled %}<span class="inline-block mb-1 px-2 py-0.5 rounded text-xs font-semibold bg-yellow text-navy uppercase tracking-wide">Scheduled</span>{% endif %}
@@ -43,7 +46,7 @@
     {% for c in cards %}
     <div class="border-2 border-navy rounded-md overflow-hidden bg-body-grey cursor-move">
         <input type="hidden" name="page_id" value="{{ c.page_id }}" />
-        {% call card_body(c) %}
+        {% call card_body(c, is_square) %}
     </div>
     {% endfor %}
 </form>
@@ -51,7 +54,7 @@
 <ul class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 list-none p-0 my-4">
     {% for c in cards %}
     <li class="border-2 border-navy rounded-md overflow-hidden bg-body-grey">
-        {% call card_body(c) %}
+        {% call card_body(c, is_square) %}
     </li>
     {% endfor %}
 </ul>

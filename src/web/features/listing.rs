@@ -18,6 +18,7 @@ use crate::web::util::urlencode::urlencode;
 pub const PAGE_SIZE: i64 = 10;
 
 /// Which DAO ordering a listing uses.
+#[derive(Clone, Copy)]
 pub enum ListOrder {
     /// Newest by `page_creation_date` (blog).
     Newest,

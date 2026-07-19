@@ -133,11 +133,11 @@ role=\"button\" aria-label=\"Zoom image\" src=\"{}\" alt=\"{}\" />",
                         // sentinel (keeps transform() pure + content-hash-cached);
                         // the page render fills it with the children grid. The
                         // ordering rides the fence meta (` ```children order=newest `).
-                        let order = crate::web::features::child_index::parse_order(
-                            code.meta.as_deref(),
-                        );
+                        let meta = code.meta.as_deref();
+                        let order = crate::web::features::child_index::parse_order(meta);
+                        let aspect = crate::web::features::child_index::parse_aspect(meta);
                         *node = Node::Html(Html {
-                            value: crate::web::features::child_index::sentinel(order),
+                            value: crate::web::features::child_index::sentinel(order, aspect),
                             position: None,
                         });
                     }
