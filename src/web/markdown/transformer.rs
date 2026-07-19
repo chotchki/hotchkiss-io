@@ -117,18 +117,30 @@ role=\"button\" aria-label=\"Zoom image\" src=\"{}\" alt=\"{}\" />",
                 }
             }
             Node::Code(code) => {
-                if let Some(lang) = code.lang.as_deref()
-                    && diagram::is_diagram_lang(lang)
-                {
-                    // Don't compile here. Emit a placeholder that carries the d2
-                    // source (LLM / no-JS friendly) + an hx-get that swaps in the
-                    // rendered SVG on load. `register` returns the content hash;
-                    // the actual d2 compile happens lazily at /diagram/<hash>.
-                    let hash = diagram::register(&code.value);
-                    *node = Node::Html(Html {
-                        value: diagram::placeholder(&hash, &code.value),
-                        position: None,
-                    });
+                if let Some(lang) = code.lang.as_deref() {
+                    if diagram::is_diagram_lang(lang) {
+                        // Don't compile here. Emit a placeholder that carries the d2
+                        // source (LLM / no-JS friendly) + an hx-get that swaps in the
+                        // rendered SVG on load. `register` returns the content hash;
+                        // the actual d2 compile happens lazily at /diagram/<hash>.
+                        let hash = diagram::register(&code.value);
+                        *node = Node::Html(Html {
+                            value: diagram::placeholder(&hash, &code.value),
+                            position: None,
+                        });
+                    } else if lang.eq_ignore_ascii_case("children") {
+                        // Phase DV: the child-index widget. Emit a STABLE per-order
+                        // sentinel (keeps transform() pure + content-hash-cached);
+                        // the page render fills it with the children grid. The
+                        // ordering rides the fence meta (` ```children order=newest `).
+                        let order = crate::web::features::child_index::parse_order(
+                            code.meta.as_deref(),
+                        );
+                        *node = Node::Html(Html {
+                            value: crate::web::features::child_index::sentinel(order),
+                            position: None,
+                        });
+                    }
                 }
             }
             Node::InlineMath(m) => {

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% import "partials/icons.html" as icons %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block head %}{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+    <div class="flex flex-row items-baseline justify-between mb-4">
+        <h1 class="text-2xl font-display text-navy">{{ title }}</h1>
+        {% if is_admin %}
+        <a href="{{ edit_href }}" class="inline-flex items-center gap-1 text-sm text-navy underline">{% call icons::pen() %} Edit section</a>
+        {% endif %}
+    </div>
+    {# The listing/selection widget — cards + search + pager, shared with the
+       ` ```children ` fence. Pre-rendered (safe) by `child_index::render_children_grid`. #}
+    {{ grid|safe }}
+</div>
+{% endblock %}

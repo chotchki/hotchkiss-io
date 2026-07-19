@@ -23,6 +23,9 @@
 {# Audiobook player (Phase DD): enhances audio embeds — chapters, skips, rate,
    MediaSession, resume. First-party, degrades to native controls without it. #}
 <script defer src="/scripts/audio-player.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+{# EPUB reader (Phase DV): mounts foliate-js on any ![](/media/<ref>) epub embed —
+   fetches the gated .epub, renders the reader, restores the saved location. #}
+<script defer src="/scripts/epub-reader.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 {% if auth_state.is_admin() && edit %}
 <script src="/scripts/upload-progress.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 <script src="/scripts/editor-support.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>

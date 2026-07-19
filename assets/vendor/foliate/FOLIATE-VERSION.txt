@@ -1,0 +1,6 @@
+foliate-js
+source: https://github.com/johnfactotum/foliate-js
+commit: 78914aef4466eb960965702401634c2cb348e9b1
+vendored: 2026-07-18 (Phase DV)
+Excluded from upstream: pdf.js + vendor/pdfjs/ (PDF unsupported here; a 13MB dynamic import we never fire), reader.js + ui/ (foliate demo UI — we ship assets/scripts/epub-reader.js), build configs, tests.
+To bump: re-clone at a new commit, re-copy the same whitelist, update this marker.

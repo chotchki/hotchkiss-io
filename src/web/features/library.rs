@@ -23,7 +23,8 @@ use crate::{
         app_state::AppState,
         authentication_state::AuthenticationState,
         features::{
-            listing::{paginate, ListOrder, ListingQuery, Pagination},
+            child_index,
+            listing::{ListOrder, ListingQuery},
             top_bar::TopBar,
         },
         html_template::HtmlTemplate,
@@ -34,8 +35,8 @@ use crate::{
 use anyhow::anyhow;
 use askama::Template;
 use axum::{
-    extract::{Query, State},
-    response::{IntoResponse, Response},
+    extract::{Path, Query, State},
+    response::{IntoResponse, Redirect, Response},
     routing::get,
     Router,
 };
@@ -43,7 +44,9 @@ use axum::{
 pub fn library_router() -> Router<AppState> {
     Router::new()
         .route("/", get(show_library_index))
-        .route("/audiobooks", get(show_audiobooks))
+        // ONE generic section route (Phase DV): audiobooks, manga, and any future
+        // section render through it — gate + the shared child-index listing widget.
+        .route("/{section}", get(show_library_section))
 }
 
 /// The state-aware sign-in gate for insufficient viewers on code-defined
@@ -79,28 +82,20 @@ pub struct LibraryIndexTemplate {
     pub doors: Vec<SectionDoor>,
 }
 
-/// A book card on `/library/audiobooks` — mirrors the blog card, linking into
-/// the content tree where `get_page_path` serves the detail page.
-pub struct BookCard {
-    pub page_name: String,
-    pub title: String,
-    pub cover_url: Option<String>,
-    pub excerpt: String,
-    /// Admin-only badges (an insufficient viewer never reaches this page).
-    pub is_scheduled: bool,
-    pub visibility: Option<&'static str>,
-}
-
+/// A library SECTION index (audiobooks, manga, …) — the section title + its
+/// children rendered by the shared child-index widget (DV.7). The `grid` is the
+/// pre-rendered (safe) listing HTML; the `edit_href` is the admin section-editor link.
 #[derive(Template)]
-#[template(path = "library/audiobooks.html")]
-pub struct AudiobooksTemplate {
+#[template(path = "library/section.html")]
+pub struct LibrarySectionTemplate {
     pub top_bar: TopBar,
     pub auth_state: AuthenticationState,
-    pub books: Vec<BookCard>,
-    pub pagination: Pagination,
-    /// The `audiobooks` child page exists (chris has authored the section) —
-    /// false renders the not-set-up-yet empty state instead of "no results".
-    pub section_exists: bool,
+    pub title: String,
+    /// The children grid HTML (cards + search + pager), rendered by `child_index`.
+    pub grid: String,
+    pub is_admin: bool,
+    /// `/pages/library/<section>?edit` — the admin "edit section" target.
+    pub edit_href: String,
 }
 
 /// Load the `library` special row and gate the viewer against ITS `min_role`.
@@ -165,66 +160,58 @@ pub async fn show_library_index(
     Ok(HtmlTemplate(template).into_response())
 }
 
-pub async fn show_audiobooks(
+/// A library SECTION index — `/library/<section>` (audiobooks, manga, …). ONE
+/// generic handler (DV.7): gate against the `library` row, then render the section's
+/// children through the shared child-index listing widget. Replaces the bespoke
+/// `show_audiobooks` — audiobooks + manga are now identical (only the authored
+/// content + its books/series differ). A section is an AUTHORED child of `library`
+/// (inherit-on-create stamps its gate); a missing/invisible one → back to the index
+/// (a bogus `/library/<x>` isn't a content 404 — this is a code route).
+pub async fn show_library_section(
     State(state): State<AppState>,
     session_data: SessionData,
+    Path(section): Path<String>,
     Query(query): Query<ListingQuery>,
 ) -> Result<Response, AppError> {
-    let library = match gate(&state, &session_data, "/library/audiobooks").await? {
+    let route = format!("/library/{section}");
+    let library = match gate(&state, &session_data, &route).await? {
         Ok(row) => row,
         Err(gate_response) => return Ok(gate_response),
     };
     let viewer = session_data.auth_state.role();
 
-    // The `audiobooks` section is an AUTHORED child of `library` (not seeded —
-    // inherit-on-create stamps its min_role from the parent). Missing just
-    // means chris hasn't set it up yet: render the empty state, not a 500.
-    let section =
-        ContentPageDao::find_by_name(&state.pool, Some(library.page_id), "audiobooks").await?;
-    let section = section.filter(|s| s.is_visible_to(viewer));
-
-    let (rows, pagination) = match &section {
-        Some(s) => {
-            paginate(
-                &state.pool,
-                Some(s.page_id),
-                &query,
-                ListOrder::Newest,
-                "/library/audiobooks",
-                viewer,
-            )
+    let Some(section_page) =
+        ContentPageDao::find_by_name(&state.pool, Some(library.page_id), &section)
             .await?
-        }
-        None => (
-            Vec::new(),
-            Pagination {
-                current_page: 1,
-                total_pages: 1,
-                total_results: 0,
-                search: String::new(),
-                base_path: "/library/audiobooks".to_string(),
-            },
-        ),
+            .filter(|s| s.is_visible_to(viewer))
+    else {
+        return Ok(Redirect::temporary("/library").into_response());
     };
 
-    let mut books: Vec<BookCard> = Vec::with_capacity(rows.len());
-    for p in &rows {
-        books.push(BookCard {
-            page_name: p.page_name.clone(),
-            title: p.display_title(),
-            cover_url: crate::web::features::media::cover_url_for(&state.pool, p.page_id).await,
-            excerpt: cached_excerpt(&p.page_markdown),
-            is_scheduled: p.is_scheduled(),
-            visibility: p.visibility_label(),
-        });
-    }
+    // The listing/selection widget — the ONE renderer shared with the ` ```children `
+    // fence. The pager stays on the code route (`route`), while the cards + the
+    // new-child form target the content tree where child pages live (`child_base`),
+    // so a card links to `/pages/library/<section>/<slug>` (served by get_page_path)
+    // and "+ new child" POSTs `/pages/library/<section>` (the child-create path).
+    let child_base = format!("/pages/library/{section}");
+    let grid = child_index::render_children_grid(
+        &state.pool,
+        section_page.page_id,
+        &query,
+        ListOrder::Newest,
+        &route,
+        &child_base,
+        viewer,
+    )
+    .await?;
 
-    let template = AudiobooksTemplate {
+    let template = LibrarySectionTemplate {
         top_bar: TopBar::create(&state.pool, "library", viewer).await?,
-        auth_state: session_data.auth_state,
-        books,
-        pagination,
-        section_exists: section.is_some(),
+        auth_state: session_data.auth_state.clone(),
+        title: section_page.display_title(),
+        grid,
+        is_admin: session_data.auth_state.is_admin(),
+        edit_href: format!("{child_base}?edit"),
     };
     Ok(HtmlTemplate(template).into_response())
 }

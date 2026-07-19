@@ -4134,6 +4134,67 @@ async fn threejs_3mf_loader_assets_are_served() {
     }
 }
 
+/// Phase DV: the child-index widget — a ` ```children ` fence in a page's markdown
+/// renders that page's CHILD pages as a card grid (with links), and the raw
+/// sentinel is filled, not left in the output. The unified listing mechanism behind
+/// manga series pages + the audiobooks section.
+#[tokio::test]
+async fn child_index_widget_lists_children() {
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // A parent "shelf" carrying the child-index fence, plus two children.
+    admin.post(server.url("/pages")).form(&[("page_title", "Shelf")]).send().await.unwrap();
+    admin
+        .put(server.url("/pages/shelf"))
+        .header("HX-Request", "true")
+        .form(&[
+            ("page_category", ""),
+            ("page_markdown", "# Shelf\n\n```children order=manual\n```\n"),
+            ("page_cover_media_ref", ""),
+            ("page_order", "0"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    for t in ["Volume One", "Volume Two"] {
+        admin.post(server.url("/pages/shelf")).form(&[("page_title", t)]).send().await.unwrap();
+    }
+
+    // Anonymous read → the widget lists the children as cards linking to their pages.
+    let body = reqwest::get(server.url("/pages/shelf")).await.unwrap().text().await.unwrap();
+    assert!(body.contains("Volume One"), "widget lists child 1");
+    assert!(body.contains("Volume Two"), "widget lists child 2");
+    assert!(
+        body.contains("/pages/shelf/volume-one"),
+        "a card links to the child page: {body}"
+    );
+    assert!(
+        !body.contains("class=\"child-index\""),
+        "the sentinel must be FILLED, not left raw in the output"
+    );
+}
+
+/// Phase DV: the vendored foliate-js EPUB reader engine serves as ES modules — the
+/// entry (`view.js`), the EPUB parser it dynamically imports (`epub.js`), and the
+/// zip loader under the relative `./vendor/` path view.js resolves against.
+#[tokio::test]
+async fn foliate_reader_assets_are_served() {
+    let server = spawn_test_server().await.expect("spawn");
+    for path in [
+        "/vendor/foliate/view.js",
+        "/vendor/foliate/epub.js",
+        "/vendor/foliate/paginator.js",
+        "/vendor/foliate/vendor/zip.js",
+    ] {
+        let r = reqwest::get(server.url(path)).await.unwrap();
+        assert_eq!(r.status(), StatusCode::OK, "{path} must serve");
+        let ct = r.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("");
+        assert!(ct.contains("javascript"), "{path} should be served as JS, got {ct}");
+    }
+}
+
 /// `fab publish`'s Downloads links use `/media/<ref>` (the upload API returns a
 /// media_ref, not the byte url_key). That must resolve — redirect to the item's
 /// FULL-RES bytes — not 404 (the bowtie regression: the 3MF download link 404'd).

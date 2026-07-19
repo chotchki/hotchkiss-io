@@ -12,6 +12,9 @@ pub enum MediaKind {
     Video,
     Stl,
     Audio,
+    /// An EPUB (manga / novel) rendered in-browser by foliate-js (Phase DV). Stored
+    /// as a plain blob (`application/epub+zip`); the embed mounts the reader.
+    Epub,
     File,
 }
 
@@ -22,6 +25,7 @@ impl MediaKind {
             MediaKind::Video => "video",
             MediaKind::Stl => "stl",
             MediaKind::Audio => "audio",
+            MediaKind::Epub => "epub",
             MediaKind::File => "file",
         }
     }
@@ -32,6 +36,7 @@ impl MediaKind {
             "video" => Ok(MediaKind::Video),
             "stl" => Ok(MediaKind::Stl),
             "audio" => Ok(MediaKind::Audio),
+            "epub" => Ok(MediaKind::Epub),
             "file" => Ok(MediaKind::File),
             other => Err(anyhow!("unknown media kind {other:?}")),
         }

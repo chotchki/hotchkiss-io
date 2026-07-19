@@ -109,6 +109,21 @@ pub fn probe(path: &Path, original_name: &str) -> Result<Probed> {
             chapters: None,
         });
     }
+    // `.epub` is a book (manga / novel) the foliate-js reader renders in-browser
+    // (Phase DV) — typed by extension like the other zip-container formats, since
+    // ffprobe can't read the zip. Served as a plain `application/epub+zip` blob
+    // (inert → the embed's `MediaKind::Epub` branch mounts the reader).
+    if lower.ends_with(".epub") {
+        return Ok(Probed {
+            kind: MediaKind::Epub,
+            mime: "application/epub+zip".to_string(),
+            codecs: None,
+            width: None,
+            height: None,
+            duration_ms: None,
+            chapters: None,
+        });
+    }
     let bin = FFPROBE_BIN
         .as_deref()
         .ok_or_else(|| anyhow!("ffprobe not found — `brew install ffmpeg` (looked at $FFPROBE_BIN, /opt/homebrew/bin, /usr/local/bin, PATH)"))?;
@@ -334,6 +349,15 @@ mod tests {
         let mf = probe(Path::new("/nope"), "plate.3mf").unwrap();
         assert_eq!(mf.kind, MediaKind::Stl);
         assert_eq!(mf.mime, "model/3mf");
+    }
+
+    // `.epub` is a book (Phase DV): typed by extension (ffprobe can't read the zip),
+    // kind Epub, mime application/epub+zip — the embed mounts the foliate reader.
+    #[test]
+    fn epub_is_typed_by_extension() {
+        let ep = probe(Path::new("/nope"), "MangaSeries v01.EPUB").unwrap();
+        assert_eq!(ep.kind, MediaKind::Epub);
+        assert_eq!(ep.mime, "application/epub+zip");
     }
 
     // `.scad` is OpenSCAD SOURCE (Phase DN): a downloadable File, NOT a mesh kind,

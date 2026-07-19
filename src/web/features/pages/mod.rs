@@ -112,10 +112,15 @@ pub struct GetPageTemplate {
 }
 
 /// `?edit` (any value) toggles the admin editor on a page view; absent = the
-/// clean reader view.
+/// clean reader view. `?q=` / `?page=` drive the child-index widget's search + pager
+/// (Phase DV) when the page carries a ` ```children ` fence — harmless otherwise.
 #[derive(Debug, Deserialize)]
 pub struct EditQuery {
     pub edit: Option<String>,
+    #[serde(default)]
+    pub q: Option<String>,
+    #[serde(default)]
+    pub page: Option<i64>,
 }
 
 pub async fn get_page_path(
@@ -176,6 +181,24 @@ pub async fn get_page_path(
                 "article",
             );
 
+            // Render the markdown (cached), then fill any child-index widget
+            // (Phase DV) — a ` ```children ` fence becomes the page's children grid,
+            // paginated + searched by ?q=/?page=. No fence → the string is untouched.
+            let base_path = format!("/pages/{page_path}");
+            let listing_query = crate::web::features::listing::ListingQuery {
+                q: edit_q.q.clone(),
+                page: edit_q.page,
+            };
+            let rendered = crate::web::features::child_index::fill(
+                cached_transform(&strip_leading_h1(&lp.page_markdown))?,
+                lp.page_id,
+                &state.pool,
+                &listing_query,
+                &base_path,
+                viewer,
+            )
+            .await?;
+
             let gpt = GetPageTemplate {
                 top_bar: TopBar::create(&state.pool, page_names.first().unwrap(), viewer).await?,
                 auth_state: session_data.auth_state,
@@ -184,7 +207,7 @@ pub async fn get_page_path(
                 pages_path: pages_path.clone(),
                 children_pages: ContentPageDao::find_by_parent(&state.pool, Some(lp.page_id))
                     .await?,
-                rendered_markdown: cached_transform(&strip_leading_h1(&lp.page_markdown))?,
+                rendered_markdown: rendered,
                 edit: edit_q.edit.is_some(),
                 prev_post: None,
                 next_post: None,

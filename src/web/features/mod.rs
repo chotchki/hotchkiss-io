@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod blog;
 pub mod challenge;
+pub mod child_index;
 pub mod diagram;
 pub mod feed;
 pub mod home;

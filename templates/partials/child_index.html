@@ -1,0 +1,40 @@
+{# The child-index widget fragment (Phase DV) — rendered standalone by
+   `child_index::fill` and string-replaced into a content page's HTML where a
+   ` ```children ` fence sat. Lists the page's children as cards + the shared
+   search/pager. `is_admin` shows an inline "+ new child" form. Reused by manga
+   series pages AND the audiobooks section (the unified listing/selection). #}
+{% if is_admin %}
+<form hx-post="{{ form_action }}" class="mb-4 flex flex-row gap-2">
+    <input class="border border-navy px-2 grow min-w-0 rounded-sm" name="page_title" type="text"
+        placeholder="New entry title" required />
+    <button class="px-3 py-2 bg-navy border-navy rounded-sm text-div-grey whitespace-nowrap" type="submit">+ New</button>
+</form>
+{% endif %}
+
+{% include "partials/listing_search.html" %}
+
+{% if cards.is_empty() %}
+<p class="text-navy/70 italic my-4">{% if pagination.is_search() %}Nothing matches your search.{% else %}Nothing here yet.{% endif %}</p>
+{% else %}
+<ul class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 list-none p-0 my-4">
+    {% for c in cards %}
+    <li class="border-2 border-navy rounded-md overflow-hidden bg-body-grey">
+        <a href="{{ c.url }}" class="block hover:opacity-90">
+            {% if let Some(cover) = c.cover_url %}
+            <div class="aspect-[3/4] bg-navy"><img src="{{ cover }}" alt="" class="w-full h-full object-cover" loading="lazy" /></div>
+            {% else %}
+            <div class="aspect-[3/4] bg-navy flex items-center justify-center"><span class="text-4xl">📖</span></div>
+            {% endif %}
+            <div class="p-2">
+                {% if c.scheduled %}<span class="inline-block mb-1 px-2 py-0.5 rounded text-xs font-semibold bg-yellow text-navy uppercase tracking-wide">Scheduled</span>{% endif %}
+                {% if let Some(v) = c.visibility %}<span class="inline-block mb-1 px-2 py-0.5 rounded text-xs font-semibold bg-navy text-yellow uppercase tracking-wide">{{ v }}</span>{% endif %}
+                <span class="block text-sm font-display text-navy break-words">{{ c.title }}</span>
+                {% if !c.excerpt.is_empty() %}<p class="mt-1 text-xs text-navy/70 line-clamp-2">{{ c.excerpt }}</p>{% endif %}
+            </div>
+        </a>
+    </li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+{% include "partials/listing_pager.html" %}
