@@ -648,9 +648,10 @@ Your browser can't play this video.</video>"
                 .map(|u| format!(" data-artwork=\"{u}\""))
                 .unwrap_or_default();
             let chapters_attr = media
+                .meta()
                 .chapters
-                .as_deref()
-                .map(|c| format!(" data-chapters=\"{}\"", attr_escape(c)))
+                .as_ref()
+                .map(|c| format!(" data-chapters=\"{}\"", attr_escape(&c.to_string())))
                 .unwrap_or_default();
             // Header = cover art + title, NOT a download button (a series page
             // of N volumes was N navy download slabs — the wrong emphasis for
@@ -1156,7 +1157,7 @@ mod tests {
             duration_ms: Some(44_908),
             created_at: "now".to_string(),
             min_role: None,
-            chapters: None,
+            metadata: None,
         }
     }
     fn variant(url_key: &str, mime: &str, codecs: Option<&str>) -> MediaVariantDao {
@@ -1411,7 +1412,7 @@ mod tests {
     fn audio_renders_player_element_with_chapters_and_cover_header() {
         let mut m = media("audio");
         m.title = Some("Test Book".to_string());
-        m.chapters = Some(r#"[{"start_ms":0,"title":"One"}]"#.to_string());
+        m.metadata = Some(r#"{"chapters":[{"start_ms":0,"title":"One"}]}"#.to_string());
         let mut full = variant("fullaudio", "audio/mp4", None);
         full.bytes = 900_000;
         let mut low = variant("lowaudio", "audio/mp4", None);

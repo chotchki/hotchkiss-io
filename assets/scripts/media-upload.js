@@ -185,6 +185,27 @@
     });
   });
 
+  // Re-derive an image's AVIF rungs from its original (ED.1) — spawned server
+  // side; the button reports and the admin refreshes when ready.
+  document.querySelectorAll(".rederive-media").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      btn.disabled = true;
+      btn.textContent = "Re-deriving…";
+      fetch("/admin/media/" + btn.dataset.mediaRef + "/rederive", {
+        method: "POST",
+      })
+        .then((r) =>
+          r.ok ? r.text() : r.text().then((t) => Promise.reject(t || r.status)),
+        )
+        .then((msg) => setStatus(msg))
+        .catch((e) => {
+          btn.disabled = false;
+          btn.textContent = "Re-derive";
+          setStatus("Re-derive failed: " + e);
+        });
+    });
+  });
+
   // Delete the whole item → DELETE /media/<ref> (CASCADEs its variants).
   document.querySelectorAll(".delete-media").forEach((btn) => {
     btn.addEventListener("click", () => {

@@ -102,9 +102,61 @@ pub struct MediaDao {
     /// `None` is the ONLY public spelling; decode via `min_role_rank` — never
     /// branch on the raw string (same rule as `content_pages.min_role`).
     pub min_role: Option<String>,
-    /// Audiobook chapters (Phase DD): JSON `[{"start_ms": N, "title": "…"}]`,
-    /// stamped at ingest for `Audio`. `None` elsewhere / when chapterless.
-    pub chapters: Option<String>,
+    /// The item's metadata bag (Phase ED — migration `0032` folded the old
+    /// `chapters` column in): JSON of [`MediaMetadata`]. Read through
+    /// [`MediaDao::meta`] (fail-soft), never parse inline.
+    pub metadata: Option<String>,
+}
+
+/// The typed shape of `media.metadata` (Phase ED). ONE extensible bag instead
+/// of column sprawl: `chapters` migrated in from the 0027 column; `edit` holds
+/// the image edit params the derivation applies. Decode is FAIL-SOFT
+/// ([`MediaDao::meta`]) — garbage reads as default, never a 500.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct MediaMetadata {
+    /// Audiobook chapters (Phase DD): `[{"start_ms": N, "title": "…"}]` —
+    /// stamped at ingest for `Audio`, passed through OPAQUE to the player's
+    /// `data-chapters` (never interpreted server-side).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapters: Option<serde_json::Value>,
+    /// Image edit params (rotate/crop) applied when DERIVING the AVIF rungs —
+    /// the original bytes are never touched (Phase ED).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edit: Option<EditParams>,
+}
+
+/// Image edit parameters — inputs to the rung DERIVATION, never a mutation of
+/// the stored original (re-runnable, reversible).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct EditParams {
+    /// Clockwise quarter-turns (0–3) applied to the decoded source first.
+    #[serde(default)]
+    pub rotate: u8,
+    /// Normalized `[x, y]` corners (TL, TR, BR, BL) of the crop quad; an
+    /// axis-aligned rect is the degenerate case. `None` = full frame.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub corners: Option<[[f64; 2]; 4]>,
+}
+
+impl MediaMetadata {
+    /// Serialize for storage — `None` when the bag is empty, so an untouched
+    /// item keeps a NULL column.
+    pub fn to_stored(&self) -> Option<String> {
+        if self.chapters.is_none() && self.edit.is_none() {
+            return None;
+        }
+        serde_json::to_string(self).ok()
+    }
+
+    /// Wrap the probe's raw chapters JSON into a stored metadata string — the
+    /// ingest create path's helper (a fresh item has no edit params yet).
+    pub fn wrap_chapters(chapters_json: Option<String>) -> Option<String> {
+        MediaMetadata {
+            chapters: chapters_json.and_then(|c| serde_json::from_str(&c).ok()),
+            edit: None,
+        }
+        .to_stored()
+    }
 }
 
 impl MediaDao {
@@ -133,6 +185,14 @@ impl MediaDao {
         MinRole::from_stored(self.min_role.as_deref()).label()
     }
 
+    /// Fail-soft decode of the metadata bag — garbage/NULL reads as default.
+    pub fn meta(&self) -> MediaMetadata {
+        self.metadata
+            .as_deref()
+            .and_then(|m| serde_json::from_str(m).ok())
+            .unwrap_or_default()
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
         executor: impl SqliteExecutor<'_>,
@@ -143,12 +203,12 @@ impl MediaDao {
         height: Option<i64>,
         duration_ms: Option<i64>,
         min_role: Option<String>,
-        chapters: Option<String>,
+        metadata: Option<String>,
     ) -> Result<MediaDao> {
         let kind_str = kind.as_str();
         let row = query!(
             r#"
-            INSERT INTO media (media_ref, kind, title, width, height, duration_ms, min_role, chapters)
+            INSERT INTO media (media_ref, kind, title, width, height, duration_ms, min_role, metadata)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             RETURNING media_id as "media_id!", created_at as "created_at!"
             "#,
@@ -159,7 +219,7 @@ impl MediaDao {
             height,
             duration_ms,
             min_role,
-            chapters,
+            metadata,
         )
         .fetch_one(executor)
         .await?;
@@ -174,7 +234,7 @@ impl MediaDao {
             duration_ms,
             created_at: row.created_at,
             min_role,
-            chapters,
+            metadata,
         })
     }
 
@@ -204,7 +264,7 @@ impl MediaDao {
             MediaDao,
             r#"
             SELECT media_id as "media_id!", media_ref, kind, title,
-                   width, height, duration_ms, created_at, min_role, chapters
+                   width, height, duration_ms, created_at, min_role, metadata
             FROM media
             WHERE media_ref = ?1
             "#,
@@ -226,7 +286,7 @@ impl MediaDao {
             MediaDao,
             r#"
             SELECT media_id as "media_id!", media_ref, kind, title,
-                   width, height, duration_ms, created_at, min_role, chapters
+                   width, height, duration_ms, created_at, min_role, metadata
             FROM media
             WHERE media_id = ?1
             "#,
@@ -245,7 +305,7 @@ impl MediaDao {
             MediaDao,
             r#"
             SELECT media_id as "media_id!", media_ref, kind, title,
-                   width, height, duration_ms, created_at, min_role, chapters
+                   width, height, duration_ms, created_at, min_role, metadata
             FROM media
             ORDER BY media_id DESC
             "#
@@ -302,10 +362,18 @@ impl MediaDao {
         chapters: Option<String>,
     ) -> Result<()> {
         let kind_str = kind.as_str();
+        // MERGE into the metadata bag, don't replace it: a variant swap
+        // recomputes CHAPTERS but must never clobber `metadata.edit` (the
+        // image edit params). SQL-side json_set/json_remove because the
+        // executor is single-use (this runs inside the replace tx).
         query!(
             r#"
             UPDATE media
-            SET kind = ?1, width = ?2, height = ?3, duration_ms = ?4, chapters = ?5
+            SET kind = ?1, width = ?2, height = ?3, duration_ms = ?4,
+                metadata = CASE
+                    WHEN ?5 IS NOT NULL THEN json_set(COALESCE(metadata, '{}'), '$.chapters', json(?5))
+                    ELSE json_remove(COALESCE(metadata, '{}'), '$.chapters')
+                END
             WHERE media_id = ?6
             "#,
             kind_str,
@@ -447,6 +515,27 @@ impl MediaVariantDao {
         .execute(executor)
         .await?;
         Ok(())
+    }
+
+    /// Drop an image item's DERIVED AVIF rungs (ED.1 re-derive): every
+    /// `image/avif` variant EXCEPT the one carrying `keep_sha` — the sha guard
+    /// protects an avif-uploaded ORIGINAL (whose derived siblings share its
+    /// mime but never its bytes). Returns the count dropped.
+    pub async fn delete_avif_rungs_except(
+        executor: impl SqliteExecutor<'_>,
+        media_id: i64,
+        keep_sha: &str,
+    ) -> Result<u64> {
+        let affected = query!(
+            r#"DELETE FROM media_variant
+               WHERE media_id = ?1 AND mime = 'image/avif' AND sha256 != ?2"#,
+            media_id,
+            keep_sha
+        )
+        .execute(executor)
+        .await?
+        .rows_affected();
+        Ok(affected)
     }
 
     /// Delete ONE variant by its `url_key` WITHIN an item (Phase DQ —

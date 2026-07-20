@@ -167,3 +167,82 @@ async fn rotated_heic_bakes_orientation_into_the_avif() {
         "the derived AVIF must be upright portrait (rotation baked in)"
     );
 }
+
+#[tokio::test]
+async fn rederive_drops_and_reminting_avif_rungs() {
+    // ED.1: POST /admin/media/{ref}/rederive drops the derived rungs and
+    // re-runs the ingest derivation from the stored source. Content-addressing
+    // means identical bytes re-mint identical shas — the assertion is that the
+    // full ladder EXISTS again after the spawned re-derive completes.
+    if !tool_available("ffprobe") || !tool_available("ffmpeg") {
+        eprintln!("skipping: ffprobe/ffmpeg not installed");
+        return;
+    }
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    let heic = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/gradient-1200x900.heic"
+    ))
+    .unwrap();
+    let part = reqwest::multipart::Part::bytes(heic)
+        .file_name("photo.heic")
+        .mime_str("application/octet-stream")
+        .unwrap();
+    let resp = admin
+        .post(server.url("/media"))
+        .multipart(reqwest::multipart::Form::new().part("file", part))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let manifest: serde_json::Value = resp.json().await.unwrap();
+    let media_ref = manifest["ref"].as_str().unwrap().to_string();
+
+    let avif_count = |pool: sqlx::SqlitePool, r: String| async move {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM media_variant mv JOIN media m ON m.media_id = mv.media_id
+             WHERE m.media_ref = ?1 AND mv.mime = 'image/avif'",
+        )
+        .bind(r)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    assert_eq!(avif_count(server.pool.clone(), media_ref.clone()).await, 3);
+
+    // Anonymous is denied before anything happens.
+    let anon = reqwest::Client::new();
+    let resp = anon
+        .post(server.url(&format!("/admin/media/{media_ref}/rederive")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+    // Admin re-derive: 200, then the spawned derivation restores the ladder.
+    let resp = admin
+        .post(server.url(&format!("/admin/media/{media_ref}/rederive")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+    loop {
+        let n = avif_count(server.pool.clone(), media_ref.clone()).await;
+        if n == 3 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "re-derive never restored the ladder (count {n})"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+}

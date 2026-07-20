@@ -139,6 +139,11 @@
                         {% call icons::plus() %}
                         <input type="file" class="add-encode-input hidden" data-media-ref="{{ c.media_ref }}" multiple />
                     </label>
+                    {% if c.kind == "image" %}
+                    <button type="button" class="rederive-media text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
+                        data-media-ref="{{ c.media_ref }}"
+                        title="Re-derive the resized AVIF variants from the original (picks up orientation/edit changes)">Re-derive</button>
+                    {% endif %}
                     <button type="button" class="delete-media text-xs bg-red-600 hover:bg-red-700 text-div-grey px-2 py-1 rounded"
                         data-media-ref="{{ c.media_ref }}"
                         title="Delete" aria-label="Delete">{% call icons::trash_can() %}</button>

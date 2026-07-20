@@ -63,6 +63,7 @@ pub fn admin_router() -> Router<AppState> {
         // `DELETE /media/<ref>/variants/<url_key>`. This route is the page only,
         // distinct from `GET /media` (the JSON collection).
         .route("/media", get(media::show_media_library))
+        .route("/media/{ref}/rederive", post(media::rederive_media))
         // API keys (Phase CA): generate (shown once) / list / revoke your own.
         .route(
             "/api-keys",

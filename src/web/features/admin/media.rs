@@ -18,7 +18,7 @@ use http::{header, StatusCode};
 use sqlx::SqlitePool;
 
 use crate::db::dao::crypto_key::CryptoKey;
-use crate::db::dao::media::{MediaDao, MediaKind, MediaVariantDao};
+use crate::db::dao::media::{MediaDao, MediaKind, MediaMetadata, MediaVariantDao};
 use crate::db::dao::roles::Role;
 use crate::media::poster::generate_poster;
 use crate::media::probe::{probe, Probed};
@@ -400,7 +400,7 @@ async fn ingest_new_item(
         primary_probed.height,
         primary_probed.duration_ms,
         fields.min_role,
-        primary_probed.chapters.clone(),
+        MediaMetadata::wrap_chapters(primary_probed.chapters.clone()),
     )
     .await?;
 
@@ -469,7 +469,7 @@ pub(crate) async fn ingest_stored_file(
         probed.height,
         probed.duration_ms,
         min_role,
-        probed.chapters.clone(),
+        MediaMetadata::wrap_chapters(probed.chapters.clone()),
     )
     .await?;
     create_variant(
@@ -1021,6 +1021,55 @@ fn image_mime_from_name(name: &str) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// Re-derive an image's AVIF rungs from its source variant (ED.1): drop the
+/// derived `image/avif` rows, then re-run the SAME derivation ingest uses —
+/// so a pre-EB.10 sideways image re-mints upright, and the coming edit params
+/// (Phase ED) ride this exact seam. The window with no rungs is brief and safe
+/// (the embed falls back to the original, the pre-CN state); a failed derive
+/// self-heals by pressing the button again. Spawned — rav1e takes ~seconds.
+pub async fn rederive_media(
+    State(state): State<AppState>,
+    Path(media_ref): Path<String>,
+) -> Result<Response, AppError> {
+    let Some(media) = MediaDao::find_by_ref(&state.pool, media_ref.trim()).await? else {
+        return Ok((StatusCode::NOT_FOUND, "no such media").into_response());
+    };
+    if !matches!(media.kind(), Ok(MediaKind::Image)) {
+        return Ok((StatusCode::BAD_REQUEST, "re-derive applies to images").into_response());
+    }
+    let variants = MediaVariantDao::find_by_media_id(&state.pool, media.media_id).await?;
+    // The SOURCE = the earliest non-avif image variant (jpeg/heic/png…); an
+    // avif-uploaded original falls back to the earliest avif (created before
+    // any derived sibling, so insertion order picks it).
+    let source = variants
+        .iter()
+        .find(|v| v.mime.starts_with("image/") && v.mime != "image/avif")
+        .or_else(|| variants.iter().find(|v| v.mime.starts_with("image/")));
+    let Some(source) = source else {
+        return Ok((StatusCode::BAD_REQUEST, "no image bytes to derive from").into_response());
+    };
+
+    let dropped =
+        MediaVariantDao::delete_avif_rungs_except(&state.pool, media.media_id, &source.sha256)
+            .await?;
+    let hmac_key = CryptoKey::get_or_create(&state.pool, MEDIA_HMAC_KEY_ID)
+        .await?
+        .key_value;
+    let media_id = media.media_id;
+    let source_sha = source.sha256.clone();
+    let st = state.clone();
+    tokio::spawn(async move {
+        // Logs its own failure; the item keeps serving its original either way.
+        maybe_add_responsive_variants(&st, &hmac_key, media_id, source_sha).await;
+        tracing::info!("re-derived variants for media {media_id} ({dropped} old rung(s) dropped)");
+    });
+    Ok((
+        StatusCode::OK,
+        "re-deriving in the background — refresh in a moment",
+    )
+        .into_response())
 }
 
 /// Generate width-stepped AVIF variants for an image so the render can emit a
