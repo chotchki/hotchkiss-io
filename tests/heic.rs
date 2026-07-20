@@ -114,3 +114,56 @@ async fn heic_upload_derives_avif_rungs_and_never_serves_heic() {
         "the heic url_key must never reach the rendered embed: {html}"
     );
 }
+
+#[tokio::test]
+async fn rotated_heic_bakes_orientation_into_the_avif() {
+    // EB.10: an orientation-6 HEIC (300x200 raw pixels, rotate-90 display
+    // matrix) must come out PORTRAIT in the derived AVIF — ffmpeg's autorotate
+    // bakes the rotation during the fallback decode.
+    if !tool_available("ffprobe") || !tool_available("ffmpeg") {
+        eprintln!("skipping: ffprobe/ffmpeg not installed");
+        return;
+    }
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    let heic = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/rot-300x200-or6.heic"
+    ))
+    .expect("read rotated heic fixture");
+    let part = reqwest::multipart::Part::bytes(heic)
+        .file_name("rotated.heic")
+        .mime_str("application/octet-stream")
+        .unwrap();
+    let resp = admin
+        .post(server.url("/media"))
+        .multipart(reqwest::multipart::Form::new().part("file", part))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let manifest: serde_json::Value = resp.json().await.unwrap();
+    let media_ref = manifest["ref"].as_str().expect("ref").to_string();
+
+    // 200 wide → no 480/960 rungs; exactly the one full rung, PORTRAIT.
+    let avif: Vec<(Option<i64>, Option<i64>)> = sqlx::query_as(
+        "SELECT mv.width, mv.height
+         FROM media_variant mv JOIN media m ON m.media_id = mv.media_id
+         WHERE m.media_ref = ?1 AND mv.mime = 'image/avif'",
+    )
+    .bind(&media_ref)
+    .fetch_all(&server.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        avif,
+        vec![(Some(200), Some(300))],
+        "the derived AVIF must be upright portrait (rotation baked in)"
+    );
+}

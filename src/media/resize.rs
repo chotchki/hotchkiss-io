@@ -10,7 +10,8 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use image::imageops::FilterType;
-use image::{ImageFormat, ImageReader};
+use image::metadata::Orientation;
+use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
 use std::io::Cursor;
 use std::path::Path;
 use std::process::Command;
@@ -103,11 +104,7 @@ pub fn responsive_avif_variants(path: &Path) -> Result<ResizeResult> {
 /// poster.rs). The bool is "the SOURCE format is browser-displayable" — false
 /// tells the caller to mint the capped full rung.
 fn decode_source(path: &Path) -> Result<(image::DynamicImage, bool)> {
-    let native = ImageReader::open(path)
-        .with_context(|| format!("opening {} for resize", path.display()))?
-        .with_guessed_format()?
-        .decode();
-    match native {
+    match decode_native_oriented(path) {
         Ok(img) => Ok((img, true)),
         Err(native_err) => {
             let Some(bin) = FFMPEG_BIN.as_deref() else {
@@ -128,7 +125,31 @@ fn decode_source(path: &Path) -> Result<(image::DynamicImage, bool)> {
     }
 }
 
-/// One PNG frame on stdout.
+/// Native decode with the source's EXIF orientation APPLIED (EB.10): the image
+/// crate's plain `decode()` returns RAW pixels — a phone JPEG stores them
+/// unrotated + an Orientation tag, so every derived AVIF rung rendered sideways
+/// (browsers honor the tag on the original; our re-encodes drop it). Read the
+/// orientation off the decoder BEFORE consuming it, then bake it in.
+fn decode_native_oriented(path: &Path) -> Result<DynamicImage> {
+    let mut decoder = ImageReader::open(path)
+        .with_context(|| format!("opening {} for resize", path.display()))?
+        .with_guessed_format()?
+        .into_decoder()
+        .with_context(|| format!("decoding {}", path.display()))?;
+    let orientation = decoder
+        .orientation()
+        .unwrap_or(Orientation::NoTransforms);
+    let mut img = DynamicImage::from_decoder(decoder)
+        .with_context(|| format!("decoding {}", path.display()))?;
+    img.apply_orientation(orientation);
+    Ok(img)
+}
+
+/// One PNG frame on stdout. ffmpeg's default autorotate bakes in a HEIC's
+/// irot/display-matrix rotation (an orientation-6 HEIC decodes width/height
+/// swapped, upright — pinned by `rotated_heic_bakes_orientation_into_the_avif`).
+/// NOT passed explicitly: `-autorotate` is a bare flag whose argument-less form
+/// can't be pinned "on" without ffmpeg misparsing the next token as an output.
 fn ffmpeg_first_frame_png(bin: &str, path: &Path) -> Result<Vec<u8>> {
     let out = Command::new(bin)
         .args(["-v", "error"])
@@ -165,6 +186,41 @@ mod tests {
         assert_eq!(target_widths(700), vec![480]); // 960 >= 700 → skipped
         assert_eq!(target_widths(480), Vec::<u32>::new()); // not strictly less
         assert_eq!(target_widths(100), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn exif_orientation_is_baked_into_the_rungs() {
+        // A phone JPEG stores pixels UNROTATED + an EXIF Orientation tag (EB.10
+        // — the sideways-capture bug). Build one hermetically: encode 300x200,
+        // splice a minimal APP1 with Orientation=6 (rotate 90 CW) after the SOI.
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("rot.jpg");
+        let img = image::RgbImage::from_fn(300, 200, |x, _| {
+            image::Rgb([(x % 256) as u8, 64, 128])
+        });
+        let mut jpeg = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut Cursor::new(&mut jpeg), ImageFormat::Jpeg)
+            .unwrap();
+        assert_eq!(&jpeg[..2], b"\xff\xd8");
+        let tiff: &[u8] = b"II*\x00\x08\x00\x00\x00\
+\x01\x00\
+\x12\x01\x03\x00\x01\x00\x00\x00\x06\x00\x00\x00\
+\x00\x00\x00\x00";
+        let payload: Vec<u8> = [b"Exif\x00\x00".as_slice(), tiff].concat();
+        let mut app1 = vec![0xff, 0xe1];
+        app1.extend(((payload.len() + 2) as u16).to_be_bytes());
+        app1.extend(&payload);
+        let spliced: Vec<u8> = [&jpeg[..2], &app1, &jpeg[2..]].concat();
+        std::fs::write(&src, spliced).unwrap();
+
+        let out = responsive_avif_variants(&src).unwrap();
+        // Orientation 6 applied → the decoded source is PORTRAIT 200x300.
+        assert_eq!(
+            (out.source_width, out.source_height),
+            (200, 300),
+            "EXIF orientation must be baked in, not dropped"
+        );
     }
 
     #[test]

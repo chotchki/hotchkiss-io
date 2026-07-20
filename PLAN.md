@@ -96,6 +96,18 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] DG.3 - Up-next affordance: on page open, highlight/scroll to the last-listened volume (per-ref saved positions decide it)
 - [ ] DG.4 - Tests + CLAUDE.md delta + real-phone validation: screen-off auto-advance, lock-screen volume skip, series authoring convention documented
 - [x] DG.5 - Audio embed: cover-art + title header replaces the download button
+## Phase EB - Mobile camera capture — quick-post flow
+- [ ] EB.0 - Phase exit: from the PWA on a real iPhone — snap → original uploaded → draft created (or appended) — fast enough to use mid-print; editor papercuts fixed; tests + docs; beta dogfood then prod tag
+- [x] EB.1 - /admin/capture page: camera-first (accept=image/video + capture=environment, big touch targets), optional caption, mode select — new draft (default) vs append-to-recent-draft picker; camera button in the admin bar; uploads ORIGINALS via the canonical POST /media + upload-progress
+- [x] EB.2 - POST /admin/capture {ref, mode, target, caption} → PageWrite: new scheduled-draft blog post (CU far-future sentinel, date-derived title+slug) or append the embed to the chosen page via update_page (the ONE policy path — link rewrites + modified-date stamp for free); orphan media on a failed 2nd call is acceptable (admin console lists it)
+- [x] EB.3 - Editor papercuts: accept attr + a dedicated capture=environment camera button beside the library picker; insert ref at END when the textarea was never focused (today it lands at position 0 = top of the markdown); mobile toolbar touch targets
+- [ ] EB.4 - Real-iPhone verification on beta: snap from the PWA (HEIC path now normalized at ingest by EB.9 — confirm the embed renders off-Safari and the AVIF rungs minted), cellular-speed sanity with originals, capture-page one-handed usability
+- [x] EB.5 - Tests (integration: capture endpoints — draft-create, append, auth-gate; browser e2e: capture → draft with embed) + CLAUDE.md + note decided-out: Web Share Target (unsupported on iOS PWAs), client-side downscale (originals chosen)
+- [x] EB.6 - Library-only DEFAULT destination: a third mode that skips the page write (the POST /media upload IS the whole job); caption becomes the media title for later findability; banner links /admin/media; e2e covers default-library + explicit-draft legs
+- [x] EB.7 - Admin nav group collapses into a hamburger on mobile (same no-JS details pattern as the main tabs) — the camera/plus/Admin/Logout row outgrew a phone viewport
+- [x] EB.8 - Beta-inverted favicon + apple-touch-icon: host-aware icon serving (non-canonical host → inverted set, the robots.txt precedent) so the two pinned PWAs are tellable apart
+- [x] EB.9 - HEIC ingest normalization: keep the HEIC original stored, but derive a full-res AVIF + the 480/960 ladder at ingest so viewing never serves HEIC; embed src must prefer the AVIF; fixture test with a real HEIC
+- [x] EB.10 - Apply source orientation when deriving AVIF rungs: EXIF orientation on the image-crate path (JPEG), irot/display-matrix on the ffmpeg HEIC path — a sideways phone capture must render upright in every rung
 
 ## Backlog (not yet phased)
 
@@ -110,6 +122,8 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - **Optional: scrub non-admin users from the beta snapshot (Phase 12 review).** Beta carries prod's full `users` table (passkey records are public keys with no network-reachable leak path; chris-as-admin on beta is intentional via shared rp_id). Pure defense-in-depth: `DELETE FROM users WHERE app_role != 'Admin'` in `snapshot_prod_db_into_beta` keeps only the admin row. Not required.
 
 ### Ideas
+
+- **Minor image editing — rotate + crop (future phase).** Added 2026-07-20 out of the EB.10 orientation work: phone captures will keep wanting small fixes (a rotate the EXIF got wrong, a crop). The EB.9/EB.10 architecture already points at the clean design: the ORIGINAL is immutable in the content-addressed store and everything viewers see is a DERIVED AVIF rung — so an edit is NOT a mutation, it's stored edit parameters (rotate quadrant, crop rect) applied in `resize.rs::decode_source` before the rung derivation, then a re-derive (the `backfill-covers` spawn pattern). Re-runnable, reversible, original never touched. UI seams: the admin media library item view + maybe the capture result banner. Open Qs: where the edit params live (`media` columns vs a variant-recipe row), whether the editor preview needs client-side interactivity (a crop box wants JS) vs server round-trips.
 
 - **Media negotiation refinements (deferred from Phase DP).** None blocking; all noted in `media-design.md` §5/§11. (1) **Size-within-format** selection — pick the 480w vs 960w avif, or the low vs high 3mf — via `?width=`/`sizes`; the manifest already exposes per-variant `width`/`bytes` so a client picks the exact one by `href`, and the embed's `srcset` covers the browser, so this is only for a programmatic caller that wants a *specific* size by negotiation. (2) The `?format=` token→mime table could become essence/suffix matching if the vocabulary grows. (3) Variant **versioning** (`media_variant.superseded_at` + a "current" marker) if edit-history is ever wanted — complete-replace was chosen for now; additive, doesn't break the contract.
 - **Analytics expansion (d3 dashboard / status-noise / per-IP / referer-grouping / referer-breakdown / site-performance)** — all six folded into **Phase CQ** (SPEC.md "Analytics — signal vs noise"), designed 2026-06-30.
