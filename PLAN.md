@@ -96,6 +96,19 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] DG.3 - Up-next affordance: on page open, highlight/scroll to the last-listened volume (per-ref saved positions decide it)
 - [ ] DG.4 - Tests + CLAUDE.md delta + real-phone validation: screen-off auto-advance, lock-screen volume skip, series authoring convention documented
 - [x] DG.5 - Audio embed: cover-art + title header replaces the download button
+## Phase EC - API-key hygiene — purge revoked keys
+added 2026-07-20.
+- [ ] EC.0 - Phase exit: revoked keys vanish from /admin/api-keys 7 days after revocation (DELETED, not hidden); daily tick; tests + docs; shipped
+- [x] EC.1 - ApiKeyDao::purge_revoked(pool) — DELETE WHERE revoked_at < now-7d, returns count; DAO tests: 8d purged / 1d kept / live kept
+- [x] EC.2 - Wire the purge into the daily maintenance tick beside the request_log prune (fail-soft, logged, detached from try_join!)
+- [ ] EC.3 - CLAUDE.md delta (api-keys paragraph gains the 7-day purge) + beta push
+## Phase ED - Image editing — rotate + crop as re-runnable derivation
+- [ ] ED.0 - Phase exit: rotate + crop from the admin media library, applied as RE-DERIVATION of the AVIF rungs (original untouched, content-addressed store intact); the prod sideways image fixed with it; tests + docs; shipped
+- [ ] ED.1 - Re-derive seam FIRST: per-item "Re-derive variants" action (drop derived image variants + re-run add_derived_variants, the replace tx pattern; spawned + banner) — standalone it re-mints pre-EB.10 sideways rungs with the orientation-aware pipeline; edits ride this same seam
+- [ ] ED.2 - Edit-params storage: media columns (rotate quadrant + normalized crop rect) — ONE edit state per item, no history (the complete-replace philosophy); applied in the derivation between decode_source and rung minting; migration
+- [ ] ED.3 - Rotate UI: 90° CW/CCW buttons on the media library item view → params write + spawned re-derive (no crop box needed for the common case)
+- [ ] ED.4 - Crop UI: first-party vanilla-JS crop box over the preview (the diagram-zoom class of tool), stores a normalized rect; server clamps/validates before deriving
+- [ ] ED.5 - Tests (derivation applies params; re-derive replaces rungs; covers/embeds pick up new rungs) + CLAUDE.md + beta dogfood → prod tag; verify the prod image upright
 
 ## Backlog (not yet phased)
 
@@ -111,7 +124,7 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 
 ### Ideas
 
-- **Minor image editing — rotate + crop (future phase).** Added 2026-07-20 out of the EB.10 orientation work: phone captures will keep wanting small fixes (a rotate the EXIF got wrong, a crop). The EB.9/EB.10 architecture already points at the clean design: the ORIGINAL is immutable in the content-addressed store and everything viewers see is a DERIVED AVIF rung — so an edit is NOT a mutation, it's stored edit parameters (rotate quadrant, crop rect) applied in `resize.rs::decode_source` before the rung derivation, then a re-derive (the `backfill-covers` spawn pattern). Re-runnable, reversible, original never touched. UI seams: the admin media library item view + maybe the capture result banner. Open Qs: where the edit params live (`media` columns vs a variant-recipe row), whether the editor preview needs client-side interactivity (a crop box wants JS) vs server round-trips.
+~~**Minor image editing — rotate + crop.**~~ *Graduated to Phase ED 2026-07-20 (chris hit the need in prod).*
 
 - **Media negotiation refinements (deferred from Phase DP).** None blocking; all noted in `media-design.md` §5/§11. (1) **Size-within-format** selection — pick the 480w vs 960w avif, or the low vs high 3mf — via `?width=`/`sizes`; the manifest already exposes per-variant `width`/`bytes` so a client picks the exact one by `href`, and the embed's `srcset` covers the browser, so this is only for a programmatic caller that wants a *specific* size by negotiation. (2) The `?format=` token→mime table could become essence/suffix matching if the vocabulary grows. (3) Variant **versioning** (`media_variant.superseded_at` + a "current" marker) if edit-history is ever wanted — complete-replace was chosen for now; additive, doesn't break the contract.
 - **Analytics expansion (d3 dashboard / status-noise / per-IP / referer-grouping / referer-breakdown / site-performance)** — all six folded into **Phase CQ** (SPEC.md "Analytics — signal vs noise"), designed 2026-06-30.

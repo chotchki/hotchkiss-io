@@ -122,7 +122,31 @@ impl ApiKeyDao {
         .await?;
         Ok(res.rows_affected() > 0)
     }
+
+    /// Delete keys revoked more than [`REVOKED_RETENTION_DAYS`] ago (EC). A
+    /// revoked row is an unreusable HMAC hash + metadata — a week covers the
+    /// "which key did I just kill" audit window, past that it's clutter. Runs
+    /// on the daily maintenance tick; returns the purge count.
+    pub async fn purge_revoked(pool: &SqlitePool) -> Result<u64> {
+        // Timestamp math, not chrono::Duration — sqlx's chrono re-export lacks
+        // the delta type (the CT gotcha, same as Window::last_days).
+        let now = Utc::now();
+        let cutoff_secs = now.timestamp() - REVOKED_RETENTION_DAYS * 86_400;
+        let cutoff = DateTime::<Utc>::from_timestamp(cutoff_secs, 0).unwrap_or(now);
+        let res = sqlx::query!(
+            r#"DELETE FROM api_keys
+               WHERE revoked_at IS NOT NULL AND revoked_at < ?1"#,
+            cutoff,
+        )
+        .execute(pool)
+        .await?;
+        Ok(res.rows_affected())
+    }
 }
+
+/// How long a revoked key stays visible in `/admin/api-keys` before the daily
+/// purge deletes it.
+pub const REVOKED_RETENTION_DAYS: i64 = 7;
 
 /// `hio_<43-char base64url>` from 32 cryptographically-random bytes (openssl).
 fn generate_key() -> Result<String> {
@@ -202,6 +226,42 @@ mod tests {
         assert!(ApiKeyDao::authenticate(&pool, &key).await?.is_none());
         assert!(!ApiKeyDao::revoke(&pool, row.id, &user.id).await?);
 
+        Ok(())
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn purge_deletes_only_week_old_revoked(pool: SqlitePool) -> Result<()> {
+        let user = seed_admin(&pool).await?;
+        let (_, live) = ApiKeyDao::create(&pool, &user.id, "live").await?;
+        let (_, fresh) = ApiKeyDao::create(&pool, &user.id, "fresh-revoke").await?;
+        let (_, stale) = ApiKeyDao::create(&pool, &user.id, "stale-revoke").await?;
+        assert!(ApiKeyDao::revoke(&pool, fresh.id, &user.id).await?);
+        assert!(ApiKeyDao::revoke(&pool, stale.id, &user.id).await?);
+
+        // Backdate the stale one's revocation past the retention window (8d).
+        let backdated = DateTime::<Utc>::from_timestamp(
+            Utc::now().timestamp() - (REVOKED_RETENTION_DAYS + 1) * 86_400,
+            0,
+        )
+        .unwrap();
+        sqlx::query!(
+            "UPDATE api_keys SET revoked_at = ?1 WHERE id = ?2",
+            backdated,
+            stale.id
+        )
+        .execute(&pool)
+        .await?;
+
+        assert_eq!(ApiKeyDao::purge_revoked(&pool).await?, 1, "only the stale one");
+        let remaining = ApiKeyDao::list_for_user(&pool, &user.id).await?;
+        let labels: Vec<&str> = remaining.iter().map(|k| k.label.as_str()).collect();
+        assert!(labels.contains(&"live"), "live key untouched: {labels:?}");
+        assert!(
+            labels.contains(&"fresh-revoke"),
+            "a recent revoke stays visible for its audit week: {labels:?}"
+        );
+        assert!(!labels.contains(&"stale-revoke"), "the week-old revoke is GONE");
+        let _ = live.id;
         Ok(())
     }
 

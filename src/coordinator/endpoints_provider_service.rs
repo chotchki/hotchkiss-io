@@ -189,6 +189,22 @@ impl EndpointsProviderService {
             }
         });
 
+        // Purge API keys revoked more than a week ago, daily (Phase EC) — a
+        // revoked row can never authenticate again; a week covers the audit
+        // window, then it's clutter. Fail-soft like the prune above.
+        let key_purge_pool = self.pool.clone();
+        set.spawn(async move {
+            let mut tick = tokio::time::interval(tokio::time::Duration::from_secs(60 * 60 * 24));
+            loop {
+                tick.tick().await;
+                match crate::db::dao::api_keys::ApiKeyDao::purge_revoked(&key_purge_pool).await {
+                    Ok(n) if n > 0 => tracing::info!("Purged {n} week-old revoked API key(s)"),
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("revoked-api-key purge failed: {e}"),
+                }
+            }
+        });
+
         // Take a dated VACUUM INTO snapshot of the DB daily (first tick fires
         // immediately at startup), then prune to a rolling window. CRITICAL:
         // this loop never returns and every fallible step is matched + logged,
