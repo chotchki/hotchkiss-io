@@ -1426,13 +1426,13 @@ async fn stl_viewer_spin_respects_reduced_motion_and_stops_on_grab() {
     drop(server);
 }
 
-/// Phase EB: the quick-capture flow end-to-end in a real browser — capture.js
-/// uploads via POST /media, POSTs the ref to /admin/capture, and on a "new
-/// draft" result AUTO-SWITCHES to append mode so a multi-shot session accretes
-/// into ONE draft. Two files through the library input: the first mints a
-/// scheduled draft, the second must land in the SAME post.
+/// Phase EB: the quick-capture flow end-to-end in a real browser. Three legs:
+/// (1) the DEFAULT destination is library-only (EB.6) — the upload is the whole
+/// job, no page write, caption becomes the media title; (2) explicit "draft"
+/// mode mints a scheduled draft; (3) capture.js AUTO-SWITCHES to append after
+/// the draft, so the next shot accretes into the SAME post.
 #[tokio::test]
-async fn quick_capture_creates_draft_then_accretes_in_browser() {
+async fn quick_capture_library_default_then_draft_accretes_in_browser() {
     if !ffprobe_available() {
         eprintln!("skipping: ffprobe not installed");
         return;
@@ -1447,15 +1447,39 @@ async fn quick_capture_creates_draft_then_accretes_in_browser() {
     page.goto(server.url("/admin/capture")).await.expect("goto /admin/capture");
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // First shot → a new scheduled draft (mode defaults to "draft").
-    let f1 = write_temp_fixture("e2e-capture-1", b"first capture bytes");
-    set_file_input(&page, "#capture-library", &[&f1]).await;
-    wait_true(
+    // Leg 1 — DEFAULT (library-only): caption rides as the media title, no
+    // content page is written, the banner links the library.
+    let _: bool = js(
         &page,
-        "!document.getElementById('capture-result').classList.contains('hidden')",
-        "first capture → the result banner fills",
+        "(function(){document.getElementById('capture-caption').value='Bench shot';return true;})()",
     )
     .await;
+    let f0 = write_temp_fixture("e2e-capture-0", b"library only bytes");
+    set_file_input(&page, "#capture-library", &[&f0]).await;
+    wait_true(
+        &page,
+        "document.getElementById('capture-result').textContent.indexOf('media library') >= 0",
+        "library capture → the banner points at the library",
+    )
+    .await;
+    let pages_after_library: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM content_pages WHERE page_name LIKE 'capture-%'",
+    )
+    .fetch_one(&server.pool)
+    .await
+    .unwrap();
+    assert_eq!(pages_after_library, 0, "library-only must write NO page");
+    let titled: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM media WHERE title = 'Bench shot'")
+            .fetch_one(&server.pool)
+            .await
+            .unwrap();
+    assert_eq!(titled, 1, "the caption becomes the media title");
+
+    // Leg 2 — explicit draft mode: a scheduled draft is minted.
+    click_selector(&page, "input[name=\"capture-mode\"][value=\"draft\"]").await;
+    let f1 = write_temp_fixture("e2e-capture-1", b"first capture bytes");
+    set_file_input(&page, "#capture-library", &[&f1]).await;
     // The auto-switch: append mode is now selected with the fresh draft as target.
     wait_true(
         &page,
@@ -1466,7 +1490,13 @@ async fn quick_capture_creates_draft_then_accretes_in_browser() {
     let target: String = js(&page, "document.getElementById('capture-target').value").await;
     assert!(target.starts_with("capture-"), "append target is the new draft: {target}");
 
-    // Second shot → must accrete onto that same draft, not mint another.
+    // Leg 3 — the next shot must accrete onto that same draft, not mint
+    // another. Clear the stale 'Done' first so the wait sees THIS shot finish.
+    let _: bool = js(
+        &page,
+        "(function(){document.getElementById('capture-status').textContent='';return true;})()",
+    )
+    .await;
     let f2 = write_temp_fixture("e2e-capture-2", b"second capture bytes");
     set_file_input(&page, "#capture-library", &[&f2]).await;
     wait_true(
@@ -1498,6 +1528,7 @@ async fn quick_capture_creates_draft_then_accretes_in_browser() {
     browser.close().await.ok();
     handle.await.ok();
     let _ = std::fs::remove_dir_all(&profile);
+    let _ = std::fs::remove_file(&f0);
     let _ = std::fs::remove_file(&f1);
     let _ = std::fs::remove_file(&f2);
     drop(server);

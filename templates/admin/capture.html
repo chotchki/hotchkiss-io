@@ -30,13 +30,17 @@
 
   <label class="flex flex-col gap-1">
     <span class="text-sm font-display text-navy uppercase">Caption (optional, markdown)</span>
-    <input id="capture-caption" class="border border-navy/30 rounded px-3 py-2" placeholder="What is this?" />
+    <input id="capture-caption" class="border border-navy/30 rounded px-3 py-2" placeholder="What is this? (library-only: becomes the media title)" />
   </label>
 
   <fieldset class="flex flex-col gap-2">
     <legend class="text-sm font-display text-navy uppercase mb-1">Destination</legend>
     <label class="flex items-center gap-2">
-      <input type="radio" name="capture-mode" value="draft" checked />
+      <input type="radio" name="capture-mode" value="library" checked />
+      <span>Just the media library (author later)</span>
+    </label>
+    <label class="flex items-center gap-2">
+      <input type="radio" name="capture-mode" value="draft" />
       <span>New draft post</span>
     </label>
     <label class="flex items-center gap-2">

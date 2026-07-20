@@ -12,7 +12,9 @@
     const checked = document.querySelector(
       'input[name="capture-mode"]:checked',
     );
-    return checked ? checked.value : "draft";
+    // Library-only is the DEFAULT (EB.6): capture now, author later — the
+    // POST /media upload is the whole job, no page write.
+    return checked ? checked.value : "library";
   }
 
   function setStatus(text) {
@@ -23,6 +25,14 @@
   function uploadOne(file) {
     const fd = new FormData();
     fd.append("file", file, file.name);
+    // Library-only: the caption rides the upload as the media TITLE, so the
+    // shot is findable in /admin/media later (draft/append put it in the page).
+    if (mode() === "library") {
+      const caption = $("capture-caption");
+      if (caption && caption.value.trim()) {
+        fd.append("title", caption.value.trim());
+      }
+    }
     return UploadProgress.xhrUpload("/media", fd, (phase, loaded, total) => {
       const bar = $("capture-bar");
       if (phase === "uploading") {
@@ -73,6 +83,21 @@
     });
   }
 
+  function onLibraried() {
+    const result = $("capture-result");
+    if (result) {
+      result.classList.remove("hidden");
+      result.textContent = "In the media library — ";
+      const link = document.createElement("a");
+      link.href = "/admin/media";
+      link.textContent = "open the library";
+      link.className = "underline text-navy hover:text-navy/70";
+      result.appendChild(link);
+    }
+    const caption = $("capture-caption");
+    if (caption) caption.value = "";
+  }
+
   function onPosted(page) {
     const url = "/pages/" + page.path_segments.join("/");
     const result = $("capture-result");
@@ -114,9 +139,13 @@
     for (const f of list) {
       try {
         const ref = await uploadOne(f);
-        setStatus("Posting…");
-        const envelope = await postCapture(ref);
-        if (envelope.page) onPosted(envelope.page);
+        if (mode() === "library") {
+          onLibraried();
+        } else {
+          setStatus("Posting…");
+          const envelope = await postCapture(ref);
+          if (envelope.page) onPosted(envelope.page);
+        }
         setStatus("Done");
       } catch (e) {
         setStatus("Failed: " + (e && e.message ? e.message : e));
