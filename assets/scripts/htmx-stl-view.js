@@ -63,6 +63,11 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     controls.autoRotate = !reduceMotion;
     controls.autoRotateSpeed = 1.0;
+    // Random direction per load so the spin doesn't read as canned. The
+    // STARTING face stays authored (data-rotation*), so no random azimuth.
+    if (Math.random() < 0.5) {
+      controls.autoRotateSpeed = -controls.autoRotateSpeed;
+    }
     // First grab kills the spin for good — it's an attract loop, not the
     // interaction model; auto-resume would wrestle the camera back.
     controls.addEventListener("start", function () {
