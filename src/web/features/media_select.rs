@@ -83,10 +83,17 @@ pub fn viewer_mesh(variants: &[MediaVariantDao]) -> Option<&MediaVariantDao> {
 pub fn image_ladder(variants: &[MediaVariantDao]) -> Vec<&MediaVariantDao> {
     let mut sized: Vec<&MediaVariantDao> = variants
         .iter()
-        .filter(|v| v.mime.starts_with("image/") && v.width.is_some())
+        .filter(|v| is_web_displayable_image(&v.mime) && v.width.is_some())
         .collect();
     sized.sort_by_key(|v| v.width.unwrap_or(0));
     sized
+}
+
+/// Browser-displayable image mime. HEIC/HEIF are STORED (the original bytes stay
+/// source-of-truth) but never picked for an embed/cover ladder — only Safari
+/// renders them; browsers get the ingest-derived AVIF rungs instead (EB.9).
+pub fn is_web_displayable_image(mime: &str) -> bool {
+    mime.starts_with("image/") && !matches!(mime, "image/heic" | "image/heif")
 }
 
 /// A parsed `Accept` media range.

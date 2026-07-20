@@ -264,6 +264,10 @@ fn parse_ffprobe(json: &str) -> Result<Probed> {
             "webp" => "image/webp",
             "gif" => "image/gif",
             "bmp" => "image/bmp",
+            // A duration-less hevc "video" stream is a HEIC still (the iPhone
+            // default). Typed Image so ingest derives the AVIF rungs browsers
+            // can actually render (EB.9); the selector never serves the heic.
+            "hevc" => "image/heic",
             other => bail!("unsupported image codec {other:?}"),
         };
         (MediaKind::Image, mime, None)
@@ -396,6 +400,18 @@ mod tests {
         assert_eq!(p.codecs.as_deref(), Some("av01.0.12M.08"));
         assert_eq!((p.width, p.height), (Some(1728), Some(1116)));
         assert_eq!(p.duration_ms, Some(44_908));
+    }
+
+    #[test]
+    fn heic_still_maps_to_image_heic() {
+        // A HEIC photo probes as a duration-less hevc "video" stream — it must
+        // type as an IMAGE (EB.9), not bail as an unsupported image codec (the
+        // old behavior, which dumped phone photos into MediaKind::File).
+        let json = r#"{"streams":[{"codec_type":"video","codec_name":"hevc","width":4032,"height":3024}],"format":{}}"#;
+        let p = parse_ffprobe(json).unwrap();
+        assert_eq!(p.kind, MediaKind::Image);
+        assert_eq!(p.mime, "image/heic");
+        assert_eq!(p.width, Some(4032));
     }
 
     #[test]

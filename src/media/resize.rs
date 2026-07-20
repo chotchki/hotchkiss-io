@@ -8,17 +8,30 @@
 //! feature dependency. Sync (decode + rav1e encode block) → call under
 //! `spawn_blocking`.
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use image::imageops::FilterType;
 use image::{ImageFormat, ImageReader};
 use std::io::Cursor;
 use std::path::Path;
+use std::process::Command;
+use std::sync::LazyLock;
+
+use crate::media::probe::resolve_bin;
 
 /// Target widths for the srcset ladder. A width >= the source is skipped (never
 /// upscale); the original variant stays as the largest fallback. Capped at 960:
 /// in-flow content images render at a 480px max-height, so 960 covers a 2× phone
 /// and keeps the per-upload / backfill encode bounded (rav1e is not fast).
 pub const RESPONSIVE_WIDTHS: [u32; 2] = [480, 960];
+
+/// Cap for the EXTRA "full" rung minted when the source format isn't
+/// browser-displayable (a HEIC, EB.9): that rung becomes the embed src + zoom
+/// view, and rav1e at a true 12MP phone resolution is minutes-slow. The genuine
+/// original stays stored for download; 1920 is 2× the ladder top.
+pub const NON_WEB_FULL_WIDTH_CAP: u32 = 1920;
+
+static FFMPEG_BIN: LazyLock<Option<String>> =
+    LazyLock::new(|| resolve_bin("FFMPEG_BIN", "ffmpeg"));
 
 /// One generated variant: its actual pixel dimensions + the AVIF bytes.
 pub struct ResizedImage {
@@ -42,19 +55,31 @@ pub struct ResizeResult {
 /// width-taking signature silently skipped. `variants` is empty when the source
 /// is already small (no width below it) — the original then serves alone.
 pub fn responsive_avif_variants(path: &Path) -> Result<ResizeResult> {
-    let img = ImageReader::open(path)
-        .with_context(|| format!("opening {} for resize", path.display()))?
-        .with_guessed_format()?
-        .decode()
-        .with_context(|| format!("decoding {}", path.display()))?;
+    let (img, web_native) = decode_source(path)?;
     let (source_width, source_height) = (img.width(), img.height());
 
+    let mut widths = target_widths(source_width);
+    if !web_native {
+        // EB.9: the source itself can't render in most browsers (HEIC), so mint
+        // a capped "full" rung too — it becomes the ladder top (embed src +
+        // zoom), and no viewing path ever depends on the source bytes.
+        let full = source_width.min(NON_WEB_FULL_WIDTH_CAP);
+        if !widths.contains(&full) {
+            widths.push(full);
+        }
+    }
+
     let mut variants = Vec::new();
-    for w in target_widths(source_width) {
+    for w in widths {
         // Aspect-preserving box; resize() fits WITHIN (w, h) so read the actual
         // result dims back for the srcset `Nw` descriptor.
-        let h = ((source_height as u64 * w as u64) / (source_width.max(1) as u64)).max(1) as u32;
-        let resized = img.resize(w, h, FilterType::Lanczos3);
+        let resized = if w == source_width {
+            img.clone()
+        } else {
+            let h =
+                ((source_height as u64 * w as u64) / (source_width.max(1) as u64)).max(1) as u32;
+            img.resize(w, h, FilterType::Lanczos3)
+        };
         let mut avif = Vec::new();
         resized
             .write_to(&mut Cursor::new(&mut avif), ImageFormat::Avif)
@@ -70,6 +95,55 @@ pub fn responsive_avif_variants(path: &Path) -> Result<ResizeResult> {
         source_height,
         variants,
     })
+}
+
+/// Decode the source pixels. The `image` crate covers every web-native format;
+/// anything it can't read (HEIC/HEIF — the iPhone default) falls back to a
+/// one-frame ffmpeg decode (a still is a 1-frame stream to ffmpeg; mirrors
+/// poster.rs). The bool is "the SOURCE format is browser-displayable" — false
+/// tells the caller to mint the capped full rung.
+fn decode_source(path: &Path) -> Result<(image::DynamicImage, bool)> {
+    let native = ImageReader::open(path)
+        .with_context(|| format!("opening {} for resize", path.display()))?
+        .with_guessed_format()?
+        .decode();
+    match native {
+        Ok(img) => Ok((img, true)),
+        Err(native_err) => {
+            let Some(bin) = FFMPEG_BIN.as_deref() else {
+                bail!(
+                    "decoding {}: {native_err} (and no ffmpeg for the HEIC fallback)",
+                    path.display()
+                );
+            };
+            let png = ffmpeg_first_frame_png(bin, path).with_context(|| {
+                format!(
+                    "decoding {} (image crate: {native_err}; ffmpeg fallback also failed)",
+                    path.display()
+                )
+            })?;
+            let img = image::load_from_memory(&png).context("decoding ffmpeg fallback PNG")?;
+            Ok((img, false))
+        }
+    }
+}
+
+/// One PNG frame on stdout.
+fn ffmpeg_first_frame_png(bin: &str, path: &Path) -> Result<Vec<u8>> {
+    let out = Command::new(bin)
+        .args(["-v", "error"])
+        .arg("-i")
+        .arg(path)
+        .args(["-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"])
+        .output()
+        .map_err(|e| anyhow!("failed to spawn ffmpeg ({bin}): {e}"))?;
+    if !out.status.success() || out.stdout.is_empty() {
+        bail!(
+            "ffmpeg decode failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(out.stdout)
 }
 
 /// The [`RESPONSIVE_WIDTHS`] strictly smaller than the source (never upscale).

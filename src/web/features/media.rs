@@ -825,8 +825,11 @@ pub(crate) async fn cover_media_id_for(pool: &sqlx::SqlitePool, page_id: i64) ->
 
 /// First image variant of a cover's set — the legacy (unresized) fallback when the
 /// width ladder is empty (an image uploaded before Phase CN carries no widths).
+/// Web-displayable only: a HEIC can never be the fallback either (EB.9).
 fn first_image(variants: &[MediaVariantDao]) -> Option<&MediaVariantDao> {
-    variants.iter().find(|v| v.mime.starts_with("image/"))
+    variants
+        .iter()
+        .find(|v| media_select::is_web_displayable_image(&v.mime))
 }
 
 /// The cover image URL for a page (Phase BZ.8; DR.4 picks via `media_select`): the
