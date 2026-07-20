@@ -16,7 +16,12 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, MutexGuard};
 
 use chromiumoxide::cdp::browser_protocol::dom::SetFileInputFilesParams;
-use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
+use chromiumoxide::cdp::browser_protocol::emulation::{
+    MediaFeature, SetDeviceMetricsOverrideParams, SetEmulatedMediaParams,
+};
+use chromiumoxide::cdp::browser_protocol::input::{
+    DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+};
 use chromiumoxide::cdp::browser_protocol::web_authn::{
     AddVirtualAuthenticatorParams, AuthenticatorProtocol, AuthenticatorTransport, EnableParams,
     VirtualAuthenticatorOptions,
@@ -1323,5 +1328,90 @@ async fn inline_editor_upload_inserts_media_ref_in_browser() {
     handle.await.ok();
     let _ = std::fs::remove_dir_all(&profile);
     let _ = std::fs::remove_file(&f);
+    drop(server);
+}
+
+/// Phase EA: the STL viewer's attract spin honors `prefers-reduced-motion`
+/// (no auto-rotate at all) and hands the camera off PERMANENTLY on first grab.
+/// Asserted via the `data-autorotate` seam `htmx-stl-view.js` stamps on the
+/// `.stl-view` element (`controls` is module-scoped, invisible to the page).
+/// The model URL 404s on purpose — the flags under test are set during viewer
+/// SETUP, before (and independent of) the async STLLoader fetch. The spin RATE
+/// (delta-corrected update) stays eyeball-verified; asserting rotation speed
+/// from pixels is not worth the flake.
+#[tokio::test]
+async fn stl_viewer_spin_respects_reduced_motion_and_stops_on_grab() {
+    let _e2e = e2e_lock().await;
+    let server: TestServer = spawn_test_server().await.expect("spawn harness");
+    server
+        .seed_blog_post("stl-spin", "![model](/no-such-model.stl)")
+        .await
+        .unwrap();
+
+    let (mut browser, handle, profile) = launch().await;
+
+    // 1) Reduced-motion viewer — emulate BEFORE load so matchMedia sees it at setup.
+    let page = browser.new_page("about:blank").await.expect("new page");
+    page.execute(
+        SetEmulatedMediaParams::builder()
+            .feature(MediaFeature::new("prefers-reduced-motion", "reduce"))
+            .build(),
+    )
+    .await
+    .expect("Emulation.setEmulatedMedia");
+    page.goto(server.url("/blog/stl-spin")).await.expect("goto post");
+    wait_true(
+        &page,
+        "document.querySelector('.stl-view')?.dataset.autorotate === 'off'",
+        "reduced-motion viewer should come up with auto-rotate off",
+    )
+    .await;
+
+    // 2) Default viewer — spins on load; the first grab kills it for good.
+    let page = browser.new_page("about:blank").await.expect("new page");
+    page.goto(server.url("/blog/stl-spin")).await.expect("goto post");
+    wait_true(
+        &page,
+        "document.querySelector('.stl-view')?.dataset.autorotate === 'on'",
+        "default viewer should come up auto-rotating",
+    )
+    .await;
+
+    // Drag the canvas with real CDP input (mouse → synthesized pointerdown →
+    // OrbitControls dispatches 'start').
+    let canvas = page
+        .find_element(".stl-view canvas")
+        .await
+        .expect(".stl-view canvas");
+    let pt = canvas.clickable_point().await.expect("canvas clickable point");
+    for (kind, x, buttons) in [
+        (DispatchMouseEventType::MousePressed, pt.x, 1),
+        (DispatchMouseEventType::MouseMoved, pt.x + 30.0, 1),
+        (DispatchMouseEventType::MouseReleased, pt.x + 30.0, 0),
+    ] {
+        page.execute(
+            DispatchMouseEventParams::builder()
+                .r#type(kind)
+                .x(x)
+                .y(pt.y)
+                .button(MouseButton::Left)
+                .buttons(buttons)
+                .click_count(1)
+                .build()
+                .expect("DispatchMouseEventParams"),
+        )
+        .await
+        .expect("Input.dispatchMouseEvent");
+    }
+    wait_true(
+        &page,
+        "document.querySelector('.stl-view')?.dataset.autorotate === 'off'",
+        "grabbing the model should stop the attract spin",
+    )
+    .await;
+
+    browser.close().await.ok();
+    handle.await.ok();
+    let _ = std::fs::remove_dir_all(&profile);
     drop(server);
 }

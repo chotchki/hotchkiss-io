@@ -56,7 +56,28 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
     controls.dampingFactor = 0.25;
     controls.enableZoom = true;
     controls.enablePan = false;
-    controls.autoRotate = true;
+    // The attract spin: slow turntable, off entirely under reduced-motion.
+    // autoRotateSpeed is per-second only when update() gets a delta (see clock).
+    var reduceMotion =
+      window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    controls.autoRotate = !reduceMotion;
+    controls.autoRotateSpeed = 1.0;
+    // First grab kills the spin for good — it's an attract loop, not the
+    // interaction model; auto-resume would wrestle the camera back.
+    controls.addEventListener("start", function () {
+      controls.autoRotate = false;
+      syncAutorotateFlag();
+    });
+    // Observable seam for the browser e2e (module scope hides `controls`).
+    function syncAutorotateFlag() {
+      elem.dataset.autorotate = controls.autoRotate ? "on" : "off";
+    }
+    syncAutorotateFlag();
+
+    // Without a delta, OrbitControls steps a fixed angle per update() call —
+    // a 120Hz display spins twice as fast. The clock makes it wall-clock true.
+    var clock = new THREE.Clock();
 
     var scene = new THREE.Scene();
 
@@ -97,7 +118,7 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
       );
       (function animate() {
         requestAnimationFrame(animate);
-        controls.update();
+        controls.update(clock.getDelta());
         renderer.render(scene, camera);
       })();
     }
@@ -157,7 +178,7 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
         if (helper) {
           helper.update();
         }
-        controls.update();
+        controls.update(clock.getDelta());
         // console.log([data['filename'], JSON.stringify(camera.position)]);
         renderer.render(scene, camera);
       };
