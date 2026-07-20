@@ -115,6 +115,7 @@ pub async fn sitemap_xml(
     let top = ContentPageDao::find_by_parent(&state.pool, None).await?;
     let mut blog_id = None;
     let mut projects_id = None;
+    let mut three_d_id = None;
     for p in &top {
         if p.special_page {
             // A special row carrying a min_role is a gated SECTION — skip it
@@ -136,6 +137,14 @@ pub async fn sitemap_xml(
                     urls.push((format!("{base}/projects"), Some(p.page_modified_date)));
                 }
                 "resume" => urls.push((format!("{base}/resume"), Some(p.page_modified_date))),
+                // The 3d gallery (Phase CW shape): `/3d` is the index route,
+                // model DETAIL pages are content-tree children at
+                // `/pages/3d/<slug>` — same split as projects. Was silently
+                // absent until 2026-07-20 (fell into the unknown-arm).
+                "3d" => {
+                    three_d_id = Some(p.page_id);
+                    urls.push((format!("{base}/3d"), Some(p.page_modified_date)));
+                }
                 _ => {}
             }
         } else if p.is_visible_to(crate::db::dao::roles::Role::Anonymous) {
@@ -164,6 +173,17 @@ pub async fn sitemap_xml(
             if c.is_visible_to(crate::db::dao::roles::Role::Anonymous) {
                 urls.push((
                     format!("{base}/pages/projects/{}", c.page_name),
+                    Some(c.page_modified_date),
+                ));
+            }
+        }
+    }
+    if let Some(id) = three_d_id {
+        // Model detail pages, same content-tree split as projects.
+        for c in ContentPageDao::find_by_parent(&state.pool, Some(id)).await? {
+            if c.is_visible_to(crate::db::dao::roles::Role::Anonymous) {
+                urls.push((
+                    format!("{base}/pages/3d/{}", c.page_name),
                     Some(c.page_modified_date),
                 ));
             }

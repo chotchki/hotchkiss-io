@@ -342,3 +342,36 @@ async fn publish_now_and_unpublish_buttons_flip_visibility() {
         "publish_now must be admin-gated"
     );
 }
+
+#[tokio::test]
+async fn three_d_section_in_sitemap_like_projects() {
+    // Backlog fix 2026-07-20: the `3d` special row fell into the sitemap's
+    // unknown-arm — neither /3d nor any model page was emitted. It now mirrors
+    // the projects split: /3d is the index, models are /pages/3d/<slug>.
+    let server = spawn_test_server().await.expect("spawn");
+    let three_d_id: i64 =
+        sqlx::query_scalar("SELECT page_id FROM content_pages WHERE page_name = '3d'")
+            .fetch_one(&server.pool)
+            .await
+            .expect("the 3d special page is seeded");
+    sqlx::query(
+        "INSERT INTO content_pages (parent_page_id, page_name, page_markdown, page_order)
+         VALUES (?1, 'benchy', '# Benchy\n\nthe boat', 0)",
+    )
+    .bind(three_d_id)
+    .execute(&server.pool)
+    .await
+    .unwrap();
+
+    let sitemap = reqwest::get(server.url("/sitemap.xml"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(sitemap.contains("/3d</loc>"), "the /3d index is listed");
+    assert!(
+        sitemap.contains("/pages/3d/benchy"),
+        "model detail pages are listed under /pages/3d/"
+    );
+}
