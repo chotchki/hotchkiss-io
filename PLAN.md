@@ -108,6 +108,8 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [x] EB.8 - Beta-inverted favicon + apple-touch-icon: host-aware icon serving (non-canonical host → inverted set, the robots.txt precedent) so the two pinned PWAs are tellable apart
 - [x] EB.9 - HEIC ingest normalization: keep the HEIC original stored, but derive a full-res AVIF + the 480/960 ladder at ingest so viewing never serves HEIC; embed src must prefer the AVIF; fixture test with a real HEIC
 - [x] EB.10 - Apply source orientation when deriving AVIF rungs: EXIF orientation on the image-crate path (JPEG), irot/display-matrix on the ffmpeg HEIC path — a sideways phone capture must render upright in every rung
+- [x] EB.11 - Remove the redundant "+ New page" nav pill (desktop + hamburger) — it duplicated the Admin pill's /admin/pages target and sat fat-finger-close to Capture
+- [x] EB.12 - Capture as a reorderable special page: migration seeds ('capture','/admin/capture',special) with min_role='Admin' — rides role-aware TopBar + /admin/pages drag-reorder; drop the hardcoded camera pill from both nav admin groups
 
 ## Backlog (not yet phased)
 

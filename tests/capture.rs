@@ -236,3 +236,46 @@ async fn capture_is_admin_gated() {
     assert!(body.contains("capture=\"environment\""), "camera-first input present");
     assert!(body.contains("capture-target"), "append picker present");
 }
+
+#[tokio::test]
+async fn capture_tab_is_a_special_page_admin_only() {
+    // EB.12: capture rides the special-page machinery — an Admin-gated nav tab
+    // (reorderable in Manage Pages), NOT a hardcoded pill. Anonymous never sees
+    // it; /pages/capture redirects into the admin-gated route.
+    let server = spawn_test_server().await.expect("spawn");
+
+    let anon_html = reqwest::get(server.url("/")).await.unwrap().text().await.unwrap();
+    assert!(
+        !anon_html.contains("/pages/capture"),
+        "anonymous must not see the capture tab"
+    );
+
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+    let admin_html = admin
+        .get(server.url("/"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        admin_html.contains("/pages/capture"),
+        "admin sees the capture tab among the content tabs"
+    );
+
+    // The special row's markdown IS the redirect target.
+    let resp = admin.get(server.url("/pages/capture")).send().await.unwrap();
+    assert!(resp.status().is_redirection(), "special page redirects");
+    let loc = resp
+        .headers()
+        .get("location")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(loc, "/admin/capture");
+}

@@ -37,16 +37,6 @@
             <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-transparent">
                 <a class="text-sm text-div-grey uppercase hover:text-yellow" href="/login/logout">Logout</a>
             </li>
-            {% if auth_state.is_admin() %}
-            <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 border-b-transparent">
-                <a class="text-sm text-div-grey uppercase hover:text-yellow" href="/admin/capture" title="Quick capture" aria-label="Quick capture">{% call icons::camera() %}</a>
-            </li>
-            {% endif %}
-            {% if auth_state.is_admin() %}
-            <li class="bg-navy py-2 px-8 max-w-40 rounded-t font-display text-center border-b-2 {% if top_bar.active == "admin" %}border-b-yellow{% else %}border-b-transparent{% endif %}">
-                <a class="text-sm uppercase {% if top_bar.active == "admin" %}text-yellow{% else %}text-div-grey hover:text-yellow{% endif %}" href="/admin/pages" title="New page" aria-label="New page">{% call icons::plus() %}</a>
-            </li>
-            {% endif %}
         </ul>
         {% endif %}
     </div>
@@ -77,10 +67,6 @@
                 <a class="block border-l-4 px-4 py-2 text-sm uppercase font-display {% if top_bar.active == "admin" %}border-yellow text-yellow{% else %}border-transparent hover:bg-white/10{% endif %}" href="/admin/pages">Admin</a>
                 {% endif %}
                 <a class="block border-l-4 border-transparent px-4 py-2 text-sm uppercase font-display hover:bg-white/10" href="/login/logout">Logout</a>
-                {% if auth_state.is_admin() %}
-                <a class="block border-l-4 border-transparent px-4 py-2 text-sm uppercase font-display hover:bg-white/10" href="/admin/capture">{% call icons::camera() %} Capture</a>
-                <a class="block border-l-4 px-4 py-2 text-sm uppercase font-display {% if top_bar.active == "admin" %}border-yellow text-yellow{% else %}border-transparent hover:bg-white/10{% endif %}" href="/admin/pages">{% call icons::plus() %} New page</a>
-                {% endif %}
             </div>
             {% endif %}
         </div>
