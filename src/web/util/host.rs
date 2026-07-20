@@ -25,9 +25,32 @@ pub fn request_scheme() -> &'static str {
     if cfg!(debug_assertions) { "http" } else { "https" }
 }
 
+/// Canonical-host test shared by robots.txt (de-index beta) and the icon routes
+/// (EB.8: beta serves the INVERTED favicon/apple-touch-icon so the two pinned
+/// PWAs are tellable apart). Canonical = the registrable site host, its www
+/// variant, or localhost/127.0.0.1 (dev + tests behave like prod). Port is
+/// stripped first — beta rides `:8443`.
+pub fn is_canonical_host(host: &str, site_host: &str) -> bool {
+    let host_only = host.split(':').next().unwrap_or(host);
+    host_only == site_host
+        || host_only == format!("www.{site_host}")
+        || host_only == "localhost"
+        || host_only == "127.0.0.1"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_host_rule() {
+        assert!(is_canonical_host("hotchkiss.io", "hotchkiss.io"));
+        assert!(is_canonical_host("www.hotchkiss.io", "hotchkiss.io"));
+        assert!(is_canonical_host("localhost:8443", "hotchkiss.io"));
+        assert!(is_canonical_host("127.0.0.1:3000", "hotchkiss.io"));
+        assert!(!is_canonical_host("beta.hotchkiss.io:8443", "hotchkiss.io"));
+        assert!(!is_canonical_host("beta.hotchkiss.io", "hotchkiss.io"));
+    }
 
     fn hdrs(host: Option<&str>) -> HeaderMap {
         let mut h = HeaderMap::new();

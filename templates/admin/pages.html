@@ -11,16 +11,7 @@
 {% block content %}
 <div class="flex flex-row items-center justify-between mb-4">
     <h1 class="text-2xl font-display text-navy">Manage Pages</h1>
-    <div class="flex flex-row items-center gap-4">
-        <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/capture">Capture</a>
-        <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/media">Media</a>
-        <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/users">Users</a>
-        <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/api-keys">API Keys</a>
-        <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/analytics">Analytics</a>
-        <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/greylist">Greylist</a>
-        <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/dead-links">Dead links</a>
-        <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/logs">Logs</a>
-    </div>
+    {% include "partials/admin_nav.html" %}
 </div>
 
 <form hx-post="/pages" class="flex flex-row gap-2 mb-6">

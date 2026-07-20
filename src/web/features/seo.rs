@@ -197,14 +197,11 @@ pub async fn sitemap_xml(
 pub async fn robots_txt(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -> Response {
     let scheme = request_scheme();
     let host = request_host(&headers, &uri);
-    let host_only = host.split(':').next().unwrap_or(&host);
 
     // Canonical = the registrable site host (`hotchkiss.io`), its www variant, or
     // localhost (dev/tests). Anything else (beta.hotchkiss.io) is non-canonical.
-    let canonical = host_only == state.site_host
-        || host_only == format!("www.{}", state.site_host)
-        || host_only == "localhost"
-        || host_only == "127.0.0.1";
+    // Shared with the icon routes (EB.8) so the two hosts' identities can't drift.
+    let canonical = crate::web::util::host::is_canonical_host(&host, &state.site_host);
 
     let body = if canonical {
         format!(

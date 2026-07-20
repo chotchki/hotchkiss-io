@@ -114,11 +114,13 @@ pub async fn create_router(app_state: AppState) -> anyhow::Result<Router> {
     );
 
     // `.fallback` BEFORE `.with_state` so the handler can extract
-    // `State<AppState>` (it needs the pool to build the 404's nav).
+    // `State<AppState>` (it needs the pool to build the 404's nav). The static
+    // router merges before it too since EB.8 — the icon routes read
+    // `state.site_host` to serve beta's inverted identity icons.
     let router = router
         .fallback(crate::web::features::not_found::fallback)
-        .with_state(app_state)
-        .merge(static_content());
+        .merge(static_content())
+        .with_state(app_state);
 
     let router = if cfg!(debug_assertions) {
         router.layer(LiveReloadLayer::new())

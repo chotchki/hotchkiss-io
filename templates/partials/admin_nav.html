@@ -1,0 +1,35 @@
+{% import "partials/icons.html" as icons %}
+{# The admin section switcher (EB.7) — the hand-rolled link row outgrew a phone
+   viewport at 8 links. Inline wrap row on sm+; below that a native <details>
+   dropdown (same no-JS pattern as the site nav hamburger). Include where a page
+   wants the FULL switcher (the /admin/pages hub, /admin/capture); contextual
+   back-links on the other admin pages stay their own. #}
+<div class="hidden sm:flex flex-row flex-wrap items-center gap-x-4 gap-y-1">
+    <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/pages">Pages</a>
+    <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/capture">Capture</a>
+    <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/media">Media</a>
+    <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/media/import">Import</a>
+    <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/users">Users</a>
+    <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/api-keys">API Keys</a>
+    <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/analytics">Analytics</a>
+    <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/greylist">Greylist</a>
+    <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/dead-links">Dead links</a>
+    <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/logs">Logs</a>
+</div>
+<details class="sm:hidden relative">
+    <summary class="list-none [&::-webkit-details-marker]:hidden cursor-pointer inline-flex items-center gap-2 bg-navy text-div-grey px-3 py-2 rounded font-display uppercase text-sm">
+        {% call icons::bars() %} Admin
+    </summary>
+    <div class="absolute right-0 z-20 mt-1 bg-navy rounded shadow-lg flex flex-col min-w-44 overflow-hidden">
+        <a class="block px-4 py-2 text-sm text-div-grey uppercase font-display hover:bg-white/10" href="/admin/pages">Pages</a>
+        <a class="block px-4 py-2 text-sm text-div-grey uppercase font-display hover:bg-white/10" href="/admin/capture">Capture</a>
+        <a class="block px-4 py-2 text-sm text-div-grey uppercase font-display hover:bg-white/10" href="/admin/media">Media</a>
+        <a class="block px-4 py-2 text-sm text-div-grey uppercase font-display hover:bg-white/10" href="/admin/media/import">Import</a>
+        <a class="block px-4 py-2 text-sm text-div-grey uppercase font-display hover:bg-white/10" href="/admin/users">Users</a>
+        <a class="block px-4 py-2 text-sm text-div-grey uppercase font-display hover:bg-white/10" href="/admin/api-keys">API Keys</a>
+        <a class="block px-4 py-2 text-sm text-div-grey uppercase font-display hover:bg-white/10" href="/admin/analytics">Analytics</a>
+        <a class="block px-4 py-2 text-sm text-div-grey uppercase font-display hover:bg-white/10" href="/admin/greylist">Greylist</a>
+        <a class="block px-4 py-2 text-sm text-div-grey uppercase font-display hover:bg-white/10" href="/admin/dead-links">Dead links</a>
+        <a class="block px-4 py-2 text-sm text-div-grey uppercase font-display hover:bg-white/10" href="/admin/logs">Logs</a>
+    </div>
+</details>

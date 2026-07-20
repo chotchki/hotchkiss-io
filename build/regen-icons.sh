@@ -22,3 +22,9 @@ sips -p 512 512 --padColor "$NAVY" "$TMP" --out "$OUT/icon-maskable-512.png" >/d
 rm -f "$TMP"
 
 echo "regenerated: icon-192, icon-512, icon-maskable-512, apple-touch-icon"
+
+# Beta identity variants (EB.8): color-negated favicon + apple-touch-icon so the
+# beta PWA pin is tellable from prod on a home screen. Served host-aware by
+# static_content.rs on any non-canonical host. Requires ImageMagick (brew).
+magick "$OUT/favicon.ico" -channel RGB -negate "$OUT/favicon-beta.ico"
+magick "$OUT/apple-touch-icon.png" -channel RGB -negate "$OUT/apple-touch-icon-beta.png"
