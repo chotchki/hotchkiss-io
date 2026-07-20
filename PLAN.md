@@ -1,4 +1,4 @@
-<!-- plan-bridge:phase-high-water=EA -->
+<!-- plan-bridge:phase-high-water=EB -->
 # Plan
 
 Completed phases are in `PLAN_ARCHIVE.md` (most recent: Phase 12 — beta deployment on the mini (inverted `main`→beta / `v*`tag→prod flow); Phase 1 — `get_recs_by_name` `type=A` filter fix (ACME renewal hang); Phase 9 — Tailwind cleanup / dropped DaisyUI; Phase 8 — local/e2e test harness; Phase 7 — admin analytics dashboard; Phase 2 — DNS module testability; Phase 5 — dropped the `cookie-rs` fork; Phase 3 — `ifconfig.me` → Cloudflare `cdn-cgi/trace`; Phase 0 — push-to-deploy on the Mac mini; Phase 4 — `tray-wrapper` 0.4.1 bump).
@@ -96,20 +96,6 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] DG.3 - Up-next affordance: on page open, highlight/scroll to the last-listened volume (per-ref saved positions decide it)
 - [ ] DG.4 - Tests + CLAUDE.md delta + real-phone validation: screen-off auto-advance, lock-screen volume skip, series authoring convention documented
 - [x] DG.5 - Audio embed: cover-art + title header replaces the download button
-## Phase EB - Mobile camera capture — quick-post flow
-- [ ] EB.0 - Phase exit: from the PWA on a real iPhone — snap → original uploaded → draft created (or appended) — fast enough to use mid-print; editor papercuts fixed; tests + docs; beta dogfood then prod tag
-- [x] EB.1 - /admin/capture page: camera-first (accept=image/video + capture=environment, big touch targets), optional caption, mode select — new draft (default) vs append-to-recent-draft picker; camera button in the admin bar; uploads ORIGINALS via the canonical POST /media + upload-progress
-- [x] EB.2 - POST /admin/capture {ref, mode, target, caption} → PageWrite: new scheduled-draft blog post (CU far-future sentinel, date-derived title+slug) or append the embed to the chosen page via update_page (the ONE policy path — link rewrites + modified-date stamp for free); orphan media on a failed 2nd call is acceptable (admin console lists it)
-- [x] EB.3 - Editor papercuts: accept attr + a dedicated capture=environment camera button beside the library picker; insert ref at END when the textarea was never focused (today it lands at position 0 = top of the markdown); mobile toolbar touch targets
-- [ ] EB.4 - Real-iPhone verification on beta: snap from the PWA (HEIC path now normalized at ingest by EB.9 — confirm the embed renders off-Safari and the AVIF rungs minted), cellular-speed sanity with originals, capture-page one-handed usability
-- [x] EB.5 - Tests (integration: capture endpoints — draft-create, append, auth-gate; browser e2e: capture → draft with embed) + CLAUDE.md + note decided-out: Web Share Target (unsupported on iOS PWAs), client-side downscale (originals chosen)
-- [x] EB.6 - Library-only DEFAULT destination: a third mode that skips the page write (the POST /media upload IS the whole job); caption becomes the media title for later findability; banner links /admin/media; e2e covers default-library + explicit-draft legs
-- [x] EB.7 - Admin nav group collapses into a hamburger on mobile (same no-JS details pattern as the main tabs) — the camera/plus/Admin/Logout row outgrew a phone viewport
-- [x] EB.8 - Beta-inverted favicon + apple-touch-icon: host-aware icon serving (non-canonical host → inverted set, the robots.txt precedent) so the two pinned PWAs are tellable apart
-- [x] EB.9 - HEIC ingest normalization: keep the HEIC original stored, but derive a full-res AVIF + the 480/960 ladder at ingest so viewing never serves HEIC; embed src must prefer the AVIF; fixture test with a real HEIC
-- [x] EB.10 - Apply source orientation when deriving AVIF rungs: EXIF orientation on the image-crate path (JPEG), irot/display-matrix on the ffmpeg HEIC path — a sideways phone capture must render upright in every rung
-- [x] EB.11 - Remove the redundant "+ New page" nav pill (desktop + hamburger) — it duplicated the Admin pill's /admin/pages target and sat fat-finger-close to Capture
-- [x] EB.12 - Capture as a reorderable special page: migration seeds ('capture','/admin/capture',special) with min_role='Admin' — rides role-aware TopBar + /admin/pages drag-reorder; drop the hardcoded camera pill from both nav admin groups
 
 ## Backlog (not yet phased)
 
@@ -152,3 +138,4 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - **Add Cross-Origin-Resource-Policy to the media byte route so the isolated editor can fetch models** — deferred from CW.4 on 2026-07-03.
 - DJ.2 - PageId / MediaId (i64 newtypes) through the DAOs + call sites *(deferred from phase `DJ` on 2026-07-10)*
 - **Route `deadlinks/internal.rs`'s `/media/` resolve through the canonical `media_ref::parse_cover_reference`** — added 2026-07-10 (DJ.4 follow-up). The dead-link internal resolver has its own `strip_prefix("/media/embed/"|"/media/"|"/media/file/")` → `find_by_ref`/`find_by_url_key` shape, independent of the one canonical media-token parse DJ.4 established. Consolidating it is a real DRY win (one parse path for every `/media/*` URL), but it's a link-CHECK path (not hot/security) and its shape differs (it handles `/media/embed/` + roots the whole path), so it was scoped OUT of DJ.4 to keep that refactor's blast radius to `media_ref.rs` + two spots. Low priority.
+- **Sitemap: add the 3d section — the /3d index + /pages/3d/<slug> model children (mirror the projects arm in seo.rs::sitemap_xml; the 3d special row currently falls into the unknown-arm and emits NOTHING)** — added 2026-07-20.
