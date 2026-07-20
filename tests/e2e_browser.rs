@@ -1324,6 +1324,16 @@ async fn inline_editor_upload_inserts_media_ref_in_browser() {
     .await;
     assert!(survived, "the inline upload must NOT reload the page (unsaved markdown survives)");
 
+    // EB.3: the textarea was never FOCUSED (the marker was set via JS), so the
+    // embed must APPEND at the end — before the fix it landed at caret 0 (the
+    // top of the markdown), which is where every mobile upload ended up.
+    let appended: bool = js(
+        &page,
+        "(function(){var v=document.getElementById('page_markdown').value;return v.indexOf('before-edit-marker') === 0 && v.indexOf('\\n![](/media/') > 0;})()",
+    )
+    .await;
+    assert!(appended, "the embed must append at the END of a never-focused textarea, not the top");
+
     browser.close().await.ok();
     handle.await.ok();
     let _ = std::fs::remove_dir_all(&profile);
@@ -1413,5 +1423,82 @@ async fn stl_viewer_spin_respects_reduced_motion_and_stops_on_grab() {
     browser.close().await.ok();
     handle.await.ok();
     let _ = std::fs::remove_dir_all(&profile);
+    drop(server);
+}
+
+/// Phase EB: the quick-capture flow end-to-end in a real browser — capture.js
+/// uploads via POST /media, POSTs the ref to /admin/capture, and on a "new
+/// draft" result AUTO-SWITCHES to append mode so a multi-shot session accretes
+/// into ONE draft. Two files through the library input: the first mints a
+/// scheduled draft, the second must land in the SAME post.
+#[tokio::test]
+async fn quick_capture_creates_draft_then_accretes_in_browser() {
+    if !ffprobe_available() {
+        eprintln!("skipping: ffprobe not installed");
+        return;
+    }
+    let _e2e = e2e_lock().await;
+    let server: TestServer = spawn_test_server().await.expect("spawn harness");
+    let (mut browser, handle, profile) = launch().await;
+    let page = browser.new_page("about:blank").await.expect("new page");
+    add_virtual_authenticator(&page).await;
+    register_first_admin(&page, &server, "e2e-capture-admin").await;
+
+    page.goto(server.url("/admin/capture")).await.expect("goto /admin/capture");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // First shot → a new scheduled draft (mode defaults to "draft").
+    let f1 = write_temp_fixture("e2e-capture-1", b"first capture bytes");
+    set_file_input(&page, "#capture-library", &[&f1]).await;
+    wait_true(
+        &page,
+        "!document.getElementById('capture-result').classList.contains('hidden')",
+        "first capture → the result banner fills",
+    )
+    .await;
+    // The auto-switch: append mode is now selected with the fresh draft as target.
+    wait_true(
+        &page,
+        "document.querySelector('input[name=\"capture-mode\"][value=\"append\"]').checked",
+        "after a draft capture the mode auto-switches to append",
+    )
+    .await;
+    let target: String = js(&page, "document.getElementById('capture-target').value").await;
+    assert!(target.starts_with("capture-"), "append target is the new draft: {target}");
+
+    // Second shot → must accrete onto that same draft, not mint another.
+    let f2 = write_temp_fixture("e2e-capture-2", b"second capture bytes");
+    set_file_input(&page, "#capture-library", &[&f2]).await;
+    wait_true(
+        &page,
+        "document.getElementById('capture-status').textContent === 'Done'",
+        "second capture completes",
+    )
+    .await;
+
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM content_pages WHERE page_name LIKE 'capture-%'",
+    )
+    .fetch_one(&server.pool)
+    .await
+    .unwrap();
+    let markdown: String = sqlx::query_scalar(
+        "SELECT page_markdown FROM content_pages WHERE page_name LIKE 'capture-%'",
+    )
+    .fetch_one(&server.pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 1, "two shots, ONE draft (session accretion)");
+    assert_eq!(
+        markdown.matches("![](/media/").count(),
+        2,
+        "both embeds in the one draft: {markdown}"
+    );
+
+    browser.close().await.ok();
+    handle.await.ok();
+    let _ = std::fs::remove_dir_all(&profile);
+    let _ = std::fs::remove_file(&f1);
+    let _ = std::fs::remove_file(&f2);
     drop(server);
 }

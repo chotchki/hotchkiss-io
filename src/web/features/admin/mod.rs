@@ -8,6 +8,7 @@ use crate::web::{app_state::AppState, middleware::require_admin::require_admin};
 
 pub mod analytics;
 pub mod api_keys;
+pub mod capture;
 pub mod dead_links;
 pub mod greylist;
 pub mod logs;
@@ -27,6 +28,10 @@ pub fn admin_router() -> Router<AppState> {
         .route(
             "/analytics/reclassify-bots",
             post(analytics::reclassify_bots),
+        )
+        .route(
+            "/capture",
+            get(capture::show_capture).post(capture::capture_post),
         )
         .route("/pages", get(pages::show_admin_pages))
         .route("/pages/reorder", post(pages::reorder_pages))

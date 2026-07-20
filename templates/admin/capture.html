@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% import "partials/icons.html" as icons %}
+
+{% block title %}Quick Capture{% endblock %}
+
+{% block head %}
+<script src="/scripts/upload-progress.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<script src="/scripts/capture.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+{% endblock %}
+
+{% block content %}
+<div class="flex flex-row items-center justify-between mb-4">
+    <h1 class="text-2xl font-display text-navy">Quick Capture</h1>
+    <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/pages">Manage Pages</a>
+</div>
+
+<p class="text-sm text-navy/70 mb-4">Snap a photo into a blog draft — the full-size original uploads, the site serves resized AVIFs. Publish later from the editor.</p>
+
+<div class="flex flex-col gap-4 max-w-xl">
+  {# The two pickers: camera-first (capture=environment opens the camera on a
+     phone), library second. Big targets — this page exists for thumbs. #}
+  <label class="flex items-center justify-center gap-3 bg-yellow text-navy text-xl font-display uppercase rounded-lg p-6 cursor-pointer hover:bg-yellow/90">
+    {% call icons::camera() %} Take a photo
+    <input type="file" id="capture-camera" class="hidden" accept="image/*" capture="environment" />
+  </label>
+  <label class="flex items-center justify-center gap-3 bg-navy text-div-grey rounded-lg p-4 cursor-pointer hover:bg-navy/90">
+    {% call icons::photo_film() %} From the photo library
+    <input type="file" id="capture-library" class="hidden" accept="image/*" multiple />
+  </label>
+
+  <label class="flex flex-col gap-1">
+    <span class="text-sm font-display text-navy uppercase">Caption (optional, markdown)</span>
+    <input id="capture-caption" class="border border-navy/30 rounded px-3 py-2" placeholder="What is this?" />
+  </label>
+
+  <fieldset class="flex flex-col gap-2">
+    <legend class="text-sm font-display text-navy uppercase mb-1">Destination</legend>
+    <label class="flex items-center gap-2">
+      <input type="radio" name="capture-mode" value="draft" checked />
+      <span>New draft post</span>
+    </label>
+    <label class="flex items-center gap-2">
+      <input type="radio" name="capture-mode" value="append" {% if recent.is_empty() %}disabled{% endif %} />
+      <span>Add to:</span>
+      <select id="capture-target" class="border border-navy/30 rounded px-2 py-1 grow" {% if recent.is_empty() %}disabled{% endif %}>
+        {% for r in recent %}
+        <option value="{{r.slug}}">{{r.title}}{% if r.scheduled %} (draft){% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </fieldset>
+
+  <div class="flex flex-row items-center gap-3">
+    <span id="capture-status" class="text-sm text-navy/60"></span>
+    <progress id="capture-bar" max="100" value="0" class="hidden w-40"></progress>
+  </div>
+
+  {# Filled by capture.js after each successful post. #}
+  <div id="capture-result" class="hidden bg-white/60 border border-navy/20 rounded-lg p-4 text-sm"></div>
+</div>
+{% endblock %}

@@ -64,11 +64,22 @@ function setAsCoverId(attachment_id) {
 // the cursor, with NO page refresh, so unsaved markdown survives. (The old
 // attachment upload returned htmx_refresh(), which reloaded the page and ate
 // your edits.) Drop files onto the textarea, or use the toolbar button. ---
+// A never-focused textarea reports caret 0, so a mobile upload (tap the toolbar
+// button, never touch the text) silently landed the embed at the TOP of the
+// markdown (EB.3). Track real focus; until then, insert at the END.
+let editorCaretTouched = false;
+
 function insertMediaRef(ref) {
   const el = document.getElementById("page_markdown");
   if (!el) return;
-  const [start, end] = [el.selectionStart, el.selectionEnd];
-  el.setRangeText("![](/media/" + ref + ")", start, end, "end");
+  let [start, end] = [el.selectionStart, el.selectionEnd];
+  let text = "![](/media/" + ref + ")";
+  if (!editorCaretTouched) {
+    start = el.value.length;
+    end = start;
+    if (start > 0 && !el.value.endsWith("\n")) text = "\n" + text;
+  }
+  el.setRangeText(text, start, end, "end");
   el.focus();
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
@@ -133,16 +144,22 @@ function uploadMediaFiles(files) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  const input = document.getElementById("media-upload-input");
-  if (input) {
-    input.addEventListener("change", () => {
-      uploadMediaFiles(input.files);
-      input.value = "";
-    });
+  // Library picker + the camera capture input (EB.3) share the upload path.
+  for (const id of ["media-upload-input", "media-capture-input"]) {
+    const input = document.getElementById(id);
+    if (input) {
+      input.addEventListener("change", () => {
+        uploadMediaFiles(input.files);
+        input.value = "";
+      });
+    }
   }
   // Drag files onto the markdown box → upload + insert at the drop.
   const ta = document.getElementById("page_markdown");
   if (ta) {
+    ta.addEventListener("focus", () => {
+      editorCaretTouched = true;
+    });
     ta.addEventListener("dragover", (e) => {
       if (
         e.dataTransfer &&

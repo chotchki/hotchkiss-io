@@ -811,7 +811,7 @@ fn error_span(msg: &str) -> String {
 /// helpers (DR.4) so each resolves the item ONCE, then picks a variant through the
 /// shared `media_select` — the SAME selector the embed uses, so covers + embeds
 /// can't drift on which image wins.
-async fn cover_media_id_for(pool: &sqlx::SqlitePool, page_id: i64) -> Option<i64> {
+pub(crate) async fn cover_media_id_for(pool: &sqlx::SqlitePool, page_id: i64) -> Option<i64> {
     sqlx::query_scalar!(
         r#"SELECT page_cover_media_id AS "id!" FROM content_pages
            WHERE page_id = ?1 AND page_cover_media_id IS NOT NULL"#,

@@ -89,13 +89,17 @@
   <label class="flex flex-col gap-1">
     <span class="text-sm font-display text-navy uppercase flex flex-row items-center gap-3">
       Markdown
-      <button type="button" onclick="addLink()" class="text-navy/70 hover:text-navy" title="Insert link">{% call icons::link() %}</button>
-      <button type="button" onclick="addImage()" class="text-navy/70 hover:text-navy" title="Insert image">{% call icons::image() %}</button>
-      <button type="button" onclick="addChildIndex()" class="text-navy/70 hover:text-navy" title="Insert a children listing (```children — lists this page's child pages as cards)">{% call icons::bars() %}</button>
-      <button type="button" onclick="addDiagram()" class="text-navy/70 hover:text-navy" title="Insert a d2 diagram (```d2)">{% call icons::diagram_project() %}</button>
-      <label class="text-navy/70 hover:text-navy cursor-pointer" title="Upload media (image/video/STL) and insert it — or just drag files onto the box">
+      <button type="button" onclick="addLink()" class="text-navy/70 hover:text-navy p-1.5 -m-1.5" title="Insert link">{% call icons::link() %}</button>
+      <button type="button" onclick="addImage()" class="text-navy/70 hover:text-navy p-1.5 -m-1.5" title="Insert image">{% call icons::image() %}</button>
+      <button type="button" onclick="addChildIndex()" class="text-navy/70 hover:text-navy p-1.5 -m-1.5" title="Insert a children listing (```children — lists this page's child pages as cards)">{% call icons::bars() %}</button>
+      <button type="button" onclick="addDiagram()" class="text-navy/70 hover:text-navy p-1.5 -m-1.5" title="Insert a d2 diagram (```d2)">{% call icons::diagram_project() %}</button>
+      <label class="text-navy/70 hover:text-navy cursor-pointer p-1.5 -m-1.5" title="Upload media (image/video/STL) and insert it — or just drag files onto the box">
         {% call icons::photo_film() %}
         <input type="file" id="media-upload-input" class="hidden" multiple />
+      </label>
+      <label class="text-navy/70 hover:text-navy cursor-pointer p-1.5 -m-1.5" title="Take a photo and insert it (opens the camera on a phone)">
+        {% call icons::camera() %}
+        <input type="file" id="media-capture-input" class="hidden" accept="image/*" capture="environment" />
       </label>
       <span id="media-upload-status" class="text-xs text-navy/50 normal-case font-normal"></span>
       <progress id="media-upload-bar" max="100" value="0" class="hidden align-middle w-32"></progress>

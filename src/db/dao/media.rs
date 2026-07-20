@@ -216,6 +216,28 @@ impl MediaDao {
         Ok(media)
     }
 
+    /// Lookup by row id — for resolving a `page_cover_media_id` back to its ref
+    /// (the capture append path re-carries the existing cover through update_page).
+    pub async fn find_by_id(
+        executor: impl SqliteExecutor<'_>,
+        media_id: i64,
+    ) -> Result<Option<MediaDao>> {
+        let media = query_as!(
+            MediaDao,
+            r#"
+            SELECT media_id as "media_id!", media_ref, kind, title,
+                   width, height, duration_ms, created_at, min_role, chapters
+            FROM media
+            WHERE media_id = ?1
+            "#,
+            media_id
+        )
+        .fetch_optional(executor)
+        .await?;
+
+        Ok(media)
+    }
+
     /// Newest-first — the media library listing.
     #[allow(dead_code)] // wired by the media library UI (BZ.7)
     pub async fn find_all(executor: impl SqliteExecutor<'_>) -> Result<Vec<MediaDao>> {
