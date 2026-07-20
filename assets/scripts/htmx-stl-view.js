@@ -34,6 +34,11 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
       0.1,
       1000,
     );
+    // Z-up scene: printable models are Z-up, and OrbitControls orbits around
+    // camera.up — so auto-rotate spins about the model's own vertical (a true
+    // turntable, not the Y-orbit rotisserie that tumbled over top and bottom).
+    // MUST precede `new OrbitControls` (it captures up at construction).
+    camera.up.set(0, 0, 1);
 
     renderer.setSize(elem.clientWidth, elem.clientHeight);
     elem.appendChild(renderer.domElement);
@@ -247,14 +252,16 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
     // offset the camera, if desired (to avoid filling the whole canvas)
     if (offset !== undefined && offset !== 0) cameraZ *= offset;
 
-    camera.position.set(0, 0, cameraZ);
-    // Random start azimuth on the orbit circle, 30°–330° from the stock +Z
-    // view — printable models are Z-up, so starting AT +Z opens every load
-    // staring down at the print's top plane. Distance (and thus the far
-    // plane math below) is unchanged; controls.update() re-aims at target.
-    camera.position.applyAxisAngle(
-      new THREE.Vector3(0, 1, 0),
-      (Math.PI / 180) * (30 + Math.random() * 300),
+    // Turntable framing (Z-up scene, see camera.up at creation): park the
+    // camera 45–60° polar off +Z — a 3/4 view, never top-down, never dead
+    // side-on — at a random azimuth per load. Distance stays cameraZ so the
+    // fit/far-plane math below holds; controls.update() re-aims at target.
+    var polar = (Math.PI / 180) * (45 + Math.random() * 15);
+    var azimuth = Math.random() * 2 * Math.PI;
+    camera.position.set(
+      cameraZ * Math.sin(polar) * Math.cos(azimuth),
+      cameraZ * Math.sin(polar) * Math.sin(azimuth),
+      cameraZ * Math.cos(polar),
     );
 
     // set the far plane of the camera so that it easily encompasses the whole object
