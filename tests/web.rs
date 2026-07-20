@@ -1935,6 +1935,46 @@ async fn media_patch_replaces_variant_set_in_place() {
     assert!(lib.contains("Widget"), "title preserved across the swap");
 }
 
+/// Regression (model-save 500): the fab-gui editor's SAVE (`PUT …/variants`) can send
+/// BYTE-IDENTICAL file parts in ONE request (an unchanged export re-sent alongside
+/// another). The replace loop must DEDUP them by content hash like `append_variants`
+/// does — else the 2nd `create` violates `UNIQUE(media_id, sha256)` → a 500 on Save.
+#[tokio::test]
+async fn replace_variants_dedups_byte_identical_parts() {
+    if !ffprobe_available() {
+        eprintln!("skipping replace-variants dedup test: ffprobe not found");
+        return;
+    }
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin.post(server.url("/test/login?role=Admin")).send().await.unwrap();
+
+    // Upload an original → ref.
+    let orig: Vec<u8> = (0..1024u32).map(|i| (i.wrapping_mul(3)) as u8).collect();
+    let up: serde_json::Value = admin
+        .post(server.url("/media"))
+        .multipart(reqwest::multipart::Form::new().part("file", bin_part(orig, "m.bin")))
+        .send().await.unwrap().json().await.unwrap();
+    let media_ref = up["ref"].as_str().unwrap().to_string();
+
+    // PUT the SAME bytes TWICE in one request (different filenames, identical content) —
+    // the fab-gui duplicate-part case. Must succeed + collapse to ONE variant.
+    let dup: Vec<u8> = (0..2048u32).map(|i| (i.wrapping_mul(11).wrapping_add(2)) as u8).collect();
+    let form = reqwest::multipart::Form::new()
+        .part("f1", bin_part(dup.clone(), "model.bin"))
+        .part("f2", bin_part(dup.clone(), "model-copy.bin"));
+    let resp = admin
+        .put(server.url(&format!("/media/{media_ref}/variants")))
+        .multipart(form)
+        .send().await.unwrap();
+    let status = resp.status();
+    let body = resp.text().await.unwrap();
+    assert_eq!(status, StatusCode::OK, "identical parts dedup, not a 500: {body}");
+    let j: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let n = j["variants"].as_array().map(|a| a.len()).unwrap_or(0);
+    assert_eq!(n, 1, "the two byte-identical parts collapsed to ONE variant, got {n}");
+}
+
 /// Phase DO/DQ guards: `PUT /media/<ref>/variants` is Admin-only (inherited from the
 /// mutation layer, no /media-specific rule), 404s an unknown ref, 400s an empty body
 /// (a replace-to-nothing is a DELETE), and the freshly-minted variants INHERIT the

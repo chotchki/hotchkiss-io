@@ -545,7 +545,15 @@ pub async fn replace_media_variants(
     // so a mid-flight failure never leaves the item with a mix of old + new.
     let mut tx = state.pool.begin().await?;
     MediaVariantDao::delete_all_for_media(&mut *tx, item.media_id).await?;
+    // Dedup WITHIN the batch (mirrors `append_variants`): the fab-gui editor's save
+    // can PUT two byte-identical files (an unchanged export re-sent alongside another),
+    // and a second `create` with the same sha would violate UNIQUE(media_id, sha256) →
+    // a 500 on Save. A variant is content-addressed, so identical bytes ARE one variant.
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for f in &ingested {
+        if !seen.insert(f.sha.as_str()) {
+            continue;
+        }
         let url_key = media_url_key(&hmac_key, &f.sha)?;
         MediaVariantDao::create(
             &mut *tx,
