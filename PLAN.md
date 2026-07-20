@@ -1,4 +1,4 @@
-<!-- plan-bridge:phase-high-water=EB -->
+<!-- plan-bridge:phase-high-water=ED -->
 # Plan
 
 Completed phases are in `PLAN_ARCHIVE.md` (most recent: Phase 12 — beta deployment on the mini (inverted `main`→beta / `v*`tag→prod flow); Phase 1 — `get_recs_by_name` `type=A` filter fix (ACME renewal hang); Phase 9 — Tailwind cleanup / dropped DaisyUI; Phase 8 — local/e2e test harness; Phase 7 — admin analytics dashboard; Phase 2 — DNS module testability; Phase 5 — dropped the `cookie-rs` fork; Phase 3 — `ifconfig.me` → Cloudflare `cdn-cgi/trace`; Phase 0 — push-to-deploy on the Mac mini; Phase 4 — `tray-wrapper` 0.4.1 bump).
@@ -96,18 +96,12 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] DG.3 - Up-next affordance: on page open, highlight/scroll to the last-listened volume (per-ref saved positions decide it)
 - [ ] DG.4 - Tests + CLAUDE.md delta + real-phone validation: screen-off auto-advance, lock-screen volume skip, series authoring convention documented
 - [x] DG.5 - Audio embed: cover-art + title header replaces the download button
-## Phase EC - API-key hygiene — purge revoked keys
-added 2026-07-20.
-- [ ] EC.0 - Phase exit: revoked keys vanish from /admin/api-keys 7 days after revocation (DELETED, not hidden); daily tick; tests + docs; shipped
-- [x] EC.1 - ApiKeyDao::purge_revoked(pool) — DELETE WHERE revoked_at < now-7d, returns count; DAO tests: 8d purged / 1d kept / live kept
-- [x] EC.2 - Wire the purge into the daily maintenance tick beside the request_log prune (fail-soft, logged, detached from try_join!)
-- [ ] EC.3 - CLAUDE.md delta (api-keys paragraph gains the 7-day purge) + beta push
 ## Phase ED - Image editing — rotate + crop as re-runnable derivation
 - [ ] ED.0 - Phase exit: rotate + crop from the admin media library, applied as RE-DERIVATION of the AVIF rungs (original untouched, content-addressed store intact); the prod sideways image fixed with it; tests + docs; shipped
 - [ ] ED.1 - Re-derive seam FIRST: per-item "Re-derive variants" action (drop derived image variants + re-run add_derived_variants, the replace tx pattern; spawned + banner) — standalone it re-mints pre-EB.10 sideways rungs with the orientation-aware pipeline; edits ride this same seam
-- [ ] ED.2 - Edit-params storage: media columns (rotate quadrant + normalized crop rect) — ONE edit state per item, no history (the complete-replace philosophy); applied in the derivation between decode_source and rung minting; migration
+- [ ] ED.2 - Metadata JSON column (chris's call): migration adds media.metadata, MIGRATES the 0027 chapters column into it (metadata.chapters; ALTER DROP the old column — SQLite 3.35+), edit params live at metadata.edit {rotate quadrant, 4 normalized corner points}; ONE typed serde struct (MediaMetadata) decoded fail-soft, the DJ newtype spirit
 - [ ] ED.3 - Rotate UI: 90° CW/CCW buttons on the media library item view → params write + spawned re-derive (no crop box needed for the common case)
-- [ ] ED.4 - Crop UI: first-party vanilla-JS crop box over the preview (the diagram-zoom class of tool), stores a normalized rect; server clamps/validates before deriving
+- [ ] ED.4 - Crop UI incl. NON-UNIFORM (perspective) crop: evaluated Cropper.js — rect+rotate only, can't do 4-point, so two tools for one job; instead a first-party 4-corner drag overlay (small vanilla JS, house style) + SERVER-side homography warp via imageproc Projection::from_control_points in the derivation — an angled sheet of paper lays flat; an axis-aligned rect crop is the degenerate case of the same 4 corners
 - [ ] ED.5 - Tests (derivation applies params; re-derive replaces rungs; covers/embeds pick up new rungs) + CLAUDE.md + beta dogfood → prod tag; verify the prod image upright
 
 ## Backlog (not yet phased)

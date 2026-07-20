@@ -1120,3 +1120,14 @@ Posting a photo from the phone was a papercut chain (navigate → ?edit → a ba
 - [x] EB.11 - Remove the redundant "+ New page" nav pill (desktop + hamburger) — it duplicated the Admin pill's /admin/pages target and sat fat-finger-close to Capture
 - [x] EB.12 - Capture as a reorderable special page: migration seeds ('capture','/admin/capture',special) with min_role='Admin' — rides role-aware TopBar + /admin/pages drag-reorder; drop the hardcoded camera pill from both nav admin groups
 
+---
+
+## 2026-07-20
+
+## Phase EC - API-key hygiene — purge revoked keys
+added 2026-07-20.
+- [x] EC.0 - Phase exit: revoked keys vanish from /admin/api-keys 7 days after revocation (DELETED, not hidden); daily tick; tests + docs; shipped
+- [x] EC.1 - ApiKeyDao::purge_revoked(pool) — DELETE WHERE revoked_at < now-7d, returns count; DAO tests: 8d purged / 1d kept / live kept
+- [x] EC.2 - Wire the purge into the daily maintenance tick beside the request_log prune (fail-soft, logged, detached from try_join!)
+- [x] EC.3 - CLAUDE.md delta (api-keys paragraph gains the 7-day purge) + beta push
+
