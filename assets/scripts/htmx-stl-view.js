@@ -63,8 +63,8 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     controls.autoRotate = !reduceMotion;
     controls.autoRotateSpeed = 1.0;
-    // Random direction per load so the spin doesn't read as canned. The
-    // STARTING face stays authored (data-rotation*), so no random azimuth.
+    // Random direction per load so the spin doesn't read as canned; the
+    // start azimuth is randomized too (see fitCameraToCenteredObject).
     if (Math.random() < 0.5) {
       controls.autoRotateSpeed = -controls.autoRotateSpeed;
     }
@@ -248,6 +248,14 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
     if (offset !== undefined && offset !== 0) cameraZ *= offset;
 
     camera.position.set(0, 0, cameraZ);
+    // Random start azimuth on the orbit circle, 30°–330° from the stock +Z
+    // view — printable models are Z-up, so starting AT +Z opens every load
+    // staring down at the print's top plane. Distance (and thus the far
+    // plane math below) is unchanged; controls.update() re-aims at target.
+    camera.position.applyAxisAngle(
+      new THREE.Vector3(0, 1, 0),
+      (Math.PI / 180) * (30 + Math.random() * 300),
+    );
 
     // set the far plane of the camera so that it easily encompasses the whole object
     const minZ = boundingBox.min.z;
