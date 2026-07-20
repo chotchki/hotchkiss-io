@@ -1,4 +1,4 @@
-<!-- plan-bridge:phase-high-water=DZ -->
+<!-- plan-bridge:phase-high-water=EA -->
 # Plan
 
 Completed phases are in `PLAN_ARCHIVE.md` (most recent: Phase 12 — beta deployment on the mini (inverted `main`→beta / `v*`tag→prod flow); Phase 1 — `get_recs_by_name` `type=A` filter fix (ACME renewal hang); Phase 9 — Tailwind cleanup / dropped DaisyUI; Phase 8 — local/e2e test harness; Phase 7 — admin analytics dashboard; Phase 2 — DNS module testability; Phase 5 — dropped the `cookie-rs` fork; Phase 3 — `ifconfig.me` → Cloudflare `cdn-cgi/trace`; Phase 0 — push-to-deploy on the Mac mini; Phase 4 — `tray-wrapper` 0.4.1 bump).

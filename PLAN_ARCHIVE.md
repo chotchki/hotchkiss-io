@@ -1080,3 +1080,21 @@ The child-index card cover is a fixed 3:4 (portrait) — right for book/manga co
 - [x] DZ.6 - Cover whitespace ROOT CAUSE (a headless-screenshot + CDP box-model probe found it): the card grid renders inside `<div class="prose">` on the `/pages/<…>` fence path, so Tailwind Typography styled the cover `<img>` with article margins (`margin: 2em/1em`) → the whitespace above/below every cover (NOT grid-stretch; `items-start` from DZ.5 was a red herring for this). Fix: wrap the child-index widget in `not-prose` (it's a UI component, not article prose; harmless on the section/library routes with no prose). Regression: `children_fence_aspect_controls_the_card_shape` asserts `not-prose`.
 - [x] DZ.5 - Beta-review fixes: (a) card whitespace — `items-start` on the grids so a card doesn't stretch to the tallest sibling in its row; (b) the card widget is READ-ONLY (drag-reorder removed) — reordering is now a drag+position LIST in the EDITOR (`?edit`, the `/admin/pages` grip pattern), so the Preview is a faithful read-only render; (c) LONG lists — a per-row numeric POSITION input (type a number → the row jumps + the reorder POSTs) beside grip-drag, so a 271-volume series is reorderable without dragging across hundreds of rows; (d) `htmx-sortable.js` gains grip-handle detection (so the number input stays editable) + renumber-after-reorder. Test updated to `?edit` reorder list + read-only widget. (Also: fab-gui pin 0.18.0 → 0.19.0.)
 
+---
+
+## 2026-07-20
+
+## Phase EA - STL viewer animation polish
+
+The STL viewer's attract spin was all OrbitControls defaults, and `update()` ran with NO delta — a fixed angle per rAF call, so every 120Hz display (any recent iPhone/Mac) spun the model at DOUBLE the intended speed; the orbit was also a Y-axis rotisserie over a Z-up print, so every load opened staring down at the top plane. Now: delta-corrected wall-clock rotation (autoRotateSpeed 1.0 = 60s/orbit), a Z-up-native scene (`camera.up=Z` BEFORE OrbitControls — it captures up at construction) so the spin is a TRUE turntable about the model's own vertical, a 45–60°-polar 3/4 opening view at a random azimuth + random direction per load, first grab kills the spin for good, and `prefers-reduced-motion` disables it entirely. A `data-autorotate` seam on `.stl-view` makes the flags e2e-assertable (CDP-emulated reduced-motion boots "off", a real CDP drag flips "on"→"off"); spin RATE stays eyeball-verified — asserting speed from pixels is flake bait. `data-rotation*` compensation was a non-issue (zero emitters set it).
+
+- [x] EA.0 - Phase exit: attract-spin is frame-rate-independent, slower, hands off after first grab, honors prefers-reduced-motion; eyeballed under bacon on a 120Hz display
+- [x] EA.1 - Frame-rate-independent rotation: THREE.Clock + controls.update(delta) in both animate loops (r173 supports it; kills the 120Hz double-speed bug)
+- [x] EA.2 - Slow the turntable: explicit autoRotateSpeed ~1.0 (60s/orbit) instead of the default 2.0 — one-line retune after eyeballing
+- [x] EA.3 - Auto-rotate stops permanently on first user interaction (controls 'start' listener) — the spin is an attract loop, never wrestles the camera back
+- [x] EA.4 - Honor prefers-reduced-motion: reduce → no auto-rotate at all
+- [x] EA.5 - biome check + browser e2e if cheap (CDP setEmulatedMedia for reduced-motion) else manual bacon verify; docs delta if warranted
+- [x] EA.6 - Randomize spin direction per load (sign-flip autoRotateSpeed); starting face stays authored (data-rotation*)
+- [x] EA.7 - Random start azimuth on the orbit circle (30°–330° off the stock +Z view) — never opens staring down at a Z-up print's top plane
+- [x] EA.8 - True turntable: Z-up scene (camera.up=Z before OrbitControls) so auto-rotate spins about the model's Z; camera parks 45–60° polar off Z at random azimuth (supersedes EA.7's Y-orbit azimuth)
+
