@@ -589,7 +589,10 @@ re-derive.
   target dims = averaged opposing edge lengths). An axis-aligned quad is a
   plain crop; a skewed one lays an angled sheet of paper flat. The overlay UI
   (`media-crop.js`, first-party — Cropper.js was evaluated and rejected:
-  rect-only, can't 4-point) toggles RECT ⇄ 4-POINT over the same storage.
+  rect-only, can't 4-point) toggles RECT ⇄ 4-POINT over the same storage,
+  mounted INLINE on the per-item edit page `GET /admin/media/{ref}` (ED.6 —
+  rename/visibility/streams/delete live there too; NO modals, no prompt()).
+  The library cards are browse+copy only and link to it.
 - **Edited ⇒ the source leaves the ladder**: an edited item always mints the
   capped full rung (the EB.9 `NON_WEB_FULL_WIDTH_CAP` rule generalized) and the
   render swaps to `image_ladder_edited` — the source variant (picked by the

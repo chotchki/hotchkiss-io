@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% import "partials/icons.html" as icons %}
+
+{% block title %}Edit media — {{ title }}{% endblock %}
+
+{% block head %}
+<script defer src="/scripts/upload-progress.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<script defer src="/scripts/media-upload.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<script defer src="/scripts/media-crop.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+{% endblock %}
+
+{% block content %}
+<div class="flex flex-row items-center justify-between mb-4">
+    <h1 class="text-2xl font-display text-navy break-words">{{ title }}</h1>
+    <a class="text-sm text-navy underline hover:text-navy/70" href="/admin/media">&larr; Media library</a>
+</div>
+
+<p id="media-upload-status" class="text-navy text-sm mb-3"></p>
+<progress id="media-upload-bar" max="100" value="0" class="hidden w-64 mb-3"></progress>
+
+<div class="flex flex-col gap-6 max-w-3xl">
+    {# Preview — playable for video, image otherwise; kind icon as fallback. #}
+    {% if let Some(html) = play_html %}
+    {{ html|safe }}
+    {% else if let Some(key) = preview_url_key %}
+    <img src="/media/file/{{ key }}" class="max-w-full max-h-96 object-contain rounded border border-navy/20 self-start" alt="{{ title }}" />
+    {% endif %}
+    <span class="text-[10px] bg-navy text-yellow px-1.5 py-0.5 rounded uppercase font-display self-start">{{ kind }}</span>
+
+    <label class="flex flex-col gap-1">
+        <span class="text-sm font-display text-navy uppercase">Title</span>
+        <span class="flex flex-row gap-2">
+            <input id="edit-title" class="border border-navy/30 rounded px-3 py-2 grow" value="{{ title }}" />
+            <button type="button" class="save-title bg-navy hover:bg-navy/90 text-div-grey px-4 py-2 rounded text-sm"
+                data-media-ref="{{ media_ref }}">Save</button>
+        </span>
+        <span class="text-xs text-navy/60">The URL ref stays fixed — embeds never break on rename.</span>
+    </label>
+
+    <label class="flex flex-col gap-1 max-w-xs">
+        <span class="text-sm font-display text-navy uppercase">Visibility</span>
+        <span class="relative block">
+            <select class="media-visibility w-full appearance-none border border-navy/30 rounded px-2 py-2 pr-7 text-sm"
+                data-media-ref="{{ media_ref }}" title="Who can fetch this item's bytes">
+                <option value="Public"{% if visibility_rank == 0 %} selected{% endif %}>Public</option>
+                <option value="Registered"{% if visibility_rank == 1 %} selected{% endif %}>Registered</option>
+                <option value="Family"{% if visibility_rank == 2 %} selected{% endif %}>Family</option>
+                <option value="Admin"{% if visibility_rank == 3 %} selected{% endif %}>Admin-only</option>
+            </select>
+            <span class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-navy/60">{% call icons::chevron_down() %}</span>
+        </span>
+    </label>
+
+    <div class="flex flex-col gap-2">
+        <span class="text-sm font-display text-navy uppercase">Stored streams</span>
+        {% for v in variants %}
+        <div class="flex items-center gap-2 text-xs bg-navy/10 text-navy px-2 py-1.5 rounded">
+            <span class="font-mono break-all grow">{{ v.label }}</span>
+            <span class="text-navy/60 whitespace-nowrap">{{ v.size }}</span>
+            <button type="button" class="delete-variant text-red-700 hover:text-red-900 px-1 leading-none"
+                data-media-ref="{{ media_ref }}" data-url-key="{{ v.url_key }}"
+                title="Delete stream" aria-label="Delete stream">&times;</button>
+        </div>
+        {% endfor %}
+        <label class="self-start text-sm bg-navy/80 hover:bg-navy text-div-grey px-3 py-1.5 rounded cursor-pointer"
+            title="Add another encode (e.g. the HEVC), or an image as the poster">
+            {% call icons::plus() %} Add an encode
+            <input type="file" class="add-encode-input hidden" data-media-ref="{{ media_ref }}" multiple />
+        </label>
+    </div>
+
+    {% if is_image %}
+    <div class="flex flex-col gap-3 border-t border-navy/20 pt-4">
+        <span class="text-sm font-display text-navy uppercase">Edit image</span>
+        <p class="text-xs text-navy/60">Edits bake into the derived variants only — the stored original is never touched. Rotating back to 0 (or resetting the crop) is a full undo.</p>
+        <div class="flex flex-row flex-wrap gap-2">
+            <button type="button" class="rotate-media text-sm bg-navy hover:bg-navy/90 text-div-grey px-3 py-1.5 rounded"
+                data-media-ref="{{ media_ref }}" data-dir="ccw" title="Rotate 90 counter-clockwise">&#10226; Rotate left</button>
+            <button type="button" class="rotate-media text-sm bg-navy hover:bg-navy/90 text-div-grey px-3 py-1.5 rounded"
+                data-media-ref="{{ media_ref }}" data-dir="cw" title="Rotate 90 clockwise">&#10227; Rotate right</button>
+            <button type="button" class="rederive-media text-sm bg-navy hover:bg-navy/90 text-div-grey px-3 py-1.5 rounded"
+                data-media-ref="{{ media_ref }}"
+                title="Re-derive the resized AVIF variants from the original (picks up orientation/edit changes)">Re-derive variants</button>
+        </div>
+        {% if let Some(pk) = preview_url_key %}
+        {# The 4-corner crop tool mounts INLINE here (media-crop.js) — rect or
+           4-point perspective, no modal. #}
+        <div id="crop-tool" data-media-ref="{{ media_ref }}" data-preview-key="{{ pk }}"
+            {% if has_crop %}data-has-crop="1"{% endif %}></div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="border-t border-navy/20 pt-4">
+        <button type="button" class="delete-media bg-red-600 hover:bg-red-700 text-div-grey px-4 py-2 rounded text-sm"
+            data-media-ref="{{ media_ref }}" data-redirect="/admin/media"
+            title="Delete this media item and all its streams">Delete this media item</button>
+    </div>
+</div>
+{% endblock %}

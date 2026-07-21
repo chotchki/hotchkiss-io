@@ -67,6 +67,8 @@ pub struct StorageRow {
     pub below_margin: bool,
 }
 
+/// The library card (ED.6: BROWSE + COPY only — management lives on the per-item
+/// edit page the card links to).
 pub struct MediaCard {
     pub media_ref: String,
     pub title: String,
@@ -75,7 +77,6 @@ pub struct MediaCard {
     pub thumb_url_key: Option<String>,
     /// Video kind: the playable `<video>` element (reuses the embed render).
     pub play_html: Option<String>,
-    pub variants: Vec<VariantRow>,
     /// Lowercased "ref title" for the client-side name filter.
     pub search: String,
     /// First variant's HMAC `url_key` → the absolute `/media/file/<key>` direct
@@ -83,16 +84,6 @@ pub struct MediaCard {
     pub share_url_key: Option<String>,
     /// The gate badge label (DC.5), from the fail-closed decode — `None` = public.
     pub visibility: Option<&'static str>,
-    /// The decoded rank, for the selector's selected-option logic (0..=3).
-    pub visibility_rank: u8,
-    /// Image kind: the LARGEST web-displayable variant, the crop overlay's
-    /// preview (ED.4 — big enough to place corners on; normalized coords make
-    /// exact resolution irrelevant).
-    pub preview_url_key: Option<String>,
-    /// A crop quad is currently applied (ED.4) — the overlay offers Reset first,
-    /// since its preview shows the CROPPED rungs (re-cropping over a cropped
-    /// view would compound).
-    pub has_crop: bool,
 }
 
 pub struct VariantRow {
@@ -101,6 +92,63 @@ pub struct VariantRow {
     pub url_key: String,
     pub label: String,
     pub size: String,
+}
+
+/// The per-item EDIT page (ED.6) — rename, visibility, variant management, and
+/// for images the rotate/re-derive/crop tools, all in normal page flow. The
+/// library card links here; NOTHING is a modal (chris's explicit call — the
+/// crop overlay + the rename prompt() both died for this page).
+#[derive(Template)]
+#[template(path = "admin/media_edit.html")]
+pub struct MediaEditTemplate {
+    pub top_bar: TopBar,
+    pub auth_state: AuthenticationState,
+    pub media_ref: String,
+    pub title: String,
+    pub kind: String,
+    pub visibility_rank: u8,
+    pub variants: Vec<VariantRow>,
+    pub play_html: Option<String>,
+    pub preview_url_key: Option<String>,
+    pub has_crop: bool,
+    pub is_image: bool,
+}
+
+pub async fn show_media_edit(
+    State(state): State<AppState>,
+    session_data: SessionData,
+    Path(media_ref): Path<String>,
+) -> Result<Response, AppError> {
+    let Some(m) = MediaDao::find_by_ref(&state.pool, media_ref.trim()).await? else {
+        return Ok((StatusCode::NOT_FOUND, "no such media").into_response());
+    };
+    let variants = MediaVariantDao::find_by_media_id(&state.pool, m.media_id).await?;
+    let play_html = (m.kind == "video").then(|| render_embed_html(&m, &variants));
+    let preview_url_key = media_select::image_ladder(&variants)
+        .last()
+        .map(|v| v.url_key.clone());
+    let variant_rows = variants
+        .iter()
+        .map(|v| VariantRow {
+            url_key: v.url_key.clone(),
+            label: v.codecs.clone().unwrap_or_else(|| v.mime.clone()),
+            size: format_bytes(v.bytes),
+        })
+        .collect();
+    let template = MediaEditTemplate {
+        top_bar: TopBar::create(&state.pool, "admin", session_data.auth_state.role()).await?,
+        auth_state: session_data.auth_state,
+        media_ref: m.media_ref.clone(),
+        title: m.title.clone().unwrap_or_else(|| m.media_ref.clone()),
+        kind: m.kind.clone(),
+        visibility_rank: m.min_role_rank(),
+        variants: variant_rows,
+        play_html,
+        preview_url_key,
+        has_crop: m.meta().edit.and_then(|e| e.corners).is_some(),
+        is_image: m.kind == "image",
+    };
+    Ok(HtmlTemplate(template).into_response())
 }
 
 pub async fn show_media_library(
@@ -123,37 +171,20 @@ pub async fn show_media_library(
                 .map(|v| v.url_key.clone());
             (thumb, None)
         };
-        let variant_rows = variants
-            .iter()
-            .map(|v| VariantRow {
-                url_key: v.url_key.clone(),
-                label: v.codecs.clone().unwrap_or_else(|| v.mime.clone()),
-                size: format_bytes(v.bytes),
-            })
-            .collect();
         let title = m.title.clone().unwrap_or_else(|| m.media_ref.clone());
         let search = title.to_lowercase();
         // First variant's url_key → the absolute /media/file/<key> share link.
         let share_url_key = variants.first().map(|v| v.url_key.clone());
         let visibility = m.visibility_label();
-        let visibility_rank = m.min_role_rank();
-        let preview_url_key = media_select::image_ladder(&variants)
-            .last()
-            .map(|v| v.url_key.clone());
-        let has_crop = m.meta().edit.and_then(|e| e.corners).is_some();
         cards.push(MediaCard {
             media_ref: m.media_ref,
             title,
             kind: m.kind,
             thumb_url_key,
             play_html,
-            variants: variant_rows,
             search,
             share_url_key,
             visibility,
-            visibility_rank,
-            preview_url_key,
-            has_crop,
         });
     }
     // Storage panel — each configured root + its free space, so multi-drive

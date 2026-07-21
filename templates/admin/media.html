@@ -92,35 +92,13 @@
 
             <span
                 class="text-[10px] bg-navy text-yellow px-1.5 py-0.5 rounded uppercase font-display self-start">{{ c.kind }}</span>
-            <div class="flex flex-col gap-1">
-                {% for v in c.variants %}
-                <div class="flex items-center gap-1 text-[10px] bg-navy/10 text-navy px-1.5 py-0.5 rounded">
-                    <span class="font-mono break-all grow">{{ v.label }}</span>
-                    <span class="text-navy/60 whitespace-nowrap">{{ v.size }}</span>
-                    <button type="button" class="delete-variant text-red-700 hover:text-red-900 px-1 leading-none"
-                        data-media-ref="{{ c.media_ref }}" data-url-key="{{ v.url_key }}"
-                        title="Delete stream" aria-label="Delete stream">&times;</button>
-                </div>
-                {% endfor %}
-            </div>
-
             {% if let Some(v) = c.visibility %}
             <p><span class="px-2 py-0.5 rounded text-xs font-semibold bg-navy text-yellow uppercase tracking-wide"
                 title="Minimum role required to fetch this item's bytes">{{ v }}</span></p>
             {% endif %}
+            {# ED.6: the card is for BROWSING + copying — management (rename,
+               visibility, streams, image edits, delete) lives on the edit page. #}
             <div class="flex flex-col gap-1 mt-auto">
-                {# Per-item gate control (DR) → media-upload.js PUTs /media/<ref> {min_role}. #}
-                <span class="relative block">
-                    <select class="media-visibility w-full appearance-none border border-navy/30 rounded px-2 py-1 pr-7 text-xs"
-                        data-media-ref="{{ c.media_ref }}"
-                        title="Who can fetch this item's bytes">
-                        <option value="Public"{% if c.visibility_rank == 0 %} selected{% endif %}>Public</option>
-                        <option value="Registered"{% if c.visibility_rank == 1 %} selected{% endif %}>Registered</option>
-                        <option value="Family"{% if c.visibility_rank == 2 %} selected{% endif %}>Family</option>
-                        <option value="Admin"{% if c.visibility_rank == 3 %} selected{% endif %}>Admin-only</option>
-                    </select>
-                    <span class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-navy/60">{% call icons::chevron_down() %}</span>
-                </span>
                 <button type="button" class="copy-ref text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
                     data-ref="{{ c.media_ref }}">Copy <code>![]()</code></button>
                 {% if let Some(key) = c.share_url_key %}
@@ -129,38 +107,9 @@
                     title="Copy a direct, unguessable link to the file — for private sharing / download">Copy
                     link</button>
                 {% endif %}
-                <div class="flex gap-1">
-                    <button type="button"
-                        class="rename-media grow text-xs bg-navy/80 hover:bg-navy text-div-grey px-2 py-1 rounded"
-                        data-media-ref="{{ c.media_ref }}" data-title="{{ c.title }}" title="Rename"
-                        aria-label="Rename">{% call icons::pen() %}</button>
-                    <label
-                        class="grow text-center text-xs bg-navy/80 hover:bg-navy text-div-grey px-2 py-1 rounded cursor-pointer"
-                        title="Add another encode (e.g. the HEVC), or an image as the poster">
-                        {% call icons::plus() %}
-                        <input type="file" class="add-encode-input hidden" data-media-ref="{{ c.media_ref }}" multiple />
-                    </label>
-                    {% if c.kind == "image" %}
-                    <button type="button" class="rotate-media text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
-                        data-media-ref="{{ c.media_ref }}" data-dir="ccw"
-                        title="Rotate 90° counter-clockwise (baked into the derived variants; the original is untouched)">&#10226;</button>
-                    <button type="button" class="rotate-media text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
-                        data-media-ref="{{ c.media_ref }}" data-dir="cw"
-                        title="Rotate 90° clockwise (baked into the derived variants; the original is untouched)">&#10227;</button>
-                    {% if let Some(pk) = c.preview_url_key %}
-                    <button type="button" class="crop-media text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
-                        data-media-ref="{{ c.media_ref }}" data-preview-key="{{ pk }}"
-                        {% if c.has_crop %}data-has-crop="1"{% endif %}
-                        title="Crop (rect or 4-point perspective) — baked into the derived variants; the original is untouched">Crop</button>
-                    {% endif %}
-                    <button type="button" class="rederive-media text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
-                        data-media-ref="{{ c.media_ref }}"
-                        title="Re-derive the resized AVIF variants from the original (picks up orientation/edit changes)">Re-derive</button>
-                    {% endif %}
-                    <button type="button" class="delete-media text-xs bg-red-600 hover:bg-red-700 text-div-grey px-2 py-1 rounded"
-                        data-media-ref="{{ c.media_ref }}"
-                        title="Delete" aria-label="Delete">{% call icons::trash_can() %}</button>
-                </div>
+                <a class="text-center text-xs bg-navy/80 hover:bg-navy text-div-grey px-2 py-1 rounded"
+                    href="/admin/media/{{ c.media_ref }}"
+                    title="Rename, visibility, streams, image edits, delete">{% call icons::pen() %} Edit</a>
             </div>
         </div>
         {% endfor %}

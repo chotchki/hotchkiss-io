@@ -103,6 +103,7 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [x] ED.3 - Rotate UI: 90° CW/CCW buttons on the media library item view → params write + spawned re-derive (no crop box needed for the common case)
 - [x] ED.4 - Crop UI incl. NON-UNIFORM (perspective) crop, with a RECT ⇄ 4-POINT mode toggle (both have uses): rect mode drags axis-locked edges/corners (standard crop feel), 4-point mode frees each corner (angled paper lays flat); BOTH store the same 4 normalized corners — rect is the degenerate case — warped server-side via imageproc Projection::from_control_points in the derivation. Cropper.js evaluated + rejected (rect-only, can't 4-point; two tools for one job); first-party vanilla overlay, house style
 - [ ] ED.5 - Tests (derivation applies params; re-derive replaces rungs; covers/embeds pick up new rungs) + CLAUDE.md + beta dogfood → prod tag; verify the prod image upright
+- [x] ED.6 - De-cram the library: per-item EDIT PAGE at GET /admin/media/{ref} (rename input, visibility, variant management, add-encode, and for images rotate/crop/re-derive with the corner tool INLINE in page flow — no modals, no prompt()); cards slim to thumb/title/kind/copy/edit-link/delete
 
 ## Backlog (not yet phased)
 

@@ -63,6 +63,7 @@ pub fn admin_router() -> Router<AppState> {
         // `DELETE /media/<ref>/variants/<url_key>`. This route is the page only,
         // distinct from `GET /media` (the JSON collection).
         .route("/media", get(media::show_media_library))
+        .route("/media/{ref}", get(media::show_media_edit))
         .route("/media/{ref}/rederive", post(media::rederive_media))
         .route("/media/{ref}/rotate", post(media::rotate_media))
         .route("/media/{ref}/crop", post(media::crop_media))

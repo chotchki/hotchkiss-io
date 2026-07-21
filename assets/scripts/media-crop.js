@@ -1,10 +1,11 @@
-// ED.4 — the crop overlay: a first-party 4-corner tool with a RECT ⇄ 4-POINT
-// mode toggle. Rect mode drags axis-locked corners (standard crop feel);
-// 4-point frees each corner so an angled sheet of paper lays flat. BOTH store
-// the same 4 normalized corners (TL,TR,BR,BL) — the server homography-warps
-// them into the derived rungs; the original is never touched. When a crop is
-// already applied the preview shows CROPPED rungs, so the overlay pushes Reset
-// first (re-cropping over a cropped view would compound).
+// ED.4/ED.6 — the 4-corner crop tool, mounted INLINE into `#crop-tool` on the
+// media EDIT page (no modal — chris's call). RECT ⇄ 4-POINT mode toggle: rect
+// drags axis-locked corners (standard crop feel); 4-point frees each corner so
+// an angled sheet of paper lays flat. BOTH store the same 4 normalized corners
+// (TL,TR,BR,BL) — the server homography-warps them into the derived rungs; the
+// original is never touched. When a crop is already applied the preview shows
+// CROPPED rungs, so the tool pushes Reset first (re-cropping over a cropped
+// view would compound).
 (function () {
   function setStatus(text) {
     const s = document.getElementById("media-upload-status");
@@ -21,9 +22,9 @@
     );
   }
 
-  function openOverlay(btn) {
-    const ref = btn.dataset.mediaRef;
-    const hasCrop = !!btn.dataset.hasCrop;
+  function mount(root) {
+    const ref = root.dataset.mediaRef;
+    const hasCrop = !!root.dataset.hasCrop;
     // Normalized TL,TR,BR,BL; start at a 10%-inset rect.
     let corners = [
       [0.1, 0.1],
@@ -33,10 +34,7 @@
     ];
     let mode = "rect";
 
-    const overlay = document.createElement("div");
-    overlay.className =
-      "fixed inset-0 z-50 bg-navy/95 flex flex-col items-center justify-center gap-3 p-4";
-
+    root.className = "flex flex-col gap-2";
     const bar = document.createElement("div");
     bar.className = "flex flex-row flex-wrap items-center gap-2";
     const mkBtn = (label, cls) => {
@@ -49,7 +47,7 @@
     };
     const modeBtn = mkBtn(
       "Mode: rectangle",
-      "bg-navy border border-yellow text-yellow",
+      "bg-white border border-navy text-navy hover:bg-navy/10",
     );
     const applyBtn = mkBtn(
       "Apply crop",
@@ -62,21 +60,18 @@
         "bg-red-600 text-div-grey hover:bg-red-700",
       );
       const note = document.createElement("span");
-      note.className = "text-xs text-div-grey/80";
+      note.className = "text-xs text-navy/60";
       note.textContent =
-        "A crop is already applied — the preview shows it. Reset before re-cropping.";
+        "A crop is applied — the preview below shows it. Reset before re-cropping.";
       bar.appendChild(note);
     }
-    const cancelBtn = mkBtn(
-      "Cancel",
-      "bg-navy border border-div-grey/40 text-div-grey",
-    );
 
     const stage = document.createElement("div");
-    stage.className = "relative max-w-full max-h-[75vh]";
+    stage.className = "relative self-start max-w-full";
     const img = document.createElement("img");
-    img.src = "/media/file/" + btn.dataset.previewKey;
-    img.className = "max-w-full max-h-[75vh] select-none";
+    img.src = "/media/file/" + root.dataset.previewKey;
+    img.className =
+      "max-w-full max-h-[60vh] select-none rounded border border-navy/20";
     img.draggable = false;
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("class", "absolute inset-0 w-full h-full");
@@ -103,9 +98,8 @@
     });
     stage.appendChild(img);
     stage.appendChild(svg);
-    overlay.appendChild(bar);
-    overlay.appendChild(stage);
-    document.body.appendChild(overlay);
+    root.appendChild(bar);
+    root.appendChild(stage);
 
     function redraw() {
       const w = img.clientWidth;
@@ -174,17 +168,13 @@
       }
     });
 
-    function close() {
-      overlay.remove();
-      window.removeEventListener("resize", redraw);
-    }
-    cancelBtn.addEventListener("click", close);
     applyBtn.addEventListener("click", () => {
       applyBtn.disabled = true;
       postCrop(ref, corners)
         .then((msg) => {
-          close();
           setStatus(msg);
+          // Reflect the new edit state (has-crop note, preview) on next paint.
+          setTimeout(() => location.reload(), 600);
         })
         .catch((e) => {
           applyBtn.disabled = false;
@@ -195,8 +185,8 @@
       resetBtn.addEventListener("click", () => {
         postCrop(ref, null)
           .then((msg) => {
-            close();
             setStatus(msg + " (crop cleared)");
+            setTimeout(() => location.reload(), 600);
           })
           .catch((e) => setStatus("Reset failed: " + e));
       });
@@ -204,8 +194,7 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    document.querySelectorAll(".crop-media").forEach((btn) => {
-      btn.addEventListener("click", () => openOverlay(btn));
-    });
+    const root = document.getElementById("crop-tool");
+    if (root) mount(root);
   });
 })();

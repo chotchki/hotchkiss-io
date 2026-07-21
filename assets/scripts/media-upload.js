@@ -136,20 +136,17 @@
     });
   });
 
-  // Rename the display title (the ref stays fixed so embeds don't break) →
-  // PUT /media/<ref> {title}. An absent min_role KEEPS the gate (fail-safe).
-  document.querySelectorAll(".rename-media").forEach((btn) => {
+  // Rename via the edit page's title input (ED.6 — the prompt() popup died
+  // with the modals) → PUT /media/<ref> {title}. The ref stays fixed so
+  // embeds don't break; an absent min_role KEEPS the gate (fail-safe).
+  document.querySelectorAll(".save-title").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const ref = btn.dataset.mediaRef;
-      const next = window.prompt(
-        "Rename media (display title):",
-        btn.dataset.title || "",
-      );
-      if (next === null) return;
-      fetch("/media/" + ref, {
+      const input = document.getElementById("edit-title");
+      if (!input) return;
+      fetch("/media/" + btn.dataset.mediaRef, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: next }),
+        body: JSON.stringify({ title: input.value }),
       })
         .then((r) => (r.ok ? location.reload() : Promise.reject(r.status)))
         .catch((e) => setStatus("Rename failed: " + e));
@@ -235,7 +232,15 @@
     btn.addEventListener("click", () => {
       if (!window.confirm("Delete this media item?")) return;
       fetch("/media/" + btn.dataset.mediaRef, { method: "DELETE" })
-        .then((r) => (r.ok ? location.reload() : Promise.reject(r.status)))
+        .then((r) => {
+          if (!r.ok) return Promise.reject(r.status);
+          // The edit page deletes its own subject — go back to the library.
+          if (btn.dataset.redirect) {
+            location.href = btn.dataset.redirect;
+          } else {
+            location.reload();
+          }
+        })
         .catch((e) => setStatus("Delete failed: " + e));
     });
   });

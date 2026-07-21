@@ -1201,14 +1201,16 @@ async fn admin_media_library_full_crud_in_browser() {
     )
     .await;
     let media_ref = media_ref.trim().to_string();
-    // Selectors scoped to THIS card (a UUIDv7 ref is a safe attribute-selector value).
     let variants = format!(
         "document.querySelectorAll('.delete-variant[data-media-ref=\"{media_ref}\"]').length"
     );
     let card = format!("!!document.querySelector('.media-card[data-media-ref=\"{media_ref}\"]')");
-    wait_true(&page, &format!("{variants} === 1"), "the uploaded item has one variant").await;
 
-    // ── Add-encode a second file → the card gains a second variant row.
+    // ── ED.6: management moved to the per-item EDIT page (the card's Edit link).
+    click_selector(&page, &format!(".media-card[data-media-ref=\"{media_ref}\"] a[href=\"/admin/media/{media_ref}\"]")).await;
+    wait_true(&page, &format!("{variants} === 1"), "edit page → the uploaded item has one variant").await;
+
+    // ── Add-encode a second file → a second variant row.
     set_file_input(
         &page,
         &format!(".add-encode-input[data-media-ref=\"{media_ref}\"]"),
@@ -1217,11 +1219,13 @@ async fn admin_media_library_full_crud_in_browser() {
     .await;
     wait_true(&page, &format!("{variants} === 2"), "add-encode → a second variant appears").await;
 
-    // ── Rename → the new title renders on the card (prompt() stubbed to return it;
-    // the string only reaches the DOM once the server persists + the card reloads).
-    let _: bool =
-        js(&page, "(function(){window.prompt=function(){return 'Renamed By E2E';};return true;})()").await;
-    click_selector(&page, &format!(".rename-media[data-media-ref=\"{media_ref}\"]")).await;
+    // ── Rename via the page's title input (no prompt() — ED.6 killed popups).
+    let _: bool = js(
+        &page,
+        "(function(){var i=document.getElementById('edit-title');i.value='Renamed By E2E';return true;})()",
+    )
+    .await;
+    click_selector(&page, &format!(".save-title[data-media-ref=\"{media_ref}\"]")).await;
     wait_true(
         &page,
         "document.body.textContent.indexOf('Renamed By E2E') >= 0",
@@ -1252,9 +1256,15 @@ async fn admin_media_library_full_crud_in_browser() {
     click_selector(&page, &format!(".delete-variant[data-media-ref=\"{media_ref}\"]")).await;
     wait_true(&page, &format!("{variants} === 1"), "delete-variant → one variant remains").await;
 
-    // ── Delete the item → the card disappears.
+    // ── Delete the item → redirected back to the library, card gone.
     let _: bool = js(&page, "(function(){window.confirm=function(){return true;};return true;})()").await;
     click_selector(&page, &format!(".delete-media[data-media-ref=\"{media_ref}\"]")).await;
+    wait_true(
+        &page,
+        "location.pathname === '/admin/media'",
+        "delete on the edit page redirects to the library",
+    )
+    .await;
     wait_true(&page, &format!("{card} === false"), "delete-item → the card is gone").await;
 
     browser.close().await.ok();
