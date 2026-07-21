@@ -96,6 +96,34 @@ pub fn is_web_displayable_image(mime: &str) -> bool {
     mime.starts_with("image/") && !matches!(mime, "image/heic" | "image/heif")
 }
 
+/// The item's SOURCE image variant — the uploaded original the derivation reads
+/// (ED): the earliest non-avif image variant (jpeg/heic/png…), falling back to
+/// the earliest avif (an avif-uploaded original is created before any derived
+/// sibling, so insertion order picks it). Shared by the re-derive handler and
+/// the edited-image ladder exclusion so the two can't disagree on which
+/// variant is "the original".
+pub fn source_image(variants: &[MediaVariantDao]) -> Option<&MediaVariantDao> {
+    variants
+        .iter()
+        .find(|v| v.mime.starts_with("image/") && v.mime != "image/avif")
+        .or_else(|| variants.iter().find(|v| v.mime.starts_with("image/")))
+}
+
+/// The srcset ladder for an EDITED image (ED): the source variant's pixels no
+/// longer represent what viewers should see (the edit lives only in the derived
+/// rungs), so it is excluded even when web-displayable — the capped full rung
+/// the derivation mints for edited items becomes the largest entry instead.
+pub fn image_ladder_edited(variants: &[MediaVariantDao]) -> Vec<&MediaVariantDao> {
+    let source_sha = source_image(variants).map(|v| v.sha256.clone());
+    let mut sized: Vec<&MediaVariantDao> = variants
+        .iter()
+        .filter(|v| is_web_displayable_image(&v.mime) && v.width.is_some())
+        .filter(|v| Some(&v.sha256) != source_sha.as_ref())
+        .collect();
+    sized.sort_by_key(|v| v.width.unwrap_or(0));
+    sized
+}
+
 /// A parsed `Accept` media range.
 struct AcceptRange {
     ty: String,

@@ -97,9 +97,11 @@ async fn add_virtual_authenticator(page: &Page) {
         .expect("WebAuthn.addVirtualAuthenticator");
 }
 
-/// Poll the page URL until it no longer contains `/login` (or time out).
+/// Poll the page URL until it no longer contains `/login` (or time out). 45s,
+/// not 20: the ceremony is CPU-timing-sensitive, and the suite now runs beside
+/// rav1e-heavy media tests — under full-core load the 20s deadline flaked.
 async fn wait_until_left_login(page: &Page) {
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + Duration::from_secs(45);
     loop {
         assert!(
             Instant::now() < deadline,

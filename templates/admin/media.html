@@ -140,6 +140,12 @@
                         <input type="file" class="add-encode-input hidden" data-media-ref="{{ c.media_ref }}" multiple />
                     </label>
                     {% if c.kind == "image" %}
+                    <button type="button" class="rotate-media text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
+                        data-media-ref="{{ c.media_ref }}" data-dir="ccw"
+                        title="Rotate 90° counter-clockwise (baked into the derived variants; the original is untouched)">&#10226;</button>
+                    <button type="button" class="rotate-media text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
+                        data-media-ref="{{ c.media_ref }}" data-dir="cw"
+                        title="Rotate 90° clockwise (baked into the derived variants; the original is untouched)">&#10227;</button>
                     <button type="button" class="rederive-media text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
                         data-media-ref="{{ c.media_ref }}"
                         title="Re-derive the resized AVIF variants from the original (picks up orientation/edit changes)">Re-derive</button>

@@ -13,8 +13,9 @@ use anyhow::{anyhow, Result};
 use askama::Template;
 use axum::extract::{Multipart, Path, State};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Form, Json};
 use http::{header, StatusCode};
+use serde::Deserialize;
 use sqlx::SqlitePool;
 
 use crate::db::dao::crypto_key::CryptoKey;
@@ -26,6 +27,7 @@ use crate::media::resize::{responsive_avif_variants, ResizeResult};
 use crate::media::{media_url_key, MediaStore};
 use crate::web::authentication_state::AuthenticationState;
 use crate::web::features::media::{build_manifest, render_embed_html};
+use crate::web::features::media_select;
 use crate::web::features::top_bar::TopBar;
 use crate::web::{app_error::AppError, app_state::AppState, html_template::HtmlTemplate, session::SessionData};
 
@@ -1039,18 +1041,71 @@ pub async fn rederive_media(
     if !matches!(media.kind(), Ok(MediaKind::Image)) {
         return Ok((StatusCode::BAD_REQUEST, "re-derive applies to images").into_response());
     }
-    let variants = MediaVariantDao::find_by_media_id(&state.pool, media.media_id).await?;
-    // The SOURCE = the earliest non-avif image variant (jpeg/heic/png…); an
-    // avif-uploaded original falls back to the earliest avif (created before
-    // any derived sibling, so insertion order picks it).
-    let source = variants
-        .iter()
-        .find(|v| v.mime.starts_with("image/") && v.mime != "image/avif")
-        .or_else(|| variants.iter().find(|v| v.mime.starts_with("image/")));
-    let Some(source) = source else {
-        return Ok((StatusCode::BAD_REQUEST, "no image bytes to derive from").into_response());
-    };
+    if let Some(err) = drop_rungs_and_respawn(&state, &media).await? {
+        return Ok(err);
+    }
+    Ok((
+        StatusCode::OK,
+        "re-deriving in the background — refresh in a moment",
+    )
+        .into_response())
+}
 
+/// Rotate an image a quarter-turn (ED.3): bump `metadata.edit.rotate` and
+/// re-derive — the ORIGINAL bytes are never touched, the rotation is baked into
+/// the derived rungs only. Four CW turns land back on 0 and (with no crop)
+/// CLEAR the edit entirely — a full undo.
+pub async fn rotate_media(
+    State(state): State<AppState>,
+    Path(media_ref): Path<String>,
+    Form(form): Form<RotateForm>,
+) -> Result<Response, AppError> {
+    let Some(media) = MediaDao::find_by_ref(&state.pool, media_ref.trim()).await? else {
+        return Ok((StatusCode::NOT_FOUND, "no such media").into_response());
+    };
+    if !matches!(media.kind(), Ok(MediaKind::Image)) {
+        return Ok((StatusCode::BAD_REQUEST, "rotate applies to images").into_response());
+    }
+    let delta = match form.dir.as_str() {
+        "cw" => 1,
+        "ccw" => 3,
+        _ => return Ok((StatusCode::BAD_REQUEST, "dir must be cw or ccw").into_response()),
+    };
+    let mut meta = media.meta();
+    let mut edit = meta.edit.unwrap_or_default();
+    edit.rotate = (edit.rotate + delta) % 4;
+    meta.edit = (edit.rotate != 0 || edit.corners.is_some()).then_some(edit);
+    MediaDao::set_metadata(&state.pool, media.media_id, meta.to_stored()).await?;
+
+    if let Some(err) = drop_rungs_and_respawn(&state, &media).await? {
+        return Ok(err);
+    }
+    Ok((
+        StatusCode::OK,
+        "rotating in the background — refresh in a moment",
+    )
+        .into_response())
+}
+
+#[derive(Deserialize)]
+pub struct RotateForm {
+    pub dir: String,
+}
+
+/// The shared re-derivation tail (rederive/rotate/crop): pick the SOURCE via
+/// the same rule the render's edited-ladder uses, drop the derived rungs, and
+/// spawn the derivation (which reads the item's CURRENT edit params). Returns
+/// `Some(response)` for a client-visible error, `None` once spawned.
+async fn drop_rungs_and_respawn(
+    state: &AppState,
+    media: &MediaDao,
+) -> Result<Option<Response>, AppError> {
+    let variants = MediaVariantDao::find_by_media_id(&state.pool, media.media_id).await?;
+    let Some(source) = media_select::source_image(&variants) else {
+        return Ok(Some(
+            (StatusCode::BAD_REQUEST, "no image bytes to derive from").into_response(),
+        ));
+    };
     let dropped =
         MediaVariantDao::delete_avif_rungs_except(&state.pool, media.media_id, &source.sha256)
             .await?;
@@ -1065,11 +1120,7 @@ pub async fn rederive_media(
         maybe_add_responsive_variants(&st, &hmac_key, media_id, source_sha).await;
         tracing::info!("re-derived variants for media {media_id} ({dropped} old rung(s) dropped)");
     });
-    Ok((
-        StatusCode::OK,
-        "re-deriving in the background — refresh in a moment",
-    )
-        .into_response())
+    Ok(None)
 }
 
 /// Generate width-stepped AVIF variants for an image so the render can emit a
@@ -1084,12 +1135,18 @@ async fn maybe_add_responsive_variants(
 ) {
     let store = state.media_store.clone();
     let result: Result<()> = async {
+        // The item's edit params (rotate/crop) are DERIVATION inputs (ED) —
+        // fetch them fresh so a re-derive after an edit bakes the new state.
+        let edit = MediaDao::find_by_id(&state.pool, media_id)
+            .await?
+            .map(|m| m.meta().edit.unwrap_or_default())
+            .unwrap_or_default();
         let path_store = store.clone();
         let resized = tokio::task::spawn_blocking(move || -> Result<ResizeResult> {
             let path = path_store
                 .resolve_path(&original_sha, None)
                 .ok_or_else(|| anyhow!("resize source {original_sha} not found in any media root"))?;
-            responsive_avif_variants(&path)
+            responsive_avif_variants(&path, &edit)
         })
         .await
         .map_err(|e| anyhow!("resize task panicked: {e}"))??;

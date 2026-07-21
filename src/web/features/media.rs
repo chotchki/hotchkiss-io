@@ -516,8 +516,13 @@ pub(crate) fn render_embed_html(media: &MediaDao, variants: &[MediaVariantDao]) 
             // Image variants carrying a width → a srcset via the SHARED selector
             // (Phase CN/DP): a new upload records the original's width + its 480/960
             // AVIF downscales, so the browser pulls an appropriately-sized file. A
-            // legacy image with no widths falls through to a single src.
-            let ladder = media_select::image_ladder(variants);
+            // legacy image with no widths falls through to a single src. An EDITED
+            // item (ED) excludes its source — the edit lives only in the rungs.
+            let ladder = if media.meta().edit.is_some() {
+                media_select::image_ladder_edited(variants)
+            } else {
+                media_select::image_ladder(variants)
+            };
             // src = the largest (best for a no-srcset client + the zoom view);
             // falls back to the first variant when nothing has a width.
             let src_key = ladder

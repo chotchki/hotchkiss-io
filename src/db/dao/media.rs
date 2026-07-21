@@ -316,6 +316,24 @@ impl MediaDao {
         Ok(media)
     }
 
+    /// Replace the metadata bag wholesale (the callers read-modify-write via
+    /// [`MediaDao::meta`] + [`MediaMetadata::to_stored`], so `None` here means
+    /// "the bag emptied out", not "keep").
+    pub async fn set_metadata(
+        executor: impl SqliteExecutor<'_>,
+        media_id: i64,
+        metadata: Option<String>,
+    ) -> Result<()> {
+        query!(
+            r#"UPDATE media SET metadata = ?1 WHERE media_id = ?2"#,
+            metadata,
+            media_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    }
+
     /// Edit the display title (the URL `media_ref` is the stable key and is NOT
     /// renamed here — that would break existing `![](/media/<ref>)` embeds).
     /// An empty title clears it (display falls back to the ref).

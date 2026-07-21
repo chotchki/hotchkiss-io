@@ -17,6 +17,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::LazyLock;
 
+use crate::db::dao::media::EditParams;
 use crate::media::probe::resolve_bin;
 
 /// Target widths for the srcset ladder. A width >= the source is skipped (never
@@ -55,15 +56,19 @@ pub struct ResizeResult {
 /// `width` column is NULL (e.g. an attachment-migrated cover), which the old
 /// width-taking signature silently skipped. `variants` is empty when the source
 /// is already small (no width below it) — the original then serves alone.
-pub fn responsive_avif_variants(path: &Path) -> Result<ResizeResult> {
+pub fn responsive_avif_variants(path: &Path, edit: &EditParams) -> Result<ResizeResult> {
     let (img, web_native) = decode_source(path)?;
+    let img = apply_edit(img, edit);
     let (source_width, source_height) = (img.width(), img.height());
 
+    let edited = edit.rotate % 4 != 0 || edit.corners.is_some();
     let mut widths = target_widths(source_width);
-    if !web_native {
-        // EB.9: the source itself can't render in most browsers (HEIC), so mint
-        // a capped "full" rung too — it becomes the ladder top (embed src +
-        // zoom), and no viewing path ever depends on the source bytes.
+    if !web_native || edited {
+        // EB.9/ED: the source bytes can't stand in for the viewing image —
+        // either the format doesn't render in most browsers (HEIC) or an EDIT
+        // means the original's pixels are no longer the picture. Mint the
+        // capped "full" rung so the ladder top (embed src + zoom) never
+        // depends on the source.
         let full = source_width.min(NON_WEB_FULL_WIDTH_CAP);
         if !widths.contains(&full) {
             widths.push(full);
@@ -96,6 +101,20 @@ pub fn responsive_avif_variants(path: &Path) -> Result<ResizeResult> {
         source_height,
         variants,
     })
+}
+
+/// Apply the item's edit params to the decoded source (ED): quarter-turn
+/// rotation now; the 4-corner crop/perspective warp lands with the imageproc
+/// wiring (ED.4) — until then `corners` only affects the full-rung decision,
+/// never the pixels. The edit is an input to DERIVATION — the stored original
+/// is never touched.
+fn apply_edit(img: DynamicImage, edit: &EditParams) -> DynamicImage {
+    match edit.rotate % 4 {
+        1 => img.rotate90(),
+        2 => img.rotate180(),
+        3 => img.rotate270(),
+        _ => img,
+    }
 }
 
 /// Decode the source pixels. The `image` crate covers every web-native format;
@@ -189,6 +208,32 @@ mod tests {
     }
 
     #[test]
+    fn rotate_edit_is_applied_and_mints_the_full_rung() {
+        // ED.3: rotate=1 (90 CW) — the decoded source comes out PORTRAIT and,
+        // because the item is EDITED, a full-size rung is minted even for a
+        // web-native source (the original can no longer stand in as the src).
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("rot-edit.png");
+        let img = image::RgbImage::from_fn(300, 200, |x, _| {
+            image::Rgb([(x % 256) as u8, 32, 200])
+        });
+        image::DynamicImage::ImageRgb8(img).save(&src).unwrap();
+
+        let edit = EditParams {
+            rotate: 1,
+            corners: None,
+        };
+        let out = responsive_avif_variants(&src, &edit).unwrap();
+        assert_eq!((out.source_width, out.source_height), (200, 300));
+        assert_eq!(out.variants.len(), 1, "edited => the full rung exists");
+        assert_eq!(
+            (out.variants[0].width, out.variants[0].height),
+            (200, 300),
+            "the rung is the rotated full frame"
+        );
+    }
+
+    #[test]
     fn exif_orientation_is_baked_into_the_rungs() {
         // A phone JPEG stores pixels UNROTATED + an EXIF Orientation tag (EB.10
         // — the sideways-capture bug). Build one hermetically: encode 300x200,
@@ -214,7 +259,7 @@ mod tests {
         let spliced: Vec<u8> = [&jpeg[..2], &app1, &jpeg[2..]].concat();
         std::fs::write(&src, spliced).unwrap();
 
-        let out = responsive_avif_variants(&src).unwrap();
+        let out = responsive_avif_variants(&src, &EditParams::default()).unwrap();
         // Orientation 6 applied → the decoded source is PORTRAIT 200x300.
         assert_eq!(
             (out.source_width, out.source_height),
@@ -234,7 +279,7 @@ mod tests {
         });
         image::DynamicImage::ImageRgb8(img).save(&src).unwrap();
 
-        let out = responsive_avif_variants(&src).unwrap();
+        let out = responsive_avif_variants(&src, &EditParams::default()).unwrap();
         // Source dims come from the decoded pixels (NOT a DB column).
         assert_eq!((out.source_width, out.source_height), (700, 400));
         assert_eq!(out.variants.len(), 1);

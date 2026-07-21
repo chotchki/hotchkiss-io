@@ -246,3 +246,106 @@ async fn rederive_drops_and_reminting_avif_rungs() {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
 }
+
+#[tokio::test]
+async fn rotate_endpoint_bakes_a_portrait_rung_and_stores_the_edit() {
+    // ED.3: POST /admin/media/{ref}/rotate bumps metadata.edit.rotate and
+    // re-derives. A 300x200 PNG rotated CW must produce a 200x300 full rung
+    // (edited items always mint one), with the edit stored in the bag.
+    if !tool_available("ffprobe") {
+        eprintln!("skipping: ffprobe not installed");
+        return;
+    }
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    // Build a small PNG in-memory (fast rav1e encodes).
+    let img = image::RgbImage::from_fn(300, 200, |x, _| image::Rgb([(x % 256) as u8, 90, 30]));
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgb8(img)
+        .write_to(
+            &mut std::io::Cursor::new(&mut png),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+    let part = reqwest::multipart::Part::bytes(png)
+        .file_name("photo.png")
+        .mime_str("application/octet-stream")
+        .unwrap();
+    let resp = admin
+        .post(server.url("/media"))
+        .multipart(reqwest::multipart::Form::new().part("file", part))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let manifest: serde_json::Value = resp.json().await.unwrap();
+    let media_ref = manifest["ref"].as_str().unwrap().to_string();
+
+    let resp = admin
+        .post(server.url(&format!("/admin/media/{media_ref}/rotate")))
+        .form(&[("dir", "cw")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // The stored edit params.
+    let metadata: Option<String> =
+        sqlx::query_scalar("SELECT metadata FROM media WHERE media_ref = ?1")
+            .bind(&media_ref)
+            .fetch_one(&server.pool)
+            .await
+            .unwrap();
+    assert!(
+        metadata.as_deref().unwrap_or("").contains("\"rotate\":1"),
+        "edit params stored: {metadata:?}"
+    );
+
+    // The spawned re-derive mints the PORTRAIT full rung (200x300).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let portrait: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM media_variant mv JOIN media m ON m.media_id = mv.media_id
+             WHERE m.media_ref = ?1 AND mv.mime = 'image/avif'
+               AND mv.width = 200 AND mv.height = 300",
+        )
+        .bind(&media_ref)
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+        if portrait == 1 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "rotated rung never appeared"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // A second CW rotate then two more land back on 0 → the edit CLEARS.
+    for _ in 0..3 {
+        admin
+            .post(server.url(&format!("/admin/media/{media_ref}/rotate")))
+            .form(&[("dir", "cw")])
+            .send()
+            .await
+            .unwrap();
+    }
+    let metadata: Option<String> =
+        sqlx::query_scalar("SELECT metadata FROM media WHERE media_ref = ?1")
+            .bind(&media_ref)
+            .fetch_one(&server.pool)
+            .await
+            .unwrap();
+    assert!(
+        !metadata.as_deref().unwrap_or("").contains("rotate"),
+        "four turns = full undo, the edit clears: {metadata:?}"
+    );
+}

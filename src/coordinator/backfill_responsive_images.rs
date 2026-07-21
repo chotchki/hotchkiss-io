@@ -98,11 +98,12 @@ async fn backfill_one(
 
     let store_clone = store.clone();
     let sha = original.sha256.clone();
+    let edit = m.meta().edit.unwrap_or_default();
     let resized = tokio::task::spawn_blocking(move || -> Result<ResizeResult> {
         let path = store_clone
             .resolve_path(&sha, None)
             .ok_or_else(|| anyhow!("source bytes not found in any media root"))?;
-        responsive_avif_variants(&path)
+        responsive_avif_variants(&path, &edit)
     })
     .await
     .map_err(|e| anyhow!("resize task panicked: {e}"))??;

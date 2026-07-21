@@ -185,6 +185,30 @@
     });
   });
 
+  // Rotate a quarter-turn (ED.3): bumps metadata.edit.rotate server-side and
+  // re-derives — the original is never touched; four turns = a full undo.
+  document.querySelectorAll(".rotate-media").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      btn.disabled = true;
+      fetch("/admin/media/" + btn.dataset.mediaRef + "/rotate", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "dir=" + btn.dataset.dir,
+      })
+        .then((r) =>
+          r.ok ? r.text() : r.text().then((t) => Promise.reject(t || r.status)),
+        )
+        .then((msg) => {
+          btn.disabled = false;
+          setStatus(msg);
+        })
+        .catch((e) => {
+          btn.disabled = false;
+          setStatus("Rotate failed: " + e);
+        });
+    });
+  });
+
   // Re-derive an image's AVIF rungs from its original (ED.1) — spawned server
   // side; the button reports and the admin refreshes when ready.
   document.querySelectorAll(".rederive-media").forEach((btn) => {
