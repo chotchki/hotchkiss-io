@@ -349,3 +349,99 @@ async fn rotate_endpoint_bakes_a_portrait_rung_and_stores_the_edit() {
         "four turns = full undo, the edit clears: {metadata:?}"
     );
 }
+
+#[tokio::test]
+async fn crop_endpoint_warps_and_clears() {
+    // ED.4: POST /admin/media/{ref}/crop with a center-50% rect quad on a
+    // 400x200 PNG → a ~200x100 rung; corners:null clears the edit.
+    if !tool_available("ffprobe") {
+        eprintln!("skipping: ffprobe not installed");
+        return;
+    }
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    let img = image::RgbImage::from_fn(400, 200, |x, _| image::Rgb([(x / 2) as u8, 60, 60]));
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgb8(img)
+        .write_to(
+            &mut std::io::Cursor::new(&mut png),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+    let part = reqwest::multipart::Part::bytes(png)
+        .file_name("crop.png")
+        .mime_str("application/octet-stream")
+        .unwrap();
+    let resp = admin
+        .post(server.url("/media"))
+        .multipart(reqwest::multipart::Form::new().part("file", part))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let manifest: serde_json::Value = resp.json().await.unwrap();
+    let media_ref = manifest["ref"].as_str().unwrap().to_string();
+
+    // Out-of-range corners → 400 (the real validation gate).
+    let resp = admin
+        .post(server.url(&format!("/admin/media/{media_ref}/crop")))
+        .json(&serde_json::json!({"corners": [[-0.2, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+    // The center 50% → a ~200x100 warped rung.
+    let resp = admin
+        .post(server.url(&format!("/admin/media/{media_ref}/crop")))
+        .json(&serde_json::json!({"corners": [[0.25, 0.25], [0.75, 0.25], [0.75, 0.75], [0.25, 0.75]]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let cropped: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM media_variant mv JOIN media m ON m.media_id = mv.media_id
+             WHERE m.media_ref = ?1 AND mv.mime = 'image/avif'
+               AND mv.width = 200 AND mv.height = 100",
+        )
+        .bind(&media_ref)
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+        if cropped == 1 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "cropped rung never appeared"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+
+    // Clear → the edit empties out of the bag.
+    let resp = admin
+        .post(server.url(&format!("/admin/media/{media_ref}/crop")))
+        .json(&serde_json::json!({"corners": null}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let metadata: Option<String> =
+        sqlx::query_scalar("SELECT metadata FROM media WHERE media_ref = ?1")
+            .bind(&media_ref)
+            .fetch_one(&server.pool)
+            .await
+            .unwrap();
+    assert!(
+        !metadata.as_deref().unwrap_or("").contains("corners"),
+        "clearing the crop empties the edit: {metadata:?}"
+    );
+}

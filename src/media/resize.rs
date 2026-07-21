@@ -104,17 +104,74 @@ pub fn responsive_avif_variants(path: &Path, edit: &EditParams) -> Result<Resize
 }
 
 /// Apply the item's edit params to the decoded source (ED): quarter-turn
-/// rotation now; the 4-corner crop/perspective warp lands with the imageproc
-/// wiring (ED.4) — until then `corners` only affects the full-rung decision,
-/// never the pixels. The edit is an input to DERIVATION — the stored original
-/// is never touched.
+/// rotation FIRST (the crop UI shows the rotated view, so corners are defined
+/// in the rotated frame), then the 4-corner crop/perspective warp. The edit is
+/// an input to DERIVATION — the stored original is never touched. A degenerate
+/// quad falls back to the un-cropped image (warn, never a hard failure — the
+/// endpoint validates, this is the belt-and-suspenders).
 fn apply_edit(img: DynamicImage, edit: &EditParams) -> DynamicImage {
-    match edit.rotate % 4 {
+    let img = match edit.rotate % 4 {
         1 => img.rotate90(),
         2 => img.rotate180(),
         3 => img.rotate270(),
         _ => img,
+    };
+    let Some(corners) = edit.corners else {
+        return img;
+    };
+    match warp_quad(&img, &corners) {
+        Some(warped) => warped,
+        None => {
+            tracing::warn!("degenerate crop quad {corners:?} — serving un-cropped");
+            img
+        }
     }
+}
+
+/// Homography-warp the normalized corner quad (TL, TR, BR, BL) flat into a
+/// rectangle (ED.4): an axis-aligned quad is a plain crop; a skewed one lays an
+/// angled sheet of paper flat. Target dims = the average opposing edge lengths
+/// in source pixels, so the output resolution matches what the quad actually
+/// covers. `None` on a degenerate/non-invertible quad or a sub-8px target.
+fn warp_quad(img: &DynamicImage, corners: &[[f64; 2]; 4]) -> Option<DynamicImage> {
+    use imageproc::geometric_transformations::{warp_into, Interpolation, Projection};
+
+    let (w, h) = (img.width() as f64, img.height() as f64);
+    let px: Vec<(f32, f32)> = corners
+        .iter()
+        .map(|[x, y]| {
+            (
+                (x.clamp(0.0, 1.0) * w) as f32,
+                (y.clamp(0.0, 1.0) * h) as f32,
+            )
+        })
+        .collect();
+    let dist = |a: (f32, f32), b: (f32, f32)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
+    let target_w = ((dist(px[0], px[1]) + dist(px[3], px[2])) / 2.0).round().max(0.0) as u32;
+    let target_h = ((dist(px[0], px[3]) + dist(px[1], px[2])) / 2.0).round().max(0.0) as u32;
+    if target_w < 8 || target_h < 8 {
+        return None;
+    }
+
+    let from = [px[0], px[1], px[2], px[3]];
+    let to = [
+        (0.0, 0.0),
+        (target_w as f32, 0.0),
+        (target_w as f32, target_h as f32),
+        (0.0, target_h as f32),
+    ];
+    let projection = Projection::from_control_points(from, to)?;
+
+    let src = img.to_rgba8();
+    let mut out = image::RgbaImage::new(target_w, target_h);
+    warp_into(
+        &src,
+        &projection,
+        Interpolation::Bilinear,
+        image::Rgba([0, 0, 0, 255]),
+        &mut out,
+    );
+    Some(DynamicImage::ImageRgba8(out))
 }
 
 /// Decode the source pixels. The `image` crate covers every web-native format;
@@ -205,6 +262,45 @@ mod tests {
         assert_eq!(target_widths(700), vec![480]); // 960 >= 700 → skipped
         assert_eq!(target_widths(480), Vec::<u32>::new()); // not strictly less
         assert_eq!(target_widths(100), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn corner_crop_warps_to_the_quad_rect() {
+        // ED.4: an axis-aligned quad = a plain crop. Center 50% of a 400x200
+        // gradient → a ~200x100 output whose LEFT edge shows the source's 25%
+        // column color (red = x, so ~100).
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("crop.png");
+        let img = image::RgbImage::from_fn(400, 200, |x, _| {
+            image::Rgb([(x / 2).min(255) as u8, 10, 10])
+        });
+        image::DynamicImage::ImageRgb8(img).save(&src).unwrap();
+
+        let edit = EditParams {
+            rotate: 0,
+            corners: Some([[0.25, 0.25], [0.75, 0.25], [0.75, 0.75], [0.25, 0.75]]),
+        };
+        let out = responsive_avif_variants(&src, &edit).unwrap();
+        assert_eq!(
+            (out.source_width, out.source_height),
+            (200, 100),
+            "the derivation source is the CROPPED frame"
+        );
+        assert_eq!(out.variants.len(), 1, "edited => full rung minted");
+
+        // A skewed (perspective) quad still produces a flat rect of the
+        // averaged edge lengths — the angled-paper case.
+        let edit = EditParams {
+            rotate: 0,
+            corners: Some([[0.3, 0.25], [0.75, 0.3], [0.7, 0.75], [0.25, 0.7]]),
+        };
+        let out = responsive_avif_variants(&src, &edit).unwrap();
+        assert!(
+            out.source_width >= 8 && out.source_height >= 8,
+            "perspective quad warps to a usable rect ({}x{})",
+            out.source_width,
+            out.source_height
+        );
     }
 
     #[test]

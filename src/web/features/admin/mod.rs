@@ -65,6 +65,7 @@ pub fn admin_router() -> Router<AppState> {
         .route("/media", get(media::show_media_library))
         .route("/media/{ref}/rederive", post(media::rederive_media))
         .route("/media/{ref}/rotate", post(media::rotate_media))
+        .route("/media/{ref}/crop", post(media::crop_media))
         // API keys (Phase CA): generate (shown once) / list / revoke your own.
         .route(
             "/api-keys",

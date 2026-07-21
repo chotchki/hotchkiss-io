@@ -570,3 +570,36 @@ The deltas between SHIPPED and TARGET — the code-alignment work (Phase DP), sc
   paragraph are pointers here.
 - Deferred: size-within-format negotiation (`?width=`/`sizes`); a `?format=` token↔mime
   table vs. suffix-matching; whether OPTIONS also answers a `GET … Accept: application/json`.
+
+## 12. Image edits — rotate + crop as re-runnable DERIVATION  [SHIPPED, Phase ED]
+
+The one rule: **an edit is never a mutation.** The stored original is immutable
+(content-addressed, source-of-truth); everything viewers see is a derived AVIF
+rung — so rotate/crop are stored PARAMETERS (`media.metadata.edit`, the
+`EditParams` half of the `MediaMetadata` bag migration `0032` introduced when it
+folded the old `chapters` column in) applied by `resize.rs::apply_edit` between
+decode and rung minting. Re-runnable, reversible, undo = clear the params and
+re-derive.
+
+- **Rotate**: quarter-turns (`edit.rotate` 0–3), applied FIRST — the crop UI
+  shows the rotated view, so corners are defined in the rotated frame. Four CW
+  turns land on 0 and clear the edit entirely.
+- **Crop**: 4 normalized corners (TL,TR,BR,BL), homography-warped flat by
+  `warp_quad` (imageproc `Projection::from_control_points` + `warp_into`;
+  target dims = averaged opposing edge lengths). An axis-aligned quad is a
+  plain crop; a skewed one lays an angled sheet of paper flat. The overlay UI
+  (`media-crop.js`, first-party — Cropper.js was evaluated and rejected:
+  rect-only, can't 4-point) toggles RECT ⇄ 4-POINT over the same storage.
+- **Edited ⇒ the source leaves the ladder**: an edited item always mints the
+  capped full rung (the EB.9 `NON_WEB_FULL_WIDTH_CAP` rule generalized) and the
+  render swaps to `image_ladder_edited` — the source variant (picked by the
+  SHARED `media_select::source_image` rule) is excluded by sha, since its
+  pixels no longer represent the picture. The original stays downloadable.
+- **The re-derive seam** (`POST /admin/media/{ref}/rederive`, plus
+  `…/rotate` + `…/crop` which run the same drop-rungs-and-respawn tail):
+  drops derived `image/avif` rows (`delete_avif_rungs_except` — sha-guarded so
+  an avif-uploaded original survives) and re-runs the ingest derivation,
+  spawned. Standalone it re-mints pre-EB.10 sideways rungs; the brief
+  rung-less window is the pre-CN original-only state and self-heals.
+- **`update_facts` MERGES the bag** (SQL `json_set`/`json_remove` on the
+  chapters key) so a variant replace can never clobber `metadata.edit`.

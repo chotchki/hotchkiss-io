@@ -5,6 +5,7 @@
 {% block head %}
 <script defer src="/scripts/upload-progress.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 <script defer src="/scripts/media-upload.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+<script defer src="/scripts/media-crop.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 {% endblock %}
 
 {% block content %}
@@ -146,6 +147,12 @@
                     <button type="button" class="rotate-media text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
                         data-media-ref="{{ c.media_ref }}" data-dir="cw"
                         title="Rotate 90° clockwise (baked into the derived variants; the original is untouched)">&#10227;</button>
+                    {% if let Some(pk) = c.preview_url_key %}
+                    <button type="button" class="crop-media text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
+                        data-media-ref="{{ c.media_ref }}" data-preview-key="{{ pk }}"
+                        {% if c.has_crop %}data-has-crop="1"{% endif %}
+                        title="Crop (rect or 4-point perspective) — baked into the derived variants; the original is untouched">Crop</button>
+                    {% endif %}
                     <button type="button" class="rederive-media text-xs bg-navy hover:bg-navy/90 text-div-grey px-2 py-1 rounded"
                         data-media-ref="{{ c.media_ref }}"
                         title="Re-derive the resized AVIF variants from the original (picks up orientation/edit changes)">Re-derive</button>

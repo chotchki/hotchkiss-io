@@ -85,6 +85,14 @@ pub struct MediaCard {
     pub visibility: Option<&'static str>,
     /// The decoded rank, for the selector's selected-option logic (0..=3).
     pub visibility_rank: u8,
+    /// Image kind: the LARGEST web-displayable variant, the crop overlay's
+    /// preview (ED.4 — big enough to place corners on; normalized coords make
+    /// exact resolution irrelevant).
+    pub preview_url_key: Option<String>,
+    /// A crop quad is currently applied (ED.4) — the overlay offers Reset first,
+    /// since its preview shows the CROPPED rungs (re-cropping over a cropped
+    /// view would compound).
+    pub has_crop: bool,
 }
 
 pub struct VariantRow {
@@ -129,6 +137,10 @@ pub async fn show_media_library(
         let share_url_key = variants.first().map(|v| v.url_key.clone());
         let visibility = m.visibility_label();
         let visibility_rank = m.min_role_rank();
+        let preview_url_key = media_select::image_ladder(&variants)
+            .last()
+            .map(|v| v.url_key.clone());
+        let has_crop = m.meta().edit.and_then(|e| e.corners).is_some();
         cards.push(MediaCard {
             media_ref: m.media_ref,
             title,
@@ -140,6 +152,8 @@ pub async fn show_media_library(
             share_url_key,
             visibility,
             visibility_rank,
+            preview_url_key,
+            has_crop,
         });
     }
     // Storage panel — each configured root + its free space, so multi-drive
@@ -1090,6 +1104,55 @@ pub async fn rotate_media(
 #[derive(Deserialize)]
 pub struct RotateForm {
     pub dir: String,
+}
+
+/// Set or clear the crop quad (ED.4) and re-derive. Corners are NORMALIZED
+/// `[x,y]` in TL,TR,BR,BL order over the ROTATED frame (the crop UI shows the
+/// rotated view); `null` clears the crop. This is the REAL validation gate —
+/// `apply_edit`'s degenerate-quad fallback is only belt-and-suspenders.
+pub async fn crop_media(
+    State(state): State<AppState>,
+    Path(media_ref): Path<String>,
+    Json(form): Json<CropForm>,
+) -> Result<Response, AppError> {
+    let Some(media) = MediaDao::find_by_ref(&state.pool, media_ref.trim()).await? else {
+        return Ok((StatusCode::NOT_FOUND, "no such media").into_response());
+    };
+    if !matches!(media.kind(), Ok(MediaKind::Image)) {
+        return Ok((StatusCode::BAD_REQUEST, "crop applies to images").into_response());
+    }
+    if let Some(corners) = &form.corners {
+        let all_in_range = corners
+            .iter()
+            .flatten()
+            .all(|v| v.is_finite() && (0.0..=1.0).contains(v));
+        if !all_in_range {
+            return Ok((
+                StatusCode::BAD_REQUEST,
+                "corners must be normalized coordinates in [0,1]",
+            )
+                .into_response());
+        }
+    }
+    let mut meta = media.meta();
+    let mut edit = meta.edit.unwrap_or_default();
+    edit.corners = form.corners;
+    meta.edit = (edit.rotate != 0 || edit.corners.is_some()).then_some(edit);
+    MediaDao::set_metadata(&state.pool, media.media_id, meta.to_stored()).await?;
+
+    if let Some(err) = drop_rungs_and_respawn(&state, &media).await? {
+        return Ok(err);
+    }
+    Ok((
+        StatusCode::OK,
+        "cropping in the background — refresh in a moment",
+    )
+        .into_response())
+}
+
+#[derive(Deserialize)]
+pub struct CropForm {
+    pub corners: Option<[[f64; 2]; 4]>,
 }
 
 /// The shared re-derivation tail (rederive/rotate/crop): pick the SOURCE via

@@ -148,6 +148,7 @@ epub = "2.1.5"
 # so no duplicate. foliate-js reads the CBZ itself client-side; this is server-side
 # cover-only.
 zip = { version = "3", default-features = false, features = ["deflate"] }
+imageproc = "0.25"
 
 #Need to find the homedir
 [target."cfg(target_os = \"macos\")".dependencies]
