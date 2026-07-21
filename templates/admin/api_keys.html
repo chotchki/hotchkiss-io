@@ -46,7 +46,7 @@
             {% else %}
             <button class="text-xs text-red-700 border border-red-700 rounded px-3 py-1 hover:bg-red-700 hover:text-white uppercase"
                 hx-delete="/admin/api-keys/{{ k.id }}"
-                hx-confirm="Revoke this key? Anything using it stops working immediately.">Revoke</button>
+                data-hold-confirm="1" title="Hold to revoke — anything using it stops working immediately">Revoke</button>
             {% endif %}
         </li>
         {% endfor %}

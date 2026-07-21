@@ -170,7 +170,8 @@
   // Delete ONE stored stream → DELETE /media/<ref>/variants/<url_key>.
   document.querySelectorAll(".delete-variant").forEach((btn) => {
     btn.addEventListener("click", () => {
-      if (!window.confirm("Delete this stream?")) return;
+      // Destructive intent is gated by hold-confirm.js (data-hold-confirm) —
+      // this handler only ever fires after a completed hold.
       fetch(
         "/media/" + btn.dataset.mediaRef + "/variants/" + btn.dataset.urlKey,
         {
@@ -230,7 +231,7 @@
   // Delete the whole item → DELETE /media/<ref> (CASCADEs its variants).
   document.querySelectorAll(".delete-media").forEach((btn) => {
     btn.addEventListener("click", () => {
-      if (!window.confirm("Delete this media item?")) return;
+      // Destructive intent is gated by hold-confirm.js (data-hold-confirm).
       fetch("/media/" + btn.dataset.mediaRef, { method: "DELETE" })
         .then((r) => {
           if (!r.ok) return Promise.reject(r.status);

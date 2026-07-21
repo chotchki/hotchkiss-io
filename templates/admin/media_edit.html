@@ -58,8 +58,8 @@
             <span class="font-mono break-all grow">{{ v.label }}</span>
             <span class="text-navy/60 whitespace-nowrap">{{ v.size }}</span>
             <button type="button" class="delete-variant text-red-700 hover:text-red-900 px-1 leading-none"
-                data-media-ref="{{ media_ref }}" data-url-key="{{ v.url_key }}"
-                title="Delete stream" aria-label="Delete stream">&times;</button>
+                data-media-ref="{{ media_ref }}" data-url-key="{{ v.url_key }}" data-hold-confirm="1"
+                title="Hold to delete this stream" aria-label="Delete stream">&times;</button>
         </div>
         {% endfor %}
         <label class="self-start text-sm bg-navy/80 hover:bg-navy text-div-grey px-3 py-1.5 rounded cursor-pointer"
@@ -93,8 +93,8 @@
 
     <div class="border-t border-navy/20 pt-4">
         <button type="button" class="delete-media bg-red-600 hover:bg-red-700 text-div-grey px-4 py-2 rounded text-sm"
-            data-media-ref="{{ media_ref }}" data-redirect="/admin/media"
-            title="Delete this media item and all its streams">Delete this media item</button>
+            data-media-ref="{{ media_ref }}" data-redirect="/admin/media" data-hold-confirm="1"
+            title="Hold to delete this media item and all its streams">Delete this media item</button>
     </div>
 </div>
 {% endblock %}

@@ -70,7 +70,7 @@
     title="Show this on the landing page's Featured band"
     class="px-3 py-1.5 rounded text-sm {% if page.is_featured() %}bg-yellow text-navy hover:bg-yellow/90{% else %}bg-navy hover:bg-navy/90 text-div-grey{% endif %}">
     {% if page.is_featured() %}Unpin{% else %}Pin{% endif %}</button>
-  <button hx-delete="/pages/{{page_path}}" hx-confirm="Are you sure you wish to delete this page?" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 rounded text-div-grey text-sm" type="submit">
+  <button hx-delete="/pages/{{page_path}}" data-hold-confirm="1" title="Hold to delete this page" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 rounded text-div-grey text-sm" type="submit">
     Delete {% call icons::trash_can() %}</button>
   <button class="px-3 py-1.5 bg-navy hover:bg-navy/90 rounded text-div-grey text-sm" type="submit" form="update-page">
     Save {% call icons::floppy_disk() %}</button>

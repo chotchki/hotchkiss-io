@@ -15,7 +15,7 @@
 
 <div class="flex flex-row flex-wrap items-center gap-3 mb-4">
     <form hx-post="/admin/greylist/pin"
-        hx-confirm="Greylist {{ ip }}? They'll get the bot toll until you release them.">
+        data-hold-confirm="1" title="Hold to greylist — they get the bot toll until released">
         <input type="hidden" name="ip" value="{{ ip }}" />
         <button type="submit"
             class="text-xs text-navy border border-navy/40 rounded px-3 py-1 hover:bg-navy hover:text-div-grey uppercase font-display">Greylist

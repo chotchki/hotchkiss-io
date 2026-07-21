@@ -34,6 +34,9 @@
        visible toast instead of a silent no-op. Deferred + after htmx (binds its
        events). #}
     <script defer src="/scripts/htmx-errors.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
+    {# Hold-to-confirm (ED.7): every destructive button holds instead of
+       popping a confirm() dialog. Tiny + admin-only in effect, so global. #}
+    <script defer src="/scripts/hold-confirm.js?cb={{crate::web::router::BUILD_TIME_CACHE_BUST}}"></script>
 
     {% block head %}{% endblock %}
 </head>

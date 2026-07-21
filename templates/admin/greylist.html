@@ -71,7 +71,7 @@
                     <button
                         class="text-xs text-red-700 border border-red-700 rounded px-2 py-1 hover:bg-red-700 hover:text-white uppercase"
                         hx-post="/admin/greylist/{{ e.ip }}/release"
-                        hx-confirm="Release {{ e.ip }}? They stop getting the toll immediately.">Release</button>
+                        data-hold-confirm="1" title="Hold to release — they stop getting the toll immediately">Release</button>
                 </td>
             </tr>
             {% endfor %}

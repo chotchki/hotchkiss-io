@@ -51,7 +51,7 @@
             {% endif %} {% for target in user.role_targets %}
             <form
               hx-post="/admin/users/{{ user.id }}/role"
-              hx-confirm="Set {{ user.display_name }} to {{ target }}?"
+              data-hold-confirm="1" title="Hold to confirm"
             >
               <input type="hidden" name="role" value="{{ target }}" />
               <button
@@ -65,7 +65,7 @@
             <button
               class="text-xs text-red-700 border border-red-700 rounded px-2 py-1 hover:bg-red-700 hover:text-white uppercase"
               hx-delete="/admin/users/{{ user.id }}"
-              hx-confirm="Delete {{ user.display_name }}? This removes their account, passkeys, and API keys. They can re-register as Registered."
+              data-hold-confirm="1" title="Hold to delete — removes the account, passkeys, and API keys; they can re-register as Registered"
             >
               Delete
             </button>

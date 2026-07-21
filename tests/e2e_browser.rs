@@ -401,6 +401,24 @@ async fn wait_nonempty(page: &Page, expr: &str, ctx: &str) -> String {
     }
 }
 
+/// Complete a hold-to-confirm (ED.7): pointerdown, wait past the 800ms hold,
+/// pointerup, then a REAL (detail:1) click — the armed gate lets it through.
+/// A programmatic `.click()` would take the keyboard bypass (detail 0) and
+/// prove nothing.
+async fn hold_click(page: &Page, selector: &str) {
+    let down = format!(
+        "(function(){{var el=document.querySelector('{selector}');if(!el)return false;el.dispatchEvent(new PointerEvent('pointerdown',{{bubbles:true}}));return true;}})()"
+    );
+    let ok: bool = js(page, &down).await;
+    assert!(ok, "hold target {selector} present");
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let up = format!(
+        "(function(){{var el=document.querySelector('{selector}');if(!el)return false;el.dispatchEvent(new PointerEvent('pointerup',{{bubbles:true}}));el.dispatchEvent(new MouseEvent('click',{{bubbles:true,cancelable:true,detail:1}}));return true;}})()"
+    );
+    let ok: bool = js(page, &up).await;
+    assert!(ok, "hold target {selector} still present");
+}
+
 /// Click the first element matching `selector` (re-found fresh — element handles
 /// go stale across the reloads each mutation triggers).
 async fn click_selector(page: &Page, selector: &str) {
@@ -1251,14 +1269,24 @@ async fn admin_media_library_full_crud_in_browser() {
     )
     .await;
 
-    // ── Delete one variant → the card drops to a single variant (confirm() stubbed).
-    let _: bool = js(&page, "(function(){window.confirm=function(){return true;};return true;})()").await;
-    click_selector(&page, &format!(".delete-variant[data-media-ref=\"{media_ref}\"]")).await;
+    // ── Delete one variant via HOLD-to-confirm (ED.7 — no confirm() dialog).
+    hold_click(&page, &format!(".delete-variant[data-media-ref=\"{media_ref}\"]")).await;
     wait_true(&page, &format!("{variants} === 1"), "delete-variant → one variant remains").await;
 
-    // ── Delete the item → redirected back to the library, card gone.
-    let _: bool = js(&page, "(function(){window.confirm=function(){return true;};return true;})()").await;
-    click_selector(&page, &format!(".delete-media[data-media-ref=\"{media_ref}\"]")).await;
+    // ── A plain (un-held) click on delete must be BLOCKED by the gate.
+    let _: bool = js(
+        &page,
+        &format!(
+            "(function(){{var el=document.querySelector('.delete-media[data-media-ref=\"{media_ref}\"]');el.dispatchEvent(new MouseEvent('click',{{bubbles:true,cancelable:true,detail:1}}));return true;}})()"
+        ),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let still_here: bool = js(&page, "location.pathname !== '/admin/media'").await;
+    assert!(still_here, "an un-held delete click must be a no-op");
+
+    // ── Delete the item via HOLD → redirected back to the library, card gone.
+    hold_click(&page, &format!(".delete-media[data-media-ref=\"{media_ref}\"]")).await;
     wait_true(
         &page,
         "location.pathname === '/admin/media'",
