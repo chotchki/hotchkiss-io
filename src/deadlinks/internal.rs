@@ -31,6 +31,10 @@ const OK_EXACT: &[&str] = &[
     "/blog",
     "/projects",
     "/3d",
+    // The WASM slicer/placer editor (Phase CW) — a CODE route, not a content
+    // page; without this it read as "review" (and the /3d dead-shape below
+    // would upgrade that to a false "dead").
+    "/3d/editor",
     "/library",
     "/library/audiobooks",
     "/resume",
@@ -61,6 +65,14 @@ pub async fn resolve_internal(pool: &SqlitePool, raw_path: &str) -> Result<Inter
     // /pages/projects/<slug>, NOT /projects/<slug>. /projects is the index (Ok
     // above); a link to /projects/<anything> is the exact bug CD fixed in the feed.
     if let Some(rest) = path.strip_prefix("/projects/")
+        && !rest.is_empty()
+    {
+        return Ok(InternalVerdict::Dead);
+    }
+    // Same shape for the 3d gallery: model DETAIL pages live at
+    // /pages/3d/<slug>; /3d is the index and /3d/editor the tool (both Ok
+    // above), so any other /3d/<x> is the CD class of bug.
+    if let Some(rest) = path.strip_prefix("/3d/")
         && !rest.is_empty()
     {
         return Ok(InternalVerdict::Dead);
@@ -163,6 +175,20 @@ mod tests {
         );
         assert_eq!(
             resolve_internal(&pool, "/projects/some-piece").await.unwrap(),
+            InternalVerdict::Dead
+        );
+    }
+
+    #[sqlx::test(migrator = "crate::db::database_handle::MIGRATOR")]
+    async fn three_d_editor_is_ok_and_slug_is_the_dead_shape(pool: SqlitePool) {
+        // /3d/editor is a CODE route (the WASM slicer) — chris's false-positive
+        // report; /3d/<anything else> is the same dead-shape as /projects/<slug>.
+        assert_eq!(
+            resolve_internal(&pool, "/3d/editor").await.unwrap(),
+            InternalVerdict::Ok
+        );
+        assert_eq!(
+            resolve_internal(&pool, "/3d/benchy").await.unwrap(),
             InternalVerdict::Dead
         );
     }
