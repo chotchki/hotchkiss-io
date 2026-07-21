@@ -1131,3 +1131,29 @@ added 2026-07-20.
 - [x] EC.2 - Wire the purge into the daily maintenance tick beside the request_log prune (fail-soft, logged, detached from try_join!)
 - [x] EC.3 - CLAUDE.md delta (api-keys paragraph gains the 7-day purge) + beta push
 
+---
+
+## 2026-07-21
+
+## Phase ED - Image editing — rotate + crop as re-runnable derivation
+
+The one rule held end to end: **an edit is never a mutation.** `media.metadata` became ONE JSON bag (migration `0032` folded the 0027 `chapters` column in; fail-soft typed decode), `metadata.edit` carries rotate quarter-turns + 4 normalized crop corners, and the derivation applies them at rung minting — the content-addressed original untouched, an edited item's source excluded from the srcset ladder, `update_facts` merging via SQL `json_set` so a variant swap can't clobber an edit. The crop is homography-warped (imageproc `Projection::from_control_points` — an angled sheet of paper lays flat; a rect is the degenerate quad) with a first-party corner tool carrying a RECT ⇄ 4-POINT toggle (Cropper.js evaluated + rejected: can't 4-point). Mid-phase dogfood re-shaped the UX twice, both chris's calls: ALL management moved onto a per-item EDIT page (`/admin/media/<ref>` — the crop tool inline, the library cards de-crammed to browse+copy, the rename `prompt()` dead) and **hold-to-confirm replaced every `confirm()`/`hx-confirm` site-wide** (`hold-confirm.js` — ~800ms press-and-hold, capture-phase click gate; NO modals anywhere, the standing rule). The re-derive seam shipped first and standalone re-mints pre-EB.10 sideways rungs — the prod fix is one button.
+- [x] ED.0 - Phase exit: rotate + crop from the admin media library, applied as RE-DERIVATION of the AVIF rungs (original untouched, content-addressed store intact); the prod sideways image fixed with it; tests + docs; shipped
+- [x] ED.1 - Re-derive seam FIRST: per-item "Re-derive variants" action (drop derived image variants + re-run add_derived_variants, the replace tx pattern; spawned + banner) — standalone it re-mints pre-EB.10 sideways rungs with the orientation-aware pipeline; edits ride this same seam
+- [x] ED.2 - Metadata JSON column (chris's call): migration adds media.metadata, MIGRATES the 0027 chapters column into it (metadata.chapters; ALTER DROP the old column — SQLite 3.35+), edit params live at metadata.edit {rotate quadrant, 4 normalized corner points}; ONE typed serde struct (MediaMetadata) decoded fail-soft, the DJ newtype spirit
+- [x] ED.3 - Rotate UI: 90° CW/CCW buttons on the media library item view → params write + spawned re-derive (no crop box needed for the common case)
+- [x] ED.4 - Crop UI incl. NON-UNIFORM (perspective) crop, with a RECT ⇄ 4-POINT mode toggle (both have uses): rect mode drags axis-locked edges/corners (standard crop feel), 4-point mode frees each corner (angled paper lays flat); BOTH store the same 4 normalized corners — rect is the degenerate case — warped server-side via imageproc Projection::from_control_points in the derivation. Cropper.js evaluated + rejected (rect-only, can't 4-point; two tools for one job); first-party vanilla overlay, house style
+- [x] ED.5 - Tests (derivation applies params; re-derive replaces rungs; covers/embeds pick up new rungs) + CLAUDE.md + beta dogfood → prod tag; verify the prod image upright
+- [x] ED.6 - De-cram the library: per-item EDIT PAGE at GET /admin/media/{ref} (rename input, visibility, variant management, add-encode, and for images rotate/crop/re-derive with the corner tool INLINE in page flow — no modals, no prompt()); cards slim to thumb/title/kind/copy/edit-link/delete
+- [x] ED.7 - Hold-to-delete common widget (hold-confirm.js, base.html): any [data-hold-confirm] element needs a ~800ms press-and-hold (visible fill, early release cancels) before its click passes a capture-phase gate — replaces EVERY window.confirm() and hx-confirm modal site-wide
+
+---
+
+## 2026-07-21
+
+## Phase EE - Download filenames — Content-Disposition on the byte route
+
+A saved model was a bare 64-hex blob (the `/media/file` URL leaf). Two-layer fix, the second found by dogfood: every byte response carries `Content-Disposition: inline; filename="<title>.<ext>"` (title rides the EXISTING one-query lookup; extension from a hand map + mime_guess fallback; quoted-string-safe sanitize) — AND the embed's `download` ATTRIBUTE carries the same extensioned name, because the attribute's value outranks an inline disposition in every browser (the header alone changed nothing, chris re-tested) and the attr rides the page HTML, sidestepping year-long-cached headerless byte responses. Titles already ending in their extension don't double up.
+added 2026-07-20.
+- [x] EE.1 - Content-Disposition filename on every /media/file response: inline (attachment for active-content) + filename = sanitized owner title (or media-<key8>) + mime-derived ext via hand map + mime_guess fallback; title rides the existing one-query lookup
+

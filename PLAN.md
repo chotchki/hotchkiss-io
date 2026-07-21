@@ -1,4 +1,4 @@
-<!-- plan-bridge:phase-high-water=ED -->
+<!-- plan-bridge:phase-high-water=EE -->
 # Plan
 
 Completed phases are in `PLAN_ARCHIVE.md` (most recent: Phase 12 — beta deployment on the mini (inverted `main`→beta / `v*`tag→prod flow); Phase 1 — `get_recs_by_name` `type=A` filter fix (ACME renewal hang); Phase 9 — Tailwind cleanup / dropped DaisyUI; Phase 8 — local/e2e test harness; Phase 7 — admin analytics dashboard; Phase 2 — DNS module testability; Phase 5 — dropped the `cookie-rs` fork; Phase 3 — `ifconfig.me` → Cloudflare `cdn-cgi/trace`; Phase 0 — push-to-deploy on the Mac mini; Phase 4 — `tray-wrapper` 0.4.1 bump).
@@ -96,18 +96,6 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] DG.3 - Up-next affordance: on page open, highlight/scroll to the last-listened volume (per-ref saved positions decide it)
 - [ ] DG.4 - Tests + CLAUDE.md delta + real-phone validation: screen-off auto-advance, lock-screen volume skip, series authoring convention documented
 - [x] DG.5 - Audio embed: cover-art + title header replaces the download button
-## Phase ED - Image editing — rotate + crop as re-runnable derivation
-- [ ] ED.0 - Phase exit: rotate + crop from the admin media library, applied as RE-DERIVATION of the AVIF rungs (original untouched, content-addressed store intact); the prod sideways image fixed with it; tests + docs; shipped
-- [x] ED.1 - Re-derive seam FIRST: per-item "Re-derive variants" action (drop derived image variants + re-run add_derived_variants, the replace tx pattern; spawned + banner) — standalone it re-mints pre-EB.10 sideways rungs with the orientation-aware pipeline; edits ride this same seam
-- [x] ED.2 - Metadata JSON column (chris's call): migration adds media.metadata, MIGRATES the 0027 chapters column into it (metadata.chapters; ALTER DROP the old column — SQLite 3.35+), edit params live at metadata.edit {rotate quadrant, 4 normalized corner points}; ONE typed serde struct (MediaMetadata) decoded fail-soft, the DJ newtype spirit
-- [x] ED.3 - Rotate UI: 90° CW/CCW buttons on the media library item view → params write + spawned re-derive (no crop box needed for the common case)
-- [x] ED.4 - Crop UI incl. NON-UNIFORM (perspective) crop, with a RECT ⇄ 4-POINT mode toggle (both have uses): rect mode drags axis-locked edges/corners (standard crop feel), 4-point mode frees each corner (angled paper lays flat); BOTH store the same 4 normalized corners — rect is the degenerate case — warped server-side via imageproc Projection::from_control_points in the derivation. Cropper.js evaluated + rejected (rect-only, can't 4-point; two tools for one job); first-party vanilla overlay, house style
-- [ ] ED.5 - Tests (derivation applies params; re-derive replaces rungs; covers/embeds pick up new rungs) + CLAUDE.md + beta dogfood → prod tag; verify the prod image upright
-- [x] ED.6 - De-cram the library: per-item EDIT PAGE at GET /admin/media/{ref} (rename input, visibility, variant management, add-encode, and for images rotate/crop/re-derive with the corner tool INLINE in page flow — no modals, no prompt()); cards slim to thumb/title/kind/copy/edit-link/delete
-- [x] ED.7 - Hold-to-delete common widget (hold-confirm.js, base.html): any [data-hold-confirm] element needs a ~800ms press-and-hold (visible fill, early release cancels) before its click passes a capture-phase gate — replaces EVERY window.confirm() and hx-confirm modal site-wide
-## Phase EE - Download filenames — Content-Disposition on the byte route
-added 2026-07-20.
-- [ ] EE.1 - Content-Disposition filename on every /media/file response: inline (attachment for active-content) + filename = sanitized owner title (or media-<key8>) + mime-derived ext via hand map + mime_guess fallback; title rides the existing one-query lookup
 
 ## Backlog (not yet phased)
 
