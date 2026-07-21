@@ -168,13 +168,15 @@
       }
     });
 
+    // Reload only once the spawned re-derivation LANDS (window.MediaDerive
+    // polls the manifest) — a fixed-delay reload showed the old/empty rungs
+    // (the prod rotate-preview bug's sibling).
     applyBtn.addEventListener("click", () => {
       applyBtn.disabled = true;
       postCrop(ref, corners)
-        .then((msg) => {
-          setStatus(msg);
-          // Reflect the new edit state (has-crop note, preview) on next paint.
-          setTimeout(() => location.reload(), 600);
+        .then(() => {
+          setStatus("Cropping — the page refreshes when the variants land…");
+          window.MediaDerive.awaitDeriveThenReload(ref);
         })
         .catch((e) => {
           applyBtn.disabled = false;
@@ -184,9 +186,11 @@
     if (resetBtn) {
       resetBtn.addEventListener("click", () => {
         postCrop(ref, null)
-          .then((msg) => {
-            setStatus(msg + " (crop cleared)");
-            setTimeout(() => location.reload(), 600);
+          .then(() => {
+            setStatus(
+              "Crop cleared — the page refreshes when the variants land…",
+            );
+            window.MediaDerive.awaitDeriveThenReload(ref);
           })
           .catch((e) => setStatus("Reset failed: " + e));
       });

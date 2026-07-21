@@ -124,9 +124,17 @@ pub async fn show_media_edit(
     };
     let variants = MediaVariantDao::find_by_media_id(&state.pool, m.media_id).await?;
     let play_html = (m.kind == "video").then(|| render_embed_html(&m, &variants));
-    let preview_url_key = media_select::image_ladder(&variants)
-        .last()
-        .map(|v| v.url_key.clone());
+    // Same ladder split as the render arm: an EDITED item previews its derived
+    // rungs, never the source — the crop corners are defined over the ROTATED
+    // frame, and the prod rotate bug was this page still previewing the
+    // unrotated original after a rotate landed.
+    let preview_url_key = if m.meta().edit.is_some() {
+        media_select::image_ladder_edited(&variants)
+    } else {
+        media_select::image_ladder(&variants)
+    }
+    .last()
+    .map(|v| v.url_key.clone());
     let variant_rows = variants
         .iter()
         .map(|v| VariantRow {

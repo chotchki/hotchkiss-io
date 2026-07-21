@@ -183,6 +183,34 @@
     });
   });
 
+  // The re-derivation after rotate/crop/re-derive is SPAWNED server-side (rav1e
+  // takes seconds), and the derived rungs are DROPPED synchronously first — so
+  // "an image/avif variant exists again" in the item manifest IS the completion
+  // signal. Poll it, then reload so the preview/crop tool show the new state
+  // (the prod dogfood bug: rotate worked but nothing on the page ever changed).
+  // Timeout fallback reloads anyway (~45s covers a big photo; a small unedited
+  // image can legitimately end with zero rungs).
+  function awaitDeriveThenReload(ref) {
+    const deadline = Date.now() + 45000;
+    const tick = () => {
+      fetch("/media/" + ref, { headers: { Accept: "application/json" } })
+        .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+        .then((m) => {
+          const done = (m.variants || []).some(
+            (v) => (v.type || "") === "image/avif",
+          );
+          if (done || Date.now() > deadline) {
+            location.reload();
+          } else {
+            setTimeout(tick, 1500);
+          }
+        })
+        .catch(() => setTimeout(tick, 1500));
+    };
+    setTimeout(tick, 1500);
+  }
+  window.MediaDerive = { awaitDeriveThenReload };
+
   // Rotate a quarter-turn (ED.3): bumps metadata.edit.rotate server-side and
   // re-derives — the original is never touched; four turns = a full undo.
   document.querySelectorAll(".rotate-media").forEach((btn) => {
@@ -196,9 +224,9 @@
         .then((r) =>
           r.ok ? r.text() : r.text().then((t) => Promise.reject(t || r.status)),
         )
-        .then((msg) => {
-          btn.disabled = false;
-          setStatus(msg);
+        .then(() => {
+          setStatus("Rotating — the page refreshes when the variants land…");
+          awaitDeriveThenReload(btn.dataset.mediaRef);
         })
         .catch((e) => {
           btn.disabled = false;
@@ -219,7 +247,10 @@
         .then((r) =>
           r.ok ? r.text() : r.text().then((t) => Promise.reject(t || r.status)),
         )
-        .then((msg) => setStatus(msg))
+        .then(() => {
+          setStatus("Re-deriving — the page refreshes when the variants land…");
+          awaitDeriveThenReload(btn.dataset.mediaRef);
+        })
         .catch((e) => {
           btn.disabled = false;
           btn.textContent = "Re-derive";

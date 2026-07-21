@@ -1573,3 +1573,73 @@ async fn quick_capture_library_default_then_draft_accretes_in_browser() {
     let _ = std::fs::remove_file(&f2);
     drop(server);
 }
+
+/// The prod dogfood bug: rotate worked server-side but the edit page never
+/// showed it. The fix polls the manifest until the spawned re-derivation lands,
+/// then reloads — assert the preview img actually CHANGES after a rotate.
+#[tokio::test]
+async fn rotate_on_edit_page_auto_refreshes_the_preview() {
+    if !ffprobe_available() {
+        eprintln!("skipping: ffprobe not installed");
+        return;
+    }
+    let _e2e = e2e_lock().await;
+    let server: TestServer = spawn_test_server().await.expect("spawn harness");
+    let (mut browser, handle, profile) = launch().await;
+    let page = browser.new_page("about:blank").await.expect("new page");
+    add_virtual_authenticator(&page).await;
+    register_first_admin(&page, &server, "e2e-rotate-admin").await;
+
+    // A REAL png (the probe must type Image or no rotate buttons render).
+    let img = image::RgbImage::from_fn(300, 200, |x, _| image::Rgb([(x % 256) as u8, 50, 50]));
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgb8(img)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    let f = write_temp_fixture("e2e-rotate", &png);
+
+    page.goto(server.url("/admin/media")).await.expect("goto /admin/media");
+    set_file_input(&page, "#media-file-input", &[&f]).await;
+    let media_ref = wait_nonempty(
+        &page,
+        "(function(){var c=document.querySelector('.media-card');return c?c.getAttribute('data-media-ref'):'';})()",
+        "upload → a media card appears",
+    )
+    .await;
+    let media_ref = media_ref.trim().to_string();
+
+    page.goto(server.url(&format!("/admin/media/{media_ref}")))
+        .await
+        .expect("goto edit page");
+    let before = wait_nonempty(
+        &page,
+        "(function(){var i=document.querySelector('img[src^=\"/media/file/\"]');return i?i.getAttribute('src'):'';})()",
+        "edit page preview renders",
+    )
+    .await;
+
+    click_selector(&page, ".rotate-media[data-dir=\"cw\"]").await;
+    // The poll → reload → the preview points at the NEW (rotated) rung.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let now: String = try_string(
+            &page,
+            "(function(){var i=document.querySelector('img[src^=\"/media/file/\"]');return i?i.getAttribute('src'):'';})()",
+        )
+        .await;
+        if !now.is_empty() && now != before {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the preview never refreshed after rotate (still {before})"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    browser.close().await.ok();
+    handle.await.ok();
+    let _ = std::fs::remove_dir_all(&profile);
+    let _ = std::fs::remove_file(&f);
+    drop(server);
+}
