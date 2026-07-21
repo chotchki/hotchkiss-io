@@ -316,7 +316,7 @@ async fn serve_media_file(
     // One query resolves the variant AND the strictest-wins gate rank across
     // every item sharing this url_key (DC.2 — see the DAO doc for why the
     // LIMIT-1 owner alone could leak on deduped bytes).
-    let (variant, required_rank) =
+    let (variant, required_rank, owner_title) =
         match MediaVariantDao::find_by_url_key_with_required_rank(&state.pool, key.as_str()).await {
             Ok(Some(v)) => v,
             Ok(None) => return (StatusCode::NOT_FOUND, "Not found").into_response(),
@@ -414,11 +414,21 @@ async fn serve_media_file(
                 HeaderName::from_static("cross-origin-resource-policy"),
                 HeaderValue::from_static("cross-origin"),
             );
-            if is_active_content_mime(&variant.mime) {
-                headers.insert(
-                    header::CONTENT_DISPOSITION,
-                    HeaderValue::from_static("attachment"),
-                );
+            // A REAL filename on every response (Phase EE): the URL leaf is a
+            // bare 64-hex url_key, so a "Save as" / download-attr save landed
+            // extension-less and useless. `inline` keeps embeds rendering;
+            // active content stays force-downloaded (`attachment`) as before —
+            // both now carry `filename="<title>.<ext>"`.
+            let disposition = if is_active_content_mime(&variant.mime) {
+                "attachment"
+            } else {
+                "inline"
+            };
+            let fname = download_filename(owner_title.as_deref(), &variant.mime, &variant.url_key);
+            if let Ok(hv) = HeaderValue::from_str(&format!(
+                "{disposition}; filename=\"{fname}\""
+            )) {
+                headers.insert(header::CONTENT_DISPOSITION, hv);
             }
             resp
         }
@@ -427,6 +437,67 @@ async fn serve_media_file(
             (StatusCode::INTERNAL_SERVER_ERROR, "serve failed").into_response()
         }
     }
+}
+
+/// The `Content-Disposition` filename for a variant (Phase EE): the owning
+/// item's title (sanitized to a quoted-string-safe ASCII subset) or a stable
+/// `media-<key8>` fallback, plus a mime-derived extension — a saved file opens
+/// in the right app instead of being a bare hex blob.
+fn download_filename(title: Option<&str>, mime: &str, url_key: &str) -> String {
+    let base: String = title
+        .map(|t| {
+            t.chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.' | '(' | ')') {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
+                .collect::<String>()
+                .trim()
+                .trim_matches('.')
+                .to_string()
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("media-{}", &url_key[..url_key.len().min(8)]));
+    match extension_for_mime(mime) {
+        Some(ext) => format!("{base}.{ext}"),
+        None => base,
+    }
+}
+
+/// Extension for a stored mime. The hand map covers our probe's vocabulary
+/// (incl. the specials mime_guess misses or misorders — 3mf, scad, m4b-ish
+/// audio); anything else falls back to mime_guess's reverse lookup.
+fn extension_for_mime(mime: &str) -> Option<&'static str> {
+    let m = mime.split(';').next().unwrap_or("").trim();
+    let mapped = match m {
+        "image/jpeg" => "jpg",
+        "image/png" => "png",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/avif" => "avif",
+        "image/heic" => "heic",
+        "image/bmp" => "bmp",
+        "image/svg+xml" => "svg",
+        "video/mp4" => "mp4",
+        "video/webm" => "webm",
+        "audio/mp4" => "m4a",
+        "audio/mpeg" => "mp3",
+        "model/stl" => "stl",
+        "model/3mf" => "3mf",
+        crate::db::dao::media::SCAD_MIME => "scad",
+        "application/epub+zip" => "epub",
+        "application/vnd.comicbook+zip" => "cbz",
+        "application/pdf" => "pdf",
+        "text/plain" => "txt",
+        _ => "",
+    };
+    if !mapped.is_empty() {
+        return Some(mapped);
+    }
+    mime_guess::get_mime_extensions_str(m).and_then(|exts| exts.first().copied())
 }
 
 /// Mimes a browser would EXECUTE in our origin if served inline — force these to
@@ -1125,6 +1196,40 @@ fn attr_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn download_filenames_are_titled_sanitized_and_extensioned() {
+        // Phase EE: title + mime-derived extension; non-ASCII / quote-unsafe
+        // chars collapse to '-' (the em-dash here), so the header's
+        // quoted-string can't be broken by a title.
+        assert_eq!(
+            download_filename(Some("Trash Can Brace — model"), "model/3mf", "abcdef1234567890"),
+            "Trash Can Brace - model.3mf"
+        );
+        assert_eq!(
+            download_filename(Some("homepod"), "model/stl", "k"),
+            "homepod.stl"
+        );
+        // No title → the stable key-prefix base.
+        assert_eq!(
+            download_filename(None, "image/avif", "a8ce5c9ef0d6ab90ffff"),
+            "media-a8ce5c9e.avif"
+        );
+        // A quote in the title can never escape the header quoted-string.
+        assert_eq!(
+            download_filename(Some("a\"b"), "image/png", "k"),
+            "a-b.png"
+        );
+        // The specials mime_guess misses: scad + cbz + m4a-for-audiobooks.
+        assert_eq!(extension_for_mime(crate::db::dao::media::SCAD_MIME), Some("scad"));
+        assert_eq!(extension_for_mime("application/vnd.comicbook+zip"), Some("cbz"));
+        assert_eq!(extension_for_mime("audio/mp4"), Some("m4a"));
+        // Unknown mime → no extension, base only.
+        assert_eq!(
+            download_filename(Some("blob"), "application/x-nonsense", "k"),
+            "blob"
+        );
+    }
 
     #[test]
     fn epub_mime_serves_inline_not_active_content() {

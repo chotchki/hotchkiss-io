@@ -611,7 +611,10 @@ impl MediaVariantDao {
     pub async fn find_by_url_key_with_required_rank(
         executor: impl SqliteExecutor<'_>,
         url_key: &str,
-    ) -> Result<Option<(MediaVariantDao, i64)>> {
+    ) -> Result<Option<(MediaVariantDao, i64, Option<String>)>> {
+        // The trailing Option<String> is the OWNING item's title — the download
+        // filename base (Phase EE). On deduped bytes (shared url_key) it's the
+        // LIMIT-1 owner's title: cosmetically arbitrary, never a gate concern.
         let row = query!(
             r#"
             SELECT v.variant_id as "variant_id!", v.media_id, v.sha256, v.url_key, v.mime,
@@ -622,7 +625,8 @@ impl MediaVariantDao {
                                     ELSE 3 END)
                     FROM media_variant v2
                     JOIN media m ON m.media_id = v2.media_id
-                    WHERE v2.url_key = v.url_key) as "required_rank!: i64"
+                    WHERE v2.url_key = v.url_key) as "required_rank!: i64",
+                   (SELECT m2.title FROM media m2 WHERE m2.media_id = v.media_id) as "title?"
             FROM media_variant v
             WHERE v.url_key = ?1
             LIMIT 1
@@ -647,6 +651,7 @@ impl MediaVariantDao {
                     height: r.height,
                 },
                 r.required_rank,
+                r.title,
             )
         }))
     }
@@ -748,7 +753,7 @@ mod tests {
             )
             .await?;
         }
-        let (_, rank) = MediaVariantDao::find_by_url_key_with_required_rank(&pool, "sharedkey")
+        let (_, rank, _) = MediaVariantDao::find_by_url_key_with_required_rank(&pool, "sharedkey")
             .await?
             .expect("variant resolves");
         assert_eq!(rank, 2, "NULL + Family sharing a sha must gate at Family");
@@ -759,7 +764,7 @@ mod tests {
             "application/zip".into(), None, 10, None, None, None,
         )
         .await?;
-        let (_, rank) = MediaVariantDao::find_by_url_key_with_required_rank(&pool, "solokey")
+        let (_, rank, _) = MediaVariantDao::find_by_url_key_with_required_rank(&pool, "solokey")
             .await?
             .unwrap();
         assert_eq!(rank, 0);
@@ -775,7 +780,7 @@ mod tests {
             "application/zip".into(), None, 10, None, None, None,
         )
         .await?;
-        let (_, rank) = MediaVariantDao::find_by_url_key_with_required_rank(&pool, "sharedkey")
+        let (_, rank, _) = MediaVariantDao::find_by_url_key_with_required_rank(&pool, "sharedkey")
             .await?
             .unwrap();
         assert_eq!(rank as u8, crate::db::dao::roles::Role::Admin.rank());

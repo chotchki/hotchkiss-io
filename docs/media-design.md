@@ -324,7 +324,12 @@ immutable cache). Looked up by the STORED `url_key` (so a prod/beta key mismatch
 serves — resolves by sha). `UrlKey::parse` gates the 64-hex format at the door (junk ≡
 404, no oracle). Path resolve runs in `spawn_blocking` with a 5s timeout → 503 on a
 wedged/asleep drive (abandons the uncancellable stat, logs loudly; the file READ only
-runs once the stat passed). Gating + nosniff + CORP per §4b/4c. EXCLUDED from
+runs once the stat passed). Gating + nosniff + CORP per §4b/4c. Every response carries a REAL filename
+(Phase EE): `Content-Disposition: inline; filename="<title>.<ext>"` — the URL
+leaf is bare hex, so saves landed extension-less — with `attachment` kept for
+the active-content mimes; the title rides the same one-query lookup (LIMIT-1
+owner on deduped bytes: cosmetically arbitrary, never a gate concern), the
+extension from a hand map + mime_guess fallback. EXCLUDED from
 `request_log` (a streaming range-storm would self-greylist a listening household via R3
 + swamp the Humans signal). The `CompressionLayer` excludes `video/`/`audio/`/`model/`/
 `application/octet-stream` (gzipping a range response corrupts it).

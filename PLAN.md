@@ -105,6 +105,9 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - [ ] ED.5 - Tests (derivation applies params; re-derive replaces rungs; covers/embeds pick up new rungs) + CLAUDE.md + beta dogfood → prod tag; verify the prod image upright
 - [x] ED.6 - De-cram the library: per-item EDIT PAGE at GET /admin/media/{ref} (rename input, visibility, variant management, add-encode, and for images rotate/crop/re-derive with the corner tool INLINE in page flow — no modals, no prompt()); cards slim to thumb/title/kind/copy/edit-link/delete
 - [x] ED.7 - Hold-to-delete common widget (hold-confirm.js, base.html): any [data-hold-confirm] element needs a ~800ms press-and-hold (visible fill, early release cancels) before its click passes a capture-phase gate — replaces EVERY window.confirm() and hx-confirm modal site-wide
+## Phase EE - Download filenames — Content-Disposition on the byte route
+added 2026-07-20.
+- [ ] EE.1 - Content-Disposition filename on every /media/file response: inline (attachment for active-content) + filename = sanitized owner title (or media-<key8>) + mime-derived ext via hand map + mime_guess fallback; title rides the existing one-query lookup
 
 ## Backlog (not yet phased)
 
@@ -147,4 +150,3 @@ See SPEC.md Pillar 2. Tangible range in a different medium. The bulk loader is d
 - **Add Cross-Origin-Resource-Policy to the media byte route so the isolated editor can fetch models** — deferred from CW.4 on 2026-07-03.
 - DJ.2 - PageId / MediaId (i64 newtypes) through the DAOs + call sites *(deferred from phase `DJ` on 2026-07-10)*
 - **Route `deadlinks/internal.rs`'s `/media/` resolve through the canonical `media_ref::parse_cover_reference`** — added 2026-07-10 (DJ.4 follow-up). The dead-link internal resolver has its own `strip_prefix("/media/embed/"|"/media/"|"/media/file/")` → `find_by_ref`/`find_by_url_key` shape, independent of the one canonical media-token parse DJ.4 established. Consolidating it is a real DRY win (one parse path for every `/media/*` URL), but it's a link-CHECK path (not hot/security) and its shape differs (it handles `/media/embed/` + roots the whole path), so it was scoped OUT of DJ.4 to keep that refactor's blast radius to `media_ref.rs` + two spots. Low priority.
-- **Model download links save with no file extension (bare url_key hex) — the /media/file byte route should emit Content-Disposition with a real filename (title/ref + mime-derived ext, e.g. .stl/.3mf) at least for download-typed links; chris hit it downloading a model** — added 2026-07-20.

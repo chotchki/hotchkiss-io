@@ -445,3 +445,70 @@ async fn crop_endpoint_warps_and_clears() {
         "clearing the crop empties the edit: {metadata:?}"
     );
 }
+
+#[tokio::test]
+async fn byte_route_carries_a_real_download_filename() {
+    // Phase EE: the /media/file URL leaf is bare hex, so saves landed
+    // extension-less. Every response now carries Content-Disposition with the
+    // owner's title + a mime-derived extension.
+    if !tool_available("ffprobe") {
+        eprintln!("skipping: ffprobe not installed");
+        return;
+    }
+    let server = spawn_test_server().await.expect("spawn");
+    let admin = client();
+    admin
+        .post(server.url("/test/login?role=Admin"))
+        .send()
+        .await
+        .unwrap();
+
+    let img = image::RgbImage::from_fn(64, 64, |x, _| image::Rgb([(x * 4) as u8, 120, 40]));
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgb8(img)
+        .write_to(
+            &mut std::io::Cursor::new(&mut png),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+    let part = reqwest::multipart::Part::bytes(png)
+        .file_name("bench.png")
+        .mime_str("application/octet-stream")
+        .unwrap();
+    let form = reqwest::multipart::Form::new()
+        .text("title", "Bench Shot")
+        .part("file", part);
+    let resp = admin
+        .post(server.url("/media"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let manifest: serde_json::Value = resp.json().await.unwrap();
+    let media_ref = manifest["ref"].as_str().unwrap().to_string();
+
+    let png_key: String = sqlx::query_scalar(
+        "SELECT mv.url_key FROM media_variant mv JOIN media m ON m.media_id = mv.media_id
+         WHERE m.media_ref = ?1 AND mv.mime = 'image/png'",
+    )
+    .bind(&media_ref)
+    .fetch_one(&server.pool)
+    .await
+    .unwrap();
+
+    let resp = reqwest::get(server.url(&format!("/media/file/{png_key}")))
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let cd = resp
+        .headers()
+        .get("content-disposition")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    assert_eq!(
+        cd, "inline; filename=\"Bench Shot.png\"",
+        "titled + extensioned filename on the byte route"
+    );
+}
