@@ -462,8 +462,12 @@ fn download_filename(title: Option<&str>, mime: &str, url_key: &str) -> String {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| format!("media-{}", &url_key[..url_key.len().min(8)]));
     match extension_for_mime(mime) {
-        Some(ext) => format!("{base}.{ext}"),
-        None => base,
+        // A title that already carries the extension ("Bracket.3mf") must not
+        // double up to "Bracket.3mf.3mf".
+        Some(ext) if !base.to_ascii_lowercase().ends_with(&format!(".{ext}")) => {
+            format!("{base}.{ext}")
+        }
+        _ => base,
     }
 }
 
@@ -689,7 +693,7 @@ Your browser can't play this video.</video>"
             format!(
                 "<span class=\"flex flex-col items-center gap-2 my-4\">{}{}{}</span>",
                 stl_viewer_block(&format!("/media/file/{}", viewer.url_key), fmt),
-                download_button(&full.url_key, &alt, full.bytes),
+                download_button(&full.url_key, &alt, &full.mime, full.bytes),
                 slicer,
             )
         }
@@ -772,9 +776,10 @@ Your browser can't play this audio.</audio></span>",
 <div class=\"epub-reader relative w-full h-[80vh] min-h-96 rounded-lg border border-navy/20 bg-white overflow-hidden\" \
 data-ref=\"{r}\" data-src=\"{src}\" data-title=\"{alt}\" data-kind=\"{kind_slug}\">\
 <div class=\"epub-splash absolute inset-0 z-10 flex items-center justify-center bg-white text-navy/70 font-display uppercase text-sm\">Loading book…</div>\
-<noscript><a href=\"{src}\" download class=\"absolute inset-0 flex items-center justify-center text-navy underline\">{dl_label}</a></noscript>\
+<noscript><a href=\"{src}\" download=\"{dl_name}\" class=\"absolute inset-0 flex items-center justify-center text-navy underline\">{dl_label}</a></noscript>\
 </div></span>",
                 r = attr_escape(&media.media_ref),
+                dl_name = download_filename(Some(&alt), &v.mime, &v.url_key),
             )
         }
         MediaKind::File => {
@@ -788,10 +793,10 @@ data-ref=\"{r}\" data-src=\"{src}\" data-title=\"{alt}\" data-kind=\"{kind_slug}
                 format!(
                     "<span class=\"flex flex-col items-center gap-2 my-4\">{}{}</span>",
                     open_in_slicer_button(&media.media_ref),
-                    download_button(&v.url_key, &alt, v.bytes),
+                    download_button(&v.url_key, &alt, &v.mime, v.bytes),
                 )
             } else {
-                download_button(&v.url_key, &alt, v.bytes)
+                download_button(&v.url_key, &alt, &v.mime, v.bytes)
             }
         }
     }
@@ -829,10 +834,16 @@ pub(crate) fn stl_viewer_block(data_filename: &str, format: &str) -> String {
 /// viewer. `download` forces save-to-disk intent (the byte route only
 /// force-attaches executable mimes; a 3MF would otherwise open inline). `label`
 /// MUST already be attr-escaped by the caller.
-fn download_button(url_key: &str, label: &str, bytes: i64) -> String {
+fn download_button(url_key: &str, label: &str, mime: &str, bytes: i64) -> String {
+    // The `download` attribute VALUE outranks the byte route's inline
+    // Content-Disposition filename in every browser (the EE dogfood finding) —
+    // so it must carry the EXTENSIONED filename, not the bare label. Also
+    // effective immediately for cached byte responses: the attr rides the page
+    // HTML, which is never immutable-cached.
+    let fname = download_filename(Some(label), mime, url_key);
     format!(
         "<a class=\"media-download inline-flex items-center gap-2 my-2 px-4 py-2 bg-navy text-div-grey rounded no-underline hover:bg-navy/90\" \
-href=\"/media/file/{url_key}\" download=\"{label}\">{DOWNLOAD_ICON_SVG}<span>Download {label} <span class=\"opacity-70\">({size})</span></span></a>",
+href=\"/media/file/{url_key}\" download=\"{fname}\">{DOWNLOAD_ICON_SVG}<span>Download {label} <span class=\"opacity-70\">({size})</span></span></a>",
         size = human_bytes(bytes),
     )
 }
